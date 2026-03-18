@@ -1,0 +1,70 @@
+services:
+  # Servicio de Ollama para IA (sin mapeo de puerto, ya corre en el host)
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama-service
+    # Puerto NO mapeado porque Ollama ya corre en el host Mac
+    # ports:
+    #   - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+    profiles:
+      - with-ollama  # Solo se levanta si se pide explícitamente
+    deploy:
+      resources:
+        limits:
+          memory: 3G
+        reservations:
+          memory: 2G
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: postgres-db
+    ports:
+      - "5433:5432"
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=123456
+      - POSTGRES_DB=llm
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 256M
+
+  whatsapp-bot:
+    build: .
+    container_name: whatsapp-medical-bot
+    restart: unless-stopped
+    depends_on:
+      - postgres
+    volumes:
+      # Persistir datos de autenticación de WhatsApp
+      - ./wwebjs_auth:/app/.wwebjs_auth
+      - ./wwebjs_cache:/app/.wwebjs_cache
+      # Persistir base de datos de usuarios
+      - ./usuarios.json:/app/usuarios.json
+      # Persistir base de datos de horarios
+      - ./horarios.json:/app/horarios.json
+    environment:
+      - NODE_ENV=production
+      # Usar Ollama del host Mac (ya corriendo localmente)
+      - OLLAMA_HOST=http://host.docker.internal:11434
+      - OLLAMA_MODEL=llama3.2:latest
+      - DATABASE_URL=postgresql://postgres:123456@postgres:5432/llm?schema=public
+    # Limitar recursos para evitar problemas de memoria
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+
+volumes:
+  ollama_data:
+  postgres_data:

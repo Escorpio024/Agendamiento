@@ -1,0 +1,133 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model TipoDocumento {
+  id        Int        @id @default(autoincrement())
+  codigo    String     @unique @db.VarChar(5)
+  nombre    String     @db.VarChar(50)
+  pacientes Paciente[]
+
+  @@map("tipos_documento")
+}
+
+model EntidadSalud {
+  id                 Int        @id @default(autoincrement())
+  nombre             String     @db.VarChar(100)
+  codigoHabilitacion String?    @map("codigo_habilitacion") @db.VarChar(20)
+  pacientes          Paciente[]
+
+  @@map("entidades_salud")
+}
+
+model Ciudad {
+  id           Int        @id @default(autoincrement())
+  nombre       String     @db.VarChar(100)
+  departamento String?    @db.VarChar(100)
+  pacientes    Paciente[]
+
+  @@map("ciudades")
+}
+
+model Paciente {
+  id               Int      @id @default(autoincrement())
+  tipoDocumentoId  Int?     @map("tipo_documento_id")
+  numeroDocumento  String   @unique @map("numero_documento") @db.VarChar(20)
+  historiaClinica  String?  @unique @map("historia_clinica") @db.VarChar(20)
+  nombres          String   @db.VarChar(100)
+  apellidos        String?  @db.VarChar(100)
+  fechaNacimiento  DateTime @map("fecha_nacimiento") @db.Date
+  genero           String?  @db.VarChar(20)
+  ocupacion        String?  @db.VarChar(100)
+  ciudadResidenciaId Int?   @map("ciudad_residencia_id")
+  direccion        String?  @db.VarChar(200)
+  barrio           String?  @db.VarChar(100)
+  email            String?  @db.VarChar(150)
+  celular          String?  @db.VarChar(20)
+  telefonoFijo     String?  @map("telefono_fijo") @db.VarChar(20)
+  entidadId        Int?     @map("entidad_id")
+  tipoUsuario      String?  @map("tipo_usuario") @db.VarChar(50)
+  numeroCarnet     String?  @map("numero_carnet") @db.VarChar(50)
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  tipoDocumento    TipoDocumento? @relation(fields: [tipoDocumentoId], references: [id])
+  ciudadResidencia Ciudad?        @relation(fields: [ciudadResidenciaId], references: [id])
+  entidad          EntidadSalud?  @relation(fields: [entidadId], references: [id])
+  contactos        ContactoEmergencia[]
+  citas            Cita[]
+
+  @@map("pacientes")
+}
+
+model ContactoEmergencia {
+  id                 Int     @id @default(autoincrement())
+  pacienteId         Int?    @map("paciente_id")
+  nombre             String? @db.VarChar(100)
+  parentesco         String? @db.VarChar(50)
+  telefono           String? @db.VarChar(20)
+  esResponsableLegal Boolean @default(false) @map("es_responsable_legal")
+
+  paciente Paciente? @relation(fields: [pacienteId], references: [id])
+
+  @@map("contactos_emergencia")
+}
+
+model TipoCita {
+  id          Int     @id @default(autoincrement())
+  nombre      String  @db.VarChar(50) // General, Pediatria, Examenes, etc.
+  descripcion String? @db.Text
+
+  citas       Cita[]
+
+  @@map("tipos_cita")
+}
+
+model Cita {
+  id          Int      @id @default(autoincrement())
+  fecha       DateTime @db.Date
+  hora        String   @db.VarChar(10)
+  tipoCitaId  Int      @map("tipo_cita_id")
+  pacienteId  Int?     @map("paciente_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  
+  tipoCita    TipoCita @relation(fields: [tipoCitaId], references: [id])
+  paciente    Paciente? @relation(fields: [pacienteId], references: [id])
+  
+  @@unique([fecha, hora, tipoCitaId])
+  @@map("citas")
+}
+
+model Conversation {
+  id        String   @id // WhatsApp ID (e.g., 123456789@c.us)
+  name      String?
+  status    String   @default("bot") // bot, pending, assigned, resolved
+  unreadCount Int    @default(0)
+  lastMessageAt DateTime @default(now())
+  createdAt DateTime @default(now())
+  
+  messages  Message[]
+
+  @@map("conversations")
+}
+
+model Message {
+  id             String   @id // WhatsApp Message ID
+  conversationId String
+  fromMe         Boolean
+  body           String
+  type           String   @default("chat")
+  mediaUrl       String?
+  timestamp      DateTime @default(now())
+
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+
+  @@map("messages")
+}

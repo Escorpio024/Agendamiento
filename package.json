@@ -1,0 +1,35 @@
+{
+  "name": "llm",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@prisma/adapter-pg": "^7.4.0",
+    "@prisma/client": "^5.22.0",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "fluent-ffmpeg": "^2.1.3",
+    "mssql": "^12.2.0",
+    "multer": "^2.0.2",
+    "node-cron": "^4.2.1",
+    "ollama": "^0.5.9",
+    "openai": "^6.22.0",
+    "pg": "^8.18.0",
+    "prisma": "^5.22.0",
+    "qrcode-terminal": "^0.12.0",
+    "socket.io": "^4.8.3",
+    "tedious": "^19.2.1",
+    "uuid": "^13.0.0",
+    "whatsapp-web.js": "^1.34.6"
+  },
+  "devDependencies": {
+    "dotenv": "^17.2.4"
+  }
+}

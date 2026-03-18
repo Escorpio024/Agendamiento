@@ -1,0 +1,19 @@
+node_modules
+# Keep environment variables out of version control
+.env
+
+/generated/prisma
+
+# WhatsApp Web JS data
+wwebjs_auth
+wwebjs_cache
+.wwebjs_auth
+.wwebjs_cache
+
+# OS files
+.DS_Store
+
+# Frontend build and cache
+frontend/.next
+frontend/node_modules
+.next

@@ -1,0 +1,227 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "windows"]
+}
+
+datasource db {
+  provider = "sqlserver"
+  url      = env("DATABASE_URL")
+}
+
+// =============================================
+// TABLAS DEL CHATBOT (creadas por prisma)
+// =============================================
+
+/// Conversaciones WhatsApp (gestionadas por el chatbot)
+model Conversation {
+  id            String    @id @db.NVarChar(50)
+  name          String?   @db.NVarChar(100)
+  status        String    @default("bot") @db.NVarChar(20)
+  unreadCount   Int       @default(0)
+  lastMessageAt DateTime  @default(now())
+  createdAt     DateTime  @default(now())
+
+  messages      Message[]
+
+  @@map("bot_conversations")
+}
+
+/// Mensajes WhatsApp
+model Message {
+  id             String   @id @db.NVarChar(100)
+  conversationId String   @db.NVarChar(50)
+  fromMe         Boolean
+  body           String   @db.NVarChar(Max)
+  type           String   @default("chat") @db.NVarChar(20)
+  mediaUrl       String?  @db.NVarChar(500)
+  timestamp      DateTime @default(now())
+
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+
+  @@map("bot_messages")
+}
+
+// =============================================
+// TABLAS REALES DEL SISTEMA MÉDICO HABEJICO
+// Nombres legibles mapeados a tablas reales
+// =============================================
+
+/// Afiliados / Pacientes  →  TMUSUARIOSASEGURAMIENTO
+model Paciente {
+  KC0_COD          String   @id @db.VarChar(14)
+  KC0_TIPO_DOCTO   String?  @db.VarChar(3)
+  KC0_TIPO_USUARIO String?  @db.VarChar(1)
+  KC0_NOM          String?  @db.VarChar(60)
+  KC0_PAPELLIDO    String?  @db.VarChar(30)
+  KC0_SAPELLIDO    String?  @db.VarChar(30)
+  KC0_PNOMBRE      String?  @db.VarChar(30)
+  KC0_SNOMBRE      String?  @db.VarChar(30)
+  KC0_RES_TEL      String?  @db.VarChar(15)
+  KC0_RES_DIR      String?  @db.VarChar(50)
+  KC0_FCH_NACE     Decimal? @db.Decimal(18, 0)
+  KC0_SEXO         String?  @db.VarChar(1)
+  KC0_ESTADO       String?  @db.VarChar(2)
+  KC0_ENTIDAD      Decimal? @db.Decimal(18, 0)
+
+  @@map("TMUSUARIOSASEGURAMIENTO")
+}
+
+/// Clientes cartera (teléfonos 1-4, nombre)  →  TKCLIENTES
+model Cliente {
+  KC_ZONA   String   @db.VarChar(3)
+  KC_COD    String   @db.VarChar(14)  // Código paciente
+  KC_SEQK   String   @db.VarChar(2)
+  KC_NOM    String?  @db.VarChar(60)
+  KC_NOM3   String?  @db.VarChar(60)
+  KC_TEL1   String?  @db.VarChar(15)
+  KC_TEL2   String?  @db.VarChar(15)
+  KC_TEL3   String?  @db.VarChar(15)
+  KC_TEL4   String?  @db.VarChar(15)
+  KC_DIR1   String?  @db.VarChar(60)
+  KC_ESTADO String?  @db.VarChar(2)
+  KC_ACTIVO String?  @db.VarChar(1)
+  KC_SEXO   String?  @db.VarChar(1)
+
+  email     ClienteEmail?
+
+  @@id([KC_ZONA, KC_COD, KC_SEQK])
+  @@map("TKCLIENTES")
+}
+
+/// Email del cliente  →  TKCLIENTES2
+model ClienteEmail {
+  KC2_ZONA    String   @db.VarChar(3)
+  KC2_COD     String   @db.VarChar(14)
+  KC2_SEQK    String   @db.VarChar(2)
+  KC2_EMAIL   String?  @db.VarChar(500)
+
+  cliente     Cliente  @relation(fields: [KC2_ZONA, KC2_COD, KC2_SEQK], references: [KC_ZONA, KC_COD, KC_SEQK])
+
+  @@id([KC2_ZONA, KC2_COD, KC2_SEQK])
+  @@map("TKCLIENTES2")
+}
+
+/// Terceros general (nombre, teléfono, dirección)  →  TCTERCEROS
+model Tercero {
+  TR_TERCERO String   @id @db.VarChar(14)
+  TR_NOM     String?  @db.VarChar(60)
+  TR_NIT     String?  @db.VarChar(14)
+  TR_DIR     String?  @db.VarChar(60)
+  TR_CIU     String?  @db.VarChar(25)
+  TR_TEL     String?  @db.VarChar(15)
+  TR_ESTADO  String?  @db.VarChar(1)
+
+  detalle    TerceroDetalle?
+
+  @@map("TCTERCEROS")
+}
+
+/// Nombres separados del tercero  →  TCTERCEROS2
+model TerceroDetalle {
+  TR1_COD_TERCERO   String   @id @db.VarChar(14)
+  TR1_NOM_NOMBRE    String?  @db.VarChar(60)
+  TR1_NOM_PAPELLIDO String?  @db.VarChar(20)
+  TR1_NOM_SAPELLIDO String?  @db.VarChar(20)
+  TR1_NOM_PNOMBRE   String?  @db.VarChar(20)
+  TR1_NOM_SNOMBRE   String?  @db.VarChar(20)
+
+  tercero    Tercero  @relation(fields: [TR1_COD_TERCERO], references: [TR_TERCERO])
+
+  @@map("TCTERCEROS2")
+}
+
+/// Número Único de Identificación paciente  →  TMUSUARIOSNUI
+model PacienteNUI {
+  KCN_ZONA_NUI String   @db.VarChar(3)
+  KCN_COD_NUI  String   @db.VarChar(14)
+  KCN_ZONA     String?  @db.VarChar(3)   // Zona del paciente en TMUSUARIOSASEGURAMIENTO
+  KCN_COD      String?  @db.VarChar(14)  // Código del paciente
+  KCN_SEQK     String?  @db.VarChar(2)
+  KCN_NOM      String?  @db.VarChar(60)
+  KCN_COD_ALT  String?  @db.VarChar(15)  // Código alternativo / NUI
+
+  @@id([KCN_ZONA_NUI, KCN_COD_NUI])
+  @@map("TMUSUARIOSNUI")
+}
+
+/// Médicos / Profesionales de salud  →  TMMEDICOS
+model Medico {
+  MED_COD            Decimal  @id @db.Decimal(18, 0)
+  MED_NOMBRE         String?  @db.VarChar(40)
+  MED_ESPECIALIDAD_1 String?  @db.VarChar(6)
+  MED_ESPECIALIDAD_2 String?  @db.VarChar(6)
+  MED_ESPECIALIDAD_3 String?  @db.VarChar(6)
+  MED_CONSULTORIO    String?  @db.VarChar(6)
+  MED_EST_ESTADO     String?  @db.VarChar(1)
+  MED_OBSERV         String?  @db.VarChar(50)
+
+  @@map("TMMEDICOS")
+}
+
+/// Horarios de médicos (rango de fechas, mañana + tarde)  →  TMTURNOSMEDICOS
+model TurnoMedico {
+  TME_CODM          Decimal  @db.Decimal(18, 0)
+  TME_FCH           Decimal  @db.Decimal(18, 0)  // Fecha inicio YYYYMMDD
+  TME_FCH_FIN       Decimal? @db.Decimal(18, 0)  // Fecha fin YYYYMMDD
+  TME_HH_I          Decimal? @db.Decimal(18, 0)  // Hora inicio mañana
+  TME_MM_I          Decimal? @db.Decimal(18, 0)
+  TME_HH_F          Decimal? @db.Decimal(18, 0)  // Hora fin mañana
+  TME_MM_F          Decimal? @db.Decimal(18, 0)
+  TME_HH_I_A        Decimal? @db.Decimal(18, 0)  // Hora inicio tarde
+  TME_MM_I_A        Decimal? @db.Decimal(18, 0)
+  TME_HH_F_A        Decimal? @db.Decimal(18, 0)  // Hora fin tarde
+  TME_MM_F_A        Decimal? @db.Decimal(18, 0)
+  TME_DUR_CITA      Decimal? @db.Decimal(18, 0)  // Duración cita (minutos)
+  TME_CONSULTORIO   String?  @db.VarChar(7)
+  TME_ESPECIALIDAD  String?  @db.VarChar(6)
+  TME_OBSERV        String?  @db.VarChar(50)
+
+  @@id([TME_CODM, TME_FCH])
+  @@map("TMTURNOSMEDICOS")
+}
+
+/// Especialidades médicas  →  TMESPECIALIDADES
+model Especialidad {
+  ESP_COD       String   @id @db.VarChar(6)
+  ESP_NOMBRE    String?  @db.VarChar(40)
+  ESP_ARTIC     String?  @db.VarChar(20)
+  ESP_PUB_WEB   String?  @db.VarChar(1)
+  ESP_CANTD_WEB Decimal? @db.Decimal(18, 0)
+
+  @@map("TMESPECIALIDADES")
+}
+
+/// Consultorios  →  TMCONSULTORIOS
+model Consultorio {
+  COT_COD    String  @id @db.VarChar(7)
+  COT_NOMBRE String? @db.VarChar(40)
+  COT_ACTIVO String? @db.VarChar(1)
+
+  @@map("TMCONSULTORIOS")
+}
+
+/// Citas agendadas  →  TMCITASUSUARIOS
+model Cita {
+  KC3_MEDICO      Decimal  @db.Decimal(18, 0)
+  KC3_ZONA        String   @db.VarChar(3)
+  KC3_COD         String   @db.VarChar(14)   // Código paciente
+  KC3_SEQK        String   @db.VarChar(2)    // Secuencia
+  KC3_FCH         Decimal  @db.Decimal(18, 0) // Fecha YYYYMMDD
+  KC3_HH          Decimal  @db.Decimal(18, 0) // Hora
+  KC3_MM          Decimal  @db.Decimal(18, 0) // Minutos
+  KC3_ESPECIALISTA String?  @db.VarChar(6)
+  KC3_CONSULTORIO  String?  @db.VarChar(7)
+  KC3_ESTADO       String?  @db.VarChar(2)   // AG=Agendada, CA=Cancelada, AT=Atendida
+  KC3_TIPO         String?  @db.VarChar(3)
+  KC3_NUM          Decimal? @db.Decimal(18, 0)
+  KC3_OBSERVACION  String?  @db.VarChar(60)
+  KC3_VALOR        Decimal? @db.Decimal(18, 0)
+  KC3_GENERADA     String?  @db.VarChar(1)
+  KC3_USUARIO      String?  @db.VarChar(6)
+  KC3_ENTIDAD      Decimal? @db.Decimal(18, 0)
+  KC3_NUM_TURNO    Decimal? @db.Decimal(18, 0)
+
+
+  @@id([KC3_MEDICO, KC3_ZONA, KC3_COD, KC3_SEQK, KC3_FCH, KC3_HH, KC3_MM])
+  @@map("TMCITASUSUARIOS")
+}
