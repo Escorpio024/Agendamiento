@@ -48,27 +48,44 @@ class ReminderService {
             console.log(`📅 Encontradas ${citas.length} citas para mañana`);
 
             for (const cita of citas) {
-                // Buscar paciente por KC3_COD en TKCLIENTES
-                let paciente = await prisma.cliente.findFirst({
-                    where: { KC_COD: cita.KC3_COD }
+                const pacienteId = cita.KC3_COD;
+
+                // 1. Buscar en TMUSUARIOSFACTURACION (Reemplaza TKCLIENTES)
+                // Buscamos tanto por código interno como por documento (OACOD_NUI)
+                let factMatch = await prisma.tMUSUARIOSFACTURACION.findFirst({
+                    where: { OR: [{ KC2_COD: pacienteId }, { KC2_OACOD_NUI: pacienteId }] }
                 });
 
-                // Si no está o no tiene teléfono, buscar en TMUSUARIOSASEGURAMIENTO
-                if (!paciente?.KC_TEL1) {
-                    const pacienteAlt = await prisma.paciente.findFirst({
-                        where: { KC0_COD: cita.KC3_COD }
-                    });
+                let tel = null;
+                let nom = 'Paciente';
 
-                    if (pacienteAlt?.KC0_RES_TEL) {
-                        paciente = {
-                            KC_TEL1: pacienteAlt.KC0_RES_TEL,
-                            KC_NOM: pacienteAlt.KC0_NOM
-                        };
-                    } else {
-                        console.log(`⚠️ Paciente ${cita.KC3_COD} sin teléfono registrado ni en TKCLIENTES ni en TMUSUARIOSASEGURAMIENTO`);
-                        continue;
+                if (factMatch) {
+                    tel = factMatch.KC2_TEL_RESP || factMatch.KC2_TEL_ACOMP;
+                    nom = `${factMatch.KC2_PNOMBRE || ''} ${factMatch.KC2_PAPELLIDO || ''}`.trim() || factMatch.KC2_NOM_RESP;
+                }
+
+                // 2. Si no se encontró o no tiene teléfono, buscar en TMUSUARIOSASEGURAMIENTO (Paciente)
+                if (!tel) {
+                    const asegMatch = await prisma.paciente.findFirst({
+                        where: { KC0_COD: pacienteId }
+                    });
+                    if (asegMatch) {
+                        tel = asegMatch.KC0_RES_TEL;
+                        nom = asegMatch.KC0_NOM || nom;
                     }
                 }
+
+                // 3. Si no hay teléfono, no se puede enviar recordatorio
+                if (!tel) {
+                    console.log(`⚠️ Paciente ${pacienteId} sin teléfono registrado en Facturación o Aseguramiento`);
+                    continue;
+                }
+
+                // Objeto simulado para compatibilidad con el resto de la función
+                const paciente = {
+                    KC_TEL1: tel,
+                    KC_NOM: nom
+                };
 
                 // Buscar médico
                 const medico = await prisma.medico.findFirst({

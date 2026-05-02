@@ -2,7 +2,11 @@ require('dotenv').config({ override: true });
 const OpenAI = require("openai");
 const prompts = require('./prompts');
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const openai = new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+    timeout: 20000,   // 20 segundos máximo por llamada — evita que el bot quede mudo
+    maxRetries: 1,    // 1 reintento automático si falla
+});
 const MODEL = process.env.OPENAI_MODEL || "gpt-4o";
 
 const TODAY = () => {
@@ -75,7 +79,7 @@ async function extractIntent(message) {
         const intentMap = [
             'AGENDAR_CITA', 'MODIFICAR_CITA', 'CANCELAR_CITA',
             'CONSULTAR_CITA', 'CONSULTAR_HORARIOS', 'INFO_GENERAL',
-            'SALUDO', 'URGENCIA', 'OTRO'
+            'CONSULTAR_DATOS', 'ACTUALIZAR_CELULAR', 'SALUDO', 'URGENCIA', 'OTRO'
         ];
         return intentMap.find(i => raw.toUpperCase().includes(i)) || 'OTRO';
     } catch (error) {

@@ -12,6 +12,7 @@ PERSONALIDAD:
 - Nunca corriges la ortografía del paciente — simplemente entiendes lo que quiere.
 - Usas el nombre del paciente cuando lo sabes.
 - Nunca inventas horarios, médicos ni precios.
+- SOLO se ofrecen citas de *Medicina General*. Nunca menciones otras especialidades.
 
 REGLAS DE FORMATO WhatsApp:
 1. Mensajes CORTOS — máximo 3 líneas por turno.
@@ -22,12 +23,11 @@ REGLAS DE FORMATO WhatsApp:
 6. Sin frases relleno ("¡Claro que sí!", "¡Por supuesto!").
 
 FLUJO DE AGENDAMIENTO — información que necesitas recolectar:
-1. Tipo de cita (medicina general, odontología, pediatría, especialista)
-2. Fecha preferida (cualquier expresión: "mañana", "el viernes", "esta semana")
-3. Hora preferida (mañana, tarde, noche — o una hora específica)
+1. Fecha preferida (cualquier expresión: "mañana", "el viernes", "esta semana")
+2. Hora preferida (mañana, tarde — o una hora específica)
 
-Cuando tengas horarios disponibles, muéstralos numerados y pide que elija.
-Cuando confirmes una cita, da un resumen claro y pide confirmación.`;
+Cuando tengas horarios disponibles, muéstralos numerados y pide que elija un NÚMERO.
+Cuando confirmes una cita, da un resumen claro y conciso.`;
 
 // ─── Clasificación de intención ───────────────────────────────────────────────
 // Diseñada para manejar español informal, abreviaciones y faltas de ortografía
@@ -46,6 +46,8 @@ CONSULTAR_HORARIOS — pregunta qué días u horas hay disponibles sin querer ag
 INFO_GENERAL — pregunta sobre precios, dirección, servicios o cómo funciona la clínica
 SALUDO — solo saluda sin pedir nada
 URGENCIA — describe dolor fuerte, accidente, sangrado u otros síntomas graves
+CONSULTAR_DATOS — pregunta por sus propios datos personales registrados (ej. mi número, mi celular, mi cédula, estoy registrado)
+ACTUALIZAR_CELULAR — quiere cambiar, actualizar o registrar su número de celular o teléfono en el sistema
 OTRO — no encaja en ninguna de las anteriores
 
 Intención:`;
@@ -82,7 +84,7 @@ HORA / PERÍODO DEL DÍA:
 - Si no hay hora → null
 
 TIPO DE CITA — acepta variaciones informales:
-- "médico", "médico general", "medicina", "doctor", "consulta" → "medicina general"
+- "médico", "médico general", "medicina", "doctor", "consulta", "999" → "medicina general"
 - "odonto", "denti", "dientes", "muela" → "odontología"
 - "niño", "niños", "bebé", "pediátrico" → "pediatría"
 - "especialista", "especialidad", "reuma", "cardio"... → "especialista"

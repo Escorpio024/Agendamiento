@@ -41,7 +41,34 @@ function parseRelativeDate(dateStr) {
         const d = new Date(today); d.setDate(today.getDate() + 7); return toLocalDateStr(d);
     }
     if (/^\d{4}-\d{2}-\d{2}$/.test(clean)) return clean;
-    return toLocalDateStr(today);
+    
+    // Parsear expresiones como "21 de septiembre" si el LLM las devuelve literalmente
+    const regexMeses = /(\d{1,2})\s*de\s*(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)/i;
+    const matchMes = clean.match(regexMeses);
+    if (matchMes) {
+        const day = parseInt(matchMes[1]);
+        const mesStr = matchMes[2].toLowerCase();
+        const mesesHash = {
+            'enero':0, 'febrero':1, 'marzo':2, 'abril':3, 'mayo':4, 'junio':5, 
+            'julio':6, 'agosto':7, 'septiembre':8, 'setiembre':8, 'octubre':9, 'noviembre':10, 'diciembre':11
+        };
+        const month = mesesHash[mesStr];
+        let year = today.getFullYear();
+        // Si el mes ya pasó en este año, asumir el próximo año
+        if (month < today.getMonth() - 1) year++;
+        const d = new Date(year, month, day);
+        return toLocalDateStr(d);
+    }
+    
+    // Si la IA devolvió "Viernes" o algo que no es fecha YYYY-MM-DD, intentar parseo manual
+    const parsed = new Date(dateStr);
+    if (!isNaN(parsed) && parsed.getFullYear() > 2000) {
+        return toLocalDateStr(parsed);
+    }
+
+    // Retorna null explícitamente en lugar de reemplazar silenciosamente por hoy, para evitar 
+    // buscar a partir de hoy si el usuario introdujo una fecha no parseable
+    return null;
 }
 
 function timeLabel(hh, mm) {
@@ -54,60 +81,217 @@ function timeLabel(hh, mm) {
 // BUSCAR PACIENTE POR TELÉFONO / DOCUMENTO
 // =========================================
 
+
+// =========================================
+// HELPER: obtener celular desde TKCLIENTESANEXO5
+// Esta tabla almacena KC5_TEL_CEL (campo 'Celular' visible en Xenco > Maestro de Usuarios)
+// =========================================
+async function getPhoneFromAnexo5(searchTerms) {
+    try {
+        const rec = await prisma.tKCLIENTESANEXO5.findFirst({
+            where: { KC5_RACOD_CLI: { in: searchTerms } }
+        });
+        if (rec?.KC5_TEL_CEL && !/^0+$/.test(rec.KC5_TEL_CEL.trim())) {
+            return rec.KC5_TEL_CEL.trim();
+        }
+    } catch (_) { /* tabla puede no existir en todos los ambientes */ }
+    return null;
+}
+
+// =========================================
+// ACTUALIZAR CELULAR DEL PACIENTE
+// Actualiza KC5_TEL_CEL en TKCLIENTESANEXO5 (campo 'Celular' visible en Xenco)
+// =========================================
+async function updateCelular(internalCod, newPhone) {
+    const cleanNew = newPhone.replace(/\D/g, '');
+    if (!/^\d{7,15}$/.test(cleanNew)) {
+        return { ok: false, reason: 'formato_invalido' };
+    }
+
+    // El código puede venir sin padding (ej. 1054478593) o con (00001054478593)
+    const padded    = internalCod.padStart(14, '0');
+    const spPadded  = internalCod.padStart(14, ' ');
+    const searchTerms = [...new Set([internalCod, padded, spPadded])];
+
+    let updated = false;
+
+    // 1. Intentar actualizar en TKCLIENTESANEXO5 (fuente primaria del celular)
+    try {
+        const result = await prisma.tKCLIENTESANEXO5.updateMany({
+            where: { KC5_RACOD_CLI: { in: searchTerms } },
+            data:  { KC5_TEL_CEL: cleanNew }
+        });
+        if (result.count > 0) {
+            updated = true;
+            console.log(`[DB] ✅ Celular actualizado en TKCLIENTESANEXO5: cod=${internalCod} -> ${cleanNew} (${result.count} registros)`);
+        }
+    } catch (e) {
+        console.error('[DB] Error actualizando TKCLIENTESANEXO5:', e.message);
+    }
+
+    // 2. También actualizar TMUSUARIOSFACTURACION como respaldo
+    try {
+        const resultFact = await prisma.tMUSUARIOSFACTURACION.updateMany({
+            where: { OR: [
+                { KC2_COD:      { in: searchTerms } },
+                { KC2_OACOD_NUI: internalCod.replace(/^0+/, '') }
+            ]},
+            data: { KC2_TEL_RESP: cleanNew }
+        });
+        if (resultFact.count > 0) {
+            console.log(`[DB] ✅ Celular actualizado en TMUSUARIOSFACTURACION: ${resultFact.count} registros`);
+            updated = true;
+        }
+    } catch (e) {
+        console.error('[DB] Error actualizando TMUSUARIOSFACTURACION:', e.message);
+    }
+
+    return updated
+        ? { ok: true, phone: cleanNew }
+        : { ok: false, reason: 'no_encontrado' };
+}
+
 async function findPaciente(userId) {
     const clean = userId.replace(/@(c\.us|lid|s\.whatsapp\.net)/gi, '').replace(/\D/g, '');
     const phone10 = clean.slice(-10);
     const phone7 = clean.slice(-7);
 
-    // ── 1. Buscar en TKCLIENTES por teléfono (fuente principal → 33K pacientes reales) ──
-    const cliente = await prisma.cliente.findFirst({
+    // ── 1. Buscar por número de documento o código interno ──
+    if (/^\d{5,15}$/.test(clean)) {
+        const cleanNoZeros = clean.replace(/^0+/, '');
+        const exactPadded = clean.padStart(14, ' ');
+        const zeroPadded = clean.padStart(14, '0');
+        const searchTerms = [...new Set([clean, cleanNoZeros, exactPadded, zeroPadded])];
+
+        // En TMUSUARIOSNUI
+        const byNUI = await prisma.pacienteNUI.findFirst({
+            where: { OR: [
+                { KCN_COD_NUI: { in: searchTerms } },
+                { KCN_COD: { in: searchTerms } }
+            ] }
+        });
+        if (byNUI) {
+            const internalCod = byNUI.KCN_COD || byNUI.KCN_COD_NUI;
+            // Buscar entidad (EPS) en TMUSUARIOSFACTURACION
+            const factParaEntidad = await prisma.tMUSUARIOSFACTURACION.findFirst({
+                where: { OR: [
+                    { KC2_OACOD_NUI: { in: searchTerms } },
+                    { KC2_COD: { in: searchTerms } }
+                ] }
+            });
+            // Obtener celular real desde TKCLIENTESANEXO5 (campo visible en Xenco)
+            const celularAnexo = await getPhoneFromAnexo5(searchTerms);
+            const telFact = factParaEntidad?.KC2_TEL_RESP;
+            const realTel = celularAnexo
+                || (telFact && !/^0+$/.test(telFact.trim()) ? telFact.trim() : null)
+                || null;
+            return {
+                KC0_COD: internalCod, 
+                KC0_NOM: byNUI.KCN_NOM,
+                KC0_PNOMBRE: byNUI.KCN_NOM?.split(/[\s,]+/)[0] || 'Paciente',
+                KC0_RES_TEL: realTel,
+                KC0_ENTIDAD: factParaEntidad?.KC2_EPS_POS ? Number(factParaEntidad.KC2_EPS_POS) : null,
+                email: null,
+                zona: byNUI.KCN_ZONA || factParaEntidad?.KC2_ZONA || '001',
+                cod: internalCod,
+                seqk: byNUI.KCN_SEQK || ''
+            };
+        }
+
+        // En TMUSUARIOSFACTURACION
+        const byFact = await prisma.tMUSUARIOSFACTURACION.findFirst({
+            where: { OR: [
+                { KC2_OACOD_NUI: { in: searchTerms } },
+                { KC2_COD: { in: searchTerms } }
+            ] }
+        });
+        if (byFact) {
+            const nomComp = `${byFact.KC2_PNOMBRE || ''} ${byFact.KC2_PAPELLIDO || ''}`.trim();
+            // Obtener celular real desde TKCLIENTESANEXO5
+            const celularAnexo = await getPhoneFromAnexo5(searchTerms);
+            const telFact = byFact.KC2_TEL_RESP;
+            const realTel = celularAnexo
+                || (telFact && !/^0+$/.test(telFact.trim()) ? telFact.trim() : null)
+                || null;
+            return {
+                KC0_COD: byFact.KC2_COD, 
+                KC0_NOM: nomComp || 'Paciente',
+                KC0_PNOMBRE: byFact.KC2_PNOMBRE || byFact.KC2_NOM_RESP?.split(' ')[0] || 'Paciente',
+                KC0_RES_TEL: realTel, 
+                KC0_ENTIDAD: byFact.KC2_EPS_POS ? Number(byFact.KC2_EPS_POS) : null, 
+                email: null,
+                zona: byFact.KC2_ZONA, cod: byFact.KC2_COD, seqk: byFact.KC2_SEQK || ''
+            };
+        }
+
+        // Fallback: TMUSUARIOSASEGURAMIENTO (Por Código)
+        const byAseg = await prisma.paciente.findFirst({ 
+            where: { KC0_COD: { in: searchTerms } } 
+        });
+        if (byAseg) {
+            return { ...byAseg, email: null, zona: '001', cod: byAseg.KC0_COD, seqk: '' };
+        }
+    }
+
+    // ── 2. Buscar en TKCLIENTESANEXO5 por celular (fuente principal del número real) ──
+    try {
+        const kc5ByTel = await prisma.tKCLIENTESANEXO5.findFirst({
+            where: { OR: [
+                { KC5_TEL_CEL: { contains: phone10 } },
+                { KC5_TEL_CEL: { contains: phone7 } }
+            ]}
+        });
+        if (kc5ByTel?.KC5_RACOD_CLI) {
+            // Obtener datos completos del paciente por su código interno
+            const codPac = kc5ByTel.KC5_RACOD_CLI.trim();
+            const nuiByCode = await prisma.pacienteNUI.findFirst({ where: { KCN_COD: codPac } });
+            const factByCode = await prisma.tMUSUARIOSFACTURACION.findFirst({ where: { KC2_COD: codPac } });
+            const nomComp = nuiByCode?.KCN_NOM
+                || (factByCode ? `${factByCode.KC2_PNOMBRE || ''} ${factByCode.KC2_PAPELLIDO || ''}`.trim() : null)
+                || 'Paciente';
+            return {
+                KC0_COD: codPac,
+                KC0_NOM: nomComp,
+                KC0_PNOMBRE: nomComp.split(/[\s,]+/)[0] || 'Paciente',
+                KC0_RES_TEL: kc5ByTel.KC5_TEL_CEL.trim(),
+                KC0_ENTIDAD: factByCode?.KC2_EPS_POS ? Number(factByCode.KC2_EPS_POS) : null,
+                email: null,
+                zona: nuiByCode?.KCN_ZONA || factByCode?.KC2_ZONA || '001',
+                cod: codPac,
+                seqk: nuiByCode?.KCN_SEQK || factByCode?.KC2_SEQK || ''
+            };
+        }
+    } catch(_) {}
+
+    // ── 3. Buscar en TMUSUARIOSFACTURACION por teléfono ──
+    const factByTel = await prisma.tMUSUARIOSFACTURACION.findFirst({
         where: {
             OR: [
-                { KC_TEL1: phone10 }, { KC_TEL2: phone10 }, { KC_TEL3: phone10 },
-                { KC_TEL1: phone7 }, { KC_TEL2: phone7 }, { KC_TEL3: phone7 },
-                { KC_TEL1: { contains: phone10 } },
-                { KC_TEL2: { contains: phone10 } },
-                { KC_TEL3: { contains: phone10 } }
+                { KC2_TEL_RESP: { contains: phone10 } },
+                { KC2_TEL_RESP: { contains: phone7 } }
             ]
         }
-        // Sin include para evitar FK errors con BD real
     });
 
-    if (cliente) {
-        let emailVal = null;
-        try { const er = await prisma.clienteEmail.findFirst({ where: { KC2_COD: cliente.KC_COD } }); emailVal = er?.KC2_EMAIL || null; } catch (_) { }
+    if (factByTel) {
+        const nomComp = `${factByTel.KC2_PNOMBRE || ''} ${factByTel.KC2_PAPELLIDO || ''}`.trim();
         return {
-            KC0_COD: cliente.KC_COD,
-            KC0_NOM: cliente.KC_NOM,
-            KC0_PNOMBRE: cliente.KC_NOM?.split(' ').slice(-2, -1)[0] || cliente.KC_NOM?.split(' ')[0],
-            KC0_RES_TEL: cliente.KC_TEL1,
-            KC0_ENTIDAD: null,
-            email: emailVal,
-            zona: cliente.KC_ZONA,
-            cod: cliente.KC_COD,
-            seqk: cliente.KC_SEQK || ''
+            KC0_COD: factByTel.KC2_COD, 
+            KC0_NOM: nomComp || 'Paciente',
+            KC0_PNOMBRE: factByTel.KC2_PNOMBRE || factByTel.KC2_NOM_RESP?.split(' ')[0] || 'Paciente',
+            KC0_RES_TEL: factByTel.KC2_TEL_RESP, 
+            KC0_ENTIDAD: factByTel.KC2_EPS_POS ? Number(factByTel.KC2_EPS_POS) : null,
+            email: null,
+            zona: factByTel.KC2_ZONA, cod: factByTel.KC2_COD, seqk: factByTel.KC2_SEQK || ''
         };
     }
 
-    // ── 2. Fallback: TMUSUARIOSASEGURAMIENTO (pacientes registrados por el bot) ──
+    // ── 3. Fallback: TMUSUARIOSASEGURAMIENTO (Por Teléfono) ──
     let aseg = await prisma.paciente.findFirst({ where: { KC0_RES_TEL: { contains: phone10 } } });
     if (!aseg) aseg = await prisma.paciente.findFirst({ where: { KC0_RES_TEL: { contains: phone7 } } });
     if (aseg) {
         const emailRec = await prisma.clienteEmail.findFirst({ where: { KC2_COD: aseg.KC0_COD } });
         return { ...aseg, email: emailRec?.KC2_EMAIL || null, zona: '001', cod: aseg.KC0_COD, seqk: '' };
-    }
-
-    // ── 3. Buscar por número de documento ──
-    if (/^\d{5,15}$/.test(clean)) {
-        const byCliente = await prisma.cliente.findFirst({ where: { KC_COD: clean } });
-        if (byCliente) {
-            return {
-                KC0_COD: byCliente.KC_COD, KC0_NOM: byCliente.KC_NOM,
-                KC0_RES_TEL: byCliente.KC_TEL1, KC0_ENTIDAD: null,
-                email: null,
-                zona: byCliente.KC_ZONA, cod: byCliente.KC_COD, seqk: byCliente.KC_SEQK || ''
-            };
-        }
     }
 
     return null;
@@ -138,8 +322,15 @@ async function getAvailableSlots(fechaStr, tipo = 'medicina general', preferredD
 
     // 2. Buscar turnos activos para la fecha
     const whereClause = {
-        TME_FCH: { lte: dateDecimal },
-        TME_FCH_FIN: { gte: dateDecimal }
+        AND: [
+            { TME_FCH: { lte: dateDecimal } },
+            {
+                OR: [
+                    { TME_FCH_FIN: { gte: dateDecimal } },
+                    { TME_FCH_FIN: null }
+                ]
+            }
+        ]
     };
     if (especialidad) whereClause.TME_ESPECIALIDAD = especialidad.ESP_COD;
 
@@ -170,7 +361,8 @@ async function getAvailableSlots(fechaStr, tipo = 'medicina general', preferredD
         where: { KC3_FCH: dateDecimal }
     });
     // SQL Server CHAR(2) puede tener espacios ('CA '), por lo que filtramos con trim
-    const citasExistentes = allCitas.filter(c => c.KC3_ESTADO && c.KC3_ESTADO.trim() !== 'CA');
+    // Se consideran ocupadas todas las citas cuyo estado NO sea Cancelado ('CA') o nulo explícito
+    const citasExistentes = allCitas.filter(c => !c.KC3_ESTADO || c.KC3_ESTADO.trim() !== 'CA');
 
     // 6. Generar slots
     const now = new Date();
@@ -196,11 +388,16 @@ async function getAvailableSlots(fechaStr, tipo = 'medicina general', preferredD
             while (totalMin + dur <= endMin) {
                 const currH = Math.floor(totalMin / 60);
                 const currM = totalMin % 60;
-                const isBooked = citasExistentes.some(c =>
-                    String(c.KC3_MEDICO) === String(turno.TME_CODM) &&
-                    parseInt(c.KC3_HH) === currH &&
-                    parseInt(c.KC3_MM) === currM
-                );
+                
+                // Prevenir traslapes de citas verificando todo el bloque de tiempo
+                // Si el usuario pidió que una hora se bloquee para TODOS cuando alguien la agenda,
+                // omitimos la verificación por médico y lo hacemos a nivel global de la clínica.
+                const isBooked = citasExistentes.some(c => {
+                    if (String(c.KC3_MEDICO) !== String(turno.TME_CODM)) return false; // Evita conflicto entre distintos doctores
+                    const cMin = parseInt(c.KC3_HH) * 60 + parseInt(c.KC3_MM);
+                    return cMin < totalMin + dur && totalMin < cMin + dur;
+                });
+                
                 if (!isBooked) {
                     const slotDate = createLocalDate(dateStr, currH, currM);
                     if (slotDate > now || dateStr !== toLocalDateStr(now)) {
@@ -248,7 +445,29 @@ async function getAvailableSlots(fechaStr, tipo = 'medicina general', preferredD
 // RESERVAR CITA
 // =========================================
 
-async function reserveSlot(fechaStr, hora, userId, tipo = 'medicina general', medicoId = null) {
+// Mapear especialidad a los campos nativos del Visor de Agenda
+function getFieldsByEspecialidad(espCod) {
+    const cod = String(espCod || '').trim();
+    // Odontología: ESP_COD 461
+    if (cod === '461') return {
+        KC3_TIPO:           'VOS',  // Visita Odontología
+        KC3_TIPO_SERVICIO:  211,
+        KC3_GRUPO_ATENCION: 'O',
+        KC3_ARTIC:          '*230101',
+        KC3_C_COSTO:        '7312',
+    };
+    // Medicina General (999), Pediatría (510), Ginecología (280), etc.
+    // Valor nativo confirmado: TIPO='VD', GRUPO='O'
+    return {
+        KC3_TIPO:           'VD',
+        KC3_TIPO_SERVICIO:  201,
+        KC3_GRUPO_ATENCION: 'O',
+        KC3_ARTIC:          '890201',
+        KC3_C_COSTO:        '7310',
+    };
+}
+
+async function reserveSlot(fechaStr, hora, userId, tipo = 'medicina general', medicoId = null, pacienteData = null) {
     try {
         const dateStr = parseRelativeDate(fechaStr);
         const dateDecimal = dateToDecimal(new Date(dateStr + 'T12:00:00'));
@@ -268,9 +487,16 @@ async function reserveSlot(fechaStr, hora, userId, tipo = 'medicina general', me
             return false;
         }
 
-        // Buscar paciente
-        const paciente = await findPaciente(userId);
-        if (!paciente) return false;
+        // Buscar paciente: usar datos de sesión si los tenemos (evita fallo con LIDs de WhatsApp)
+        let paciente = pacienteData || null;
+        if (!paciente) {
+            paciente = await findPaciente(userId);
+        }
+        if (!paciente) {
+            console.error('[HABEJICO] reserveSlot falló: no se encontró paciente para userId=', userId);
+            return false;
+        }
+        console.log(`[HABEJICO] reserveSlot: paciente.KC0_COD="${paciente.KC0_COD}" zona="${paciente.zona}"`);
 
         // Validar slot disponible
         const slots = await getAvailableSlots(dateStr, tipo, null, true);
@@ -282,44 +508,91 @@ async function reserveSlot(fechaStr, hora, userId, tipo = 'medicina general', me
             return false;
         }
 
-        // Generar SEQK único para esta cita
-        const existing = await prisma.cita.findMany({
-            where: {
-                KC3_COD: paciente.KC0_COD,
-                KC3_FCH: dateDecimal,
-                KC3_MEDICO: slot.doctorId,
-                KC3_ZONA: paciente.zona || '001'
-            }
+        // Xenco por lo general usa string vacío '' para la cita del día independientemente,
+        // ya que el horario HH y MM son únicos, permitiendo evitar problemas de correlatividad.
+        const seqk = '';
+
+        const zonaUsar = (paciente.zona || '99').substring(0, 3);
+
+        // Generar timestamp Habejico: HHMMSSCC (hora sistema en decimal)
+        const now = new Date();
+        const hhSist = now.getHours();
+        const mmSist = now.getMinutes();
+        const ssSist = now.getSeconds();
+        const horaSist = hhSist * 1000000 + mmSist * 10000 + ssSist * 100;
+        const fchDecimalHoy = dateToDecimal(now);
+
+        // Resolver entidad del paciente — priorizar KC0_ENTIDAD real, fallback 0
+        const entidadPac = paciente.KC0_ENTIDAD ? Number(paciente.KC0_ENTIDAD) : 0;
+
+        // Resolver contrato y secuencia según la entidad (EPS) del paciente
+        // Mapa de contratos por entidad confirmados desde la BD nativa
+        const contratoPorEntidad = {
+            235:  { num: 'RS-0159-2026',     seq: 3 },  // SURA EPS
+            141:  { num: '01_EVN_890982370', seq: 2 },  // NUEVA EPS
+            265:  { num: 'RC-0160-2026',     seq: 3 },  // (otra EPS)
+            550:  { num: '0474-2025',         seq: 1 },  // (otra EPS)
+        };
+        const contratoInfo = contratoPorEntidad[entidadPac] || { num: '0152-2025', seq: 2 };
+
+        // Obtener el siguiente KC3_NUM disponible (correlativo de Factura)
+        // Se toma el máximo actual + 1 para garantizar unicidad
+        const maxCita = await prisma.cita.findFirst({
+            where: { KC3_NUM: { gt: 0, lt: 2000000000 } },
+            orderBy: { KC3_NUM: 'desc' }
         });
-        const seqk = String(existing.length + 1).padStart(2, '0');
+        const nextNum = maxCita ? Number(maxCita.KC3_NUM) + 1 : 1000000;
 
-        const zonaUsar = paciente.zona || '001';
+        // Obtener campos nativos según la especialidad del médico (para que Xenco los muestre)
+        const espCod = slot.especialidadCod || null;
+        const fieldsEsp = getFieldsByEspecialidad(espCod);
 
-        // Crear cita en BD con los campos idénticos a los nativos de HABE JICO
+        // Crear cita en BD con los campos idénticos a los nativos de HABEJICO
         await prisma.cita.create({
             data: {
-                KC3_MEDICO: slot.doctorId,
-                KC3_ZONA: zonaUsar,
-                KC3_COD: paciente.KC0_COD,
-                KC3_SEQK: seqk,
-                KC3_FCH: dateDecimal,
-                KC3_HH: hh,
-                KC3_MM: mm,
-                KC3_ESPECIALISTA: slot.especialidadCod || null,
-                KC3_CONSULTORIO: slot.consultorio || null,
-                KC3_ESTADO: '01',          // '01' es el estado nativo para 'Agendado'
-                KC3_TIPO: '',              // Vacío
-                KC3_OBSERVACION: `WhatsApp - ${tipo}`.substring(0, 60),
-                KC3_USUARIO: 'BOT',
-                KC3_ENTIDAD: paciente.KC0_ENTIDAD || 0,
-                KC3_NUM: 0,                // Requerido por el frontend de Habejico
-                KC3_NUM_TURNO: 0,          // Requerido por Habejico
-                KC3_VALOR: 0,              // Requerido por Habejico
-                KC3_GENERADA: null
+                KC3_MEDICO:           slot.doctorId,
+                KC3_ZONA:             zonaUsar,
+                KC3_COD:              paciente.KC0_COD,
+                KC3_SEQK:             seqk,
+                KC3_FCH:              dateDecimal,
+                KC3_HH:               hh,
+                KC3_MM:               mm,
+                KC3_ESPECIALISTA:     espCod,
+                KC3_CONSULTORIO:      slot.consultorio || null,
+                KC3_ESTADO:           null,           // null = Asignada (como aparece en el Visor de Agenda)
+                KC3_TIPO:             fieldsEsp.KC3_TIPO,
+                KC3_TIPO_SERVICIO:    fieldsEsp.KC3_TIPO_SERVICIO,
+                KC3_CAUSAL_ATENC:     2,              // Causal: Enfermedad General
+                KC3_CARGART_EPS:      'N',            // N = No carta de autorización
+                KC3_GRUPO_ATENCION:   fieldsEsp.KC3_GRUPO_ATENCION,
+                KC3_C_COSTO:          fieldsEsp.KC3_C_COSTO,
+                KC3_ARTIC:            fieldsEsp.KC3_ARTIC,
+                KC3_OBSERVACION:      `WhatsApp - ${tipo}`.substring(0, 60),
+                KC3_USUARIO:          'BOT',
+                KC3_ENTIDAD:          entidadPac,
+                KC3_ENTIDAD_OLD:      entidadPac,
+                KC3_NUM:              nextNum,        // Número de Factura correlativo
+                KC3_NUM_TURNO:        0,
+                KC3_VALOR:            54600,
+                KC3_GENERADA:         null,
+                KC3_FCH_D:            fchDecimalHoy,
+                KC3_HH_D:             hhSist,
+                KC3_MM_D:             mmSist,
+                KC3_HORA_SIST:        horaSist,
+                KC3_TERMINAL:         'BOT',
+                KC3_ONCOD_NUM_CTA:    0,
+                KC3_NUM_CONTRATO:     contratoInfo.num,   // Contrato según EPS del paciente
+                KC3_SEQ_TME2:         1,
+                KC3_SEQ_CONTRATO:     contratoInfo.seq,   // Secuencia del contrato
+                KC3_COD_PROGRAMA:     0,
+
+                KC3_COD_BARRIO:       0,
+                KC3_EDADFIN:          0,
+                KC3_FCH_ANUL:         0
             }
         });
 
-        console.log(`✅ Cita confirmada en BD: médico=${slot.doctorId} fecha=${dateDecimal} hora=${hh}:${mm}`);
+        console.log(`✅ Cita confirmada en BD: médico=${slot.doctorId} fecha=${dateDecimal} hora=${hh}:${mm} entidad=${entidadPac} zona=${zonaUsar}`);
         return true;
     } catch (err) {
         console.error('❌ Error guardando cita en BD:', err.message);
@@ -333,14 +606,72 @@ async function reserveSlot(fechaStr, hora, userId, tipo = 'medicina general', me
 
 async function getUserAppointments(userId) {
     try {
-        const paciente = await findPaciente(userId);
-        if (!paciente) return [];
+        // Estrategia dual: si el userId parece una cédula/ID directo de paciente,
+        // buscar directamente en lugar de pasar por findPaciente (que busca por teléfono)
+        let pacienteId = null;
+        const cleanId = String(userId).replace(/@(c\.us|lid|s\.whatsapp\.net)/gi, '').replace(/\D/g, '');
+        const isWhatsAppSender = userId.includes('@') || userId.includes('.us');
+
+        if (!isWhatsAppSender && /^\d{5,15}$/.test(cleanId)) {
+            const cleanNoZeros = cleanId.replace(/^0+/, '');
+            const exactPadded = cleanId.padStart(14, ' ');
+            const zeroPadded = cleanId.padStart(14, '0');
+            const searchTerms = [...new Set([cleanId, cleanNoZeros, exactPadded, zeroPadded])];
+
+            const nuiMatch = await prisma.pacienteNUI.findFirst({
+                where: { OR: [
+                    { KCN_COD_NUI: { in: searchTerms } },
+                    { KCN_COD: { in: searchTerms } }
+                ] }
+            });
+            if (nuiMatch) {
+                pacienteId = nuiMatch.KCN_COD || nuiMatch.KCN_COD_NUI;
+            } else {
+                const factMatch = await prisma.tMUSUARIOSFACTURACION.findFirst({
+                    where: { OR: [
+                        { KC2_OACOD_NUI: { in: searchTerms } },
+                        { KC2_COD: { in: searchTerms } }
+                    ] }
+                });
+                if (factMatch) {
+                    pacienteId = factMatch.KC2_COD;
+                } else {
+                    const directPac = await prisma.paciente.findFirst({
+                        where: { KC0_COD: { in: searchTerms } }
+                    });
+                    if (directPac) pacienteId = directPac.KC0_COD;
+                }
+            }
+        }
+
+        if (!pacienteId) {
+            const paciente = await findPaciente(userId);
+            if (!paciente) {
+                console.warn(`[HABEJICO] getUserAppointments: no se encontró paciente para userId=${userId}`);
+                return [];
+            }
+            pacienteId = paciente.KC0_COD;
+        }
 
         const todayDecimal = dateToDecimal(new Date());
-        const citas = await prisma.cita.findMany({
-            where: { KC3_COD: paciente.KC0_COD, KC3_FCH: { gte: todayDecimal }, KC3_ESTADO: { not: 'CA' } },
+        const cleanPacId = String(pacienteId).trim().replace(/^0+/, '');
+        const allCitas = await prisma.cita.findMany({
+            where: {
+                OR: [
+                    { KC3_COD: pacienteId },
+                    { KC3_COD: cleanPacId },
+                    { KC3_COD: String(pacienteId).padStart(14, ' ') },
+                    { KC3_COD: String(pacienteId).padStart(14, '0') }
+                ],
+                KC3_FCH: { gte: todayDecimal }
+            },
             orderBy: [{ KC3_FCH: 'asc' }, { KC3_HH: 'asc' }]
         });
+        
+        // Filtrar 'CA' (Cancelada) en JS para evadir problemas de collation o espacios en SQL
+        const citas = allCitas.filter(c => !c.KC3_ESTADO || c.KC3_ESTADO.trim() !== 'CA');
+
+        console.log(`[HABEJICO] getUserAppointments: ID=${pacienteId}, FechaGTE=${todayDecimal}, DB=${allCitas.length}, Validas=${citas.length}`);
 
         const medicoCodes = [...new Set(citas.map(c => parseInt(c.KC3_MEDICO)))];
         const medicos = medicoCodes.length
@@ -403,9 +734,11 @@ async function cancelAppointment(appointmentId) {
 
 const DAY_NAMES_ES = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 
-async function getWeekAvailability(startDateStr, tipo = 'medicina general', doctor = null, numDays = 6) {
+// Escanea hasta maxScanDays días calendario desde startDateStr y devuelve
+// hasta maxResults días que tengan disponibilidad real.
+async function getWeekAvailability(startDateStr, tipo = 'medicina general', doctor = null, maxResults = 7, maxScanDays = 365) {
     const results = [];
-    for (let i = 0; i < numDays; i++) {
+    for (let i = 0; i < maxScanDays && results.length < maxResults; i++) {
         const d = new Date(startDateStr + 'T12:00:00');
         d.setDate(d.getDate() + i);
         const dateStr = toLocalDateStr(d);
@@ -423,9 +756,10 @@ async function getWeekAvailability(startDateStr, tipo = 'medicina general', doct
     return results;
 }
 
+// Busca hasta 365 días calendario hacia adelante el primer día con disponibilidad.
 async function getNextAvailableSlots(startDateStr, tipo, doctor) {
     const d = new Date(startDateStr + 'T12:00:00');
-    for (let i = 0; i < 7; i++) {
+    for (let i = 0; i < 365; i++) {
         d.setDate(d.getDate() + 1);
         const dateStr = toLocalDateStr(d);
         const slots = await getAvailableSlots(dateStr, tipo, doctor);
@@ -455,6 +789,22 @@ function normalizeTipoCita(tipo) {
     return null; // null = buscar por nombre
 }
 
+// Inverso de normalizeTipoCita: convierte código ESP_COD al nombre legible para mostrar al paciente
+function codigoToNombreServicio(cod) {
+    if (!cod) return 'Consulta Médica';
+    const mapa = {
+        '999': 'Medicina General',
+        '461': 'Odontología',
+        '510': 'Pediatría',
+        '280': 'Ginecología',
+        '382': 'Medicina de Urgencias',
+        '385': 'Medicina Familiar',
+        '387': 'Medicina Interna',
+        '120': 'Cardiología',
+    };
+    return mapa[String(cod).trim()] || `Especialidad ${cod}`;
+}
+
 function isRangeDate(dateText) {
     if (!dateText) return false;
     const lower = dateText.toLowerCase();
@@ -479,12 +829,14 @@ module.exports = {
     getUserAppointments,
     cancelAppointment,
     normalizeTipoCita,
+    codigoToNombreServicio,
     parseRelativeDate,
     getNextAvailableSlots,
     getWeekAvailability,
     isRangeDate,
     getWeekStartDate,
     findPaciente,
+    updateCelular,
     dateToDecimal,
     decimalToDate
 };

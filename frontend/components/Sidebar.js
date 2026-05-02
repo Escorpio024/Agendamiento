@@ -1,7 +1,7 @@
-import { User, Search } from 'lucide-react';
+import { User, Search, CalendarClock } from 'lucide-react';
 import { useState } from 'react';
 
-export default function Sidebar({ conversations, activeId, onSelect, filter, setFilter }) {
+export default function Sidebar({ conversations, activeId, onSelect, filter, setFilter, onOpenHistory, appointmentsCount }) {
     const [searchTerm, setSearchTerm] = useState('');
 
     const filteredConversations = conversations.filter(conv => {
@@ -17,25 +17,33 @@ export default function Sidebar({ conversations, activeId, onSelect, filter, set
     };
 
     return (
-        <div className="flex flex-col h-full bg-white">
+        <div className="flex flex-col h-full bg-[#1E1B26] text-[#F5F5F7]">
             {/* Header */}
-            {/* Header */}
-            <div className="bg-white flex-shrink-0">
-                <div className="h-16 bg-gradient-to-r from-emerald-50 to-emerald-100 px-4 flex flex-col justify-center border-b border-emerald-200">
-                    <h1 className="text-lg font-bold text-gray-800 flex items-center gap-2">
-                        <span className="text-emerald-600">🤖</span> Chat bot Aurora
-                    </h1>
-                    <p className="text-xs text-gray-600">Panel de monitoreo médico</p>
+            <div className="flex-shrink-0">
+                <div className="h-16 bg-[#1A1721] px-4 flex justify-between items-center border-b border-[#2D283E]">
+                    <div className="flex items-center gap-2">
+                        <span className="text-[#A1E3D8] text-xl">🤖</span>
+                        <h1 className="text-lg font-bold">Chat bot Aurora</h1>
+                    </div>
+                    {/* Botón de Historial */}
+                    <button 
+                        onClick={onOpenHistory}
+                        className="flex items-center gap-2 bg-[#2D283E] hover:bg-[#8263B1] text-[#F5F5F7] px-3 py-1.5 rounded-md text-xs font-semibold transition-colors shadow-sm"
+                        title="Ver historial de citas"
+                    >
+                        <CalendarClock size={14} className="text-[#A1E3D8]" />
+                        <span>Citas: {appointmentsCount || 0}</span>
+                    </button>
                 </div>
 
                 {/* Search Bar */}
-                <div className="p-2 border-b border-gray-100 bg-gray-50">
+                <div className="p-3 border-b border-[#2D283E] bg-[#1E1B26]">
                     <div className="relative">
-                        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={16} />
+                        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-[#A1E3D8]" size={16} />
                         <input
                             type="text"
                             placeholder="Buscar por nombre o cédula..."
-                            className="w-full pl-9 pr-3 py-1.5 text-sm bg-white border border-gray-200 rounded-md focus:outline-none focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500"
+                            className="w-full pl-9 pr-3 py-2 text-sm bg-[#0F0E13] border border-[#2D283E] text-[#F5F5F7] rounded-md focus:outline-none focus:ring-1 focus:ring-[#8263B1] focus:border-[#8263B1] placeholder-gray-500"
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
                         />
@@ -43,12 +51,12 @@ export default function Sidebar({ conversations, activeId, onSelect, filter, set
                 </div>
 
                 {/* Tabs */}
-                <div className="flex items-center p-2 gap-2 overflow-x-auto border-b border-gray-100">
+                <div className="flex items-center p-2 gap-2 overflow-x-auto border-b border-[#2D283E]">
                     <button
                         onClick={() => setFilter('all')}
                         className={`flex-1 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${filter === 'all'
-                            ? 'bg-emerald-100 text-emerald-700'
-                            : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+                            ? 'bg-[#8263B1] text-[#F5F5F7]'
+                            : 'bg-[#2D283E] text-gray-400 hover:text-[#F5F5F7] hover:bg-[#3D3754]'
                             }`}
                     >
                         Todos
@@ -56,8 +64,8 @@ export default function Sidebar({ conversations, activeId, onSelect, filter, set
                     <button
                         onClick={() => setFilter('pending')}
                         className={`flex-1 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${filter === 'pending'
-                            ? 'bg-amber-100 text-amber-700'
-                            : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+                            ? 'bg-[#A1E3D8] text-[#0F0E13]'
+                            : 'bg-[#2D283E] text-gray-400 hover:text-[#F5F5F7] hover:bg-[#3D3754]'
                             }`}
                     >
                         Pendientes
@@ -65,8 +73,8 @@ export default function Sidebar({ conversations, activeId, onSelect, filter, set
                     <button
                         onClick={() => setFilter('bot')}
                         className={`flex-1 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${filter === 'bot'
-                            ? 'bg-blue-100 text-blue-700'
-                            : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+                            ? 'bg-[#8263B1] text-[#F5F5F7] bg-opacity-70'
+                            : 'bg-[#2D283E] text-gray-400 hover:text-[#F5F5F7] hover:bg-[#3D3754]'
                             }`}
                     >
                         Bot
@@ -77,7 +85,7 @@ export default function Sidebar({ conversations, activeId, onSelect, filter, set
             {/* List */}
             <div className="flex-1 overflow-y-auto">
                 {filteredConversations.length === 0 ? (
-                    <div className="p-8 text-center text-gray-400">
+                    <div className="p-8 text-center text-gray-500">
                         <p>No hay conversaciones disponibles</p>
                     </div>
                 ) : (
@@ -85,11 +93,11 @@ export default function Sidebar({ conversations, activeId, onSelect, filter, set
                         <div
                             key={conv.id}
                             onClick={() => onSelect(conv.id)}
-                            className={`flex p-4 border-b border-gray-100 cursor-pointer hover:bg-emerald-50 transition-all duration-150 ${activeId === conv.id ? 'bg-emerald-50 border-l-4 border-l-emerald-500' : ''
+                            className={`flex p-4 border-b border-[#2D283E] cursor-pointer hover:bg-[#2D283E] transition-all duration-150 ${activeId === conv.id ? 'bg-[#2D283E] border-l-4 border-l-[#A1E3D8]' : ''
                                 }`}
                         >
                             {/* Avatar */}
-                            <div className="w-12 h-12 rounded-full bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center mr-3 text-white font-bold text-lg flex-shrink-0 shadow-sm">
+                            <div className="w-12 h-12 rounded-full bg-[#8263B1] flex items-center justify-center mr-3 text-[#F5F5F7] font-bold text-lg flex-shrink-0 shadow-sm border border-[#2D283E]">
                                 {conv.patientName ? conv.patientName.charAt(0).toUpperCase() : '?'}
                             </div>
 
@@ -97,10 +105,10 @@ export default function Sidebar({ conversations, activeId, onSelect, filter, set
                             <div className="flex-1 overflow-hidden min-w-0">
                                 {/* Name and Time */}
                                 <div className="flex justify-between items-start mb-1">
-                                    <h3 className="font-semibold text-gray-900 truncate text-[15px]">
+                                    <h3 className="font-semibold text-[#F5F5F7] truncate text-[15px]">
                                         {conv.patientName || 'Sin nombre'}
                                     </h3>
-                                    <span className="text-[11px] text-gray-500 ml-2 flex-shrink-0">
+                                    <span className="text-[11px] text-[#A1E3D8] ml-2 flex-shrink-0 opacity-80">
                                         {formatDate(conv.lastMessageAt)}
                                     </span>
                                 </div>
@@ -108,20 +116,20 @@ export default function Sidebar({ conversations, activeId, onSelect, filter, set
                                 {/* Document Number */}
                                 {conv.patientDocument ? (
                                     <div className="flex items-center gap-1 mb-1.5">
-                                        <span className="text-xs text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded font-medium">
+                                        <span className="text-xs text-[#1E1B26] bg-[#A1E3D8] px-2 py-0.5 rounded font-medium">
                                             CC: {conv.patientDocument}
                                         </span>
                                     </div>
                                 ) : (
                                     <div className="flex items-center gap-1 mb-1.5">
-                                        <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded">
+                                        <span className="text-xs text-[#F5F5F7] opacity-60 bg-[#2D283E] px-2 py-0.5 rounded">
                                             No registrado
                                         </span>
                                     </div>
                                 )}
 
                                 {/* Last Message Preview */}
-                                <p className="text-sm text-gray-600 truncate leading-relaxed">
+                                <p className="text-sm text-gray-400 truncate leading-relaxed">
                                     {conv.messages?.[0]?.body || 'Multimedia'}
                                 </p>
                             </div>

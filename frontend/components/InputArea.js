@@ -29,18 +29,18 @@ export default function InputArea({ onSend }) {
     };
 
     return (
-        <div className="bg-[#f0f2f5] px-4 py-2 flex items-end gap-2 border-t border-[#e9edef] min-h-[62px]">
+        <div className="bg-[#1E1B26] px-4 py-2 flex items-end gap-2 border-t border-[#2D283E] min-h-[62px]">
             {/* Attach Button */}
-            <button className="p-2 text-[#54656f] hover:bg-gray-200 rounded-full transition-colors mb-1">
+            <button className="p-2 text-[#A1E3D8] hover:bg-[#3D3754] rounded-full transition-colors mb-1">
                 <Paperclip size={24} />
             </button>
 
             {/* Input Container */}
-            <div className="flex-1 bg-white rounded-lg flex items-center px-4 py-2 border border-white focus-within:border-white mb-1">
+            <div className="flex-1 bg-[#0F0E13] rounded-lg flex items-center px-4 py-2 border border-[#2D283E] focus-within:border-[#8263B1] mb-1 transition-colors">
                 <textarea
                     ref={textareaRef}
                     placeholder="Escribe un mensaje"
-                    className="flex-1 outline-none text-[#111b21] bg-transparent resize-none max-h-[120px] py-1 text-[15px] leading-[20px]"
+                    className="flex-1 outline-none text-[#F5F5F7] bg-transparent resize-none max-h-[120px] py-1 text-[15px] leading-[20px] placeholder-gray-500"
                     rows={1}
                     value={text}
                     onChange={(e) => setText(e.target.value)}
@@ -51,13 +51,13 @@ export default function InputArea({ onSend }) {
             {/* Mic / Send Button */}
             {text.trim() ? (
                 <button
-                    className="p-3 bg-[#00a884] text-white rounded-full hover:bg-[#008f6f] transition-colors mb-1 shadow-sm"
+                    className="p-3 bg-[#A1E3D8] text-[#0F0E13] rounded-full hover:bg-teal-400 transition-colors mb-1 shadow-sm"
                     onClick={handleSend}
                 >
                     <Send size={20} />
                 </button>
             ) : (
-                <button className="p-3 text-[#54656f] hover:bg-gray-200 rounded-full transition-colors mb-1">
+                <button className="p-3 text-[#A1E3D8] hover:bg-[#3D3754] rounded-full transition-colors mb-1">
                     <Mic size={24} />
                 </button>
             )}

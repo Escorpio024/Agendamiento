@@ -1,0 +1,20 @@
+
+model Conversation {
+  id            String    @id @db.VarChar(50)
+  name          String?   @db.VarChar(100)
+  status        String    @default("bot") @db.VarChar(20)
+  unreadCount   Int       @default(0)
+  lastMessageAt DateTime  @default(now())
+  messages      Message[]
+}
+
+model Message {
+  id             String       @id @db.VarChar(100)
+  conversationId String       @db.VarChar(50)
+  fromMe         Boolean      @default(false)
+  body           String       @db.Text
+  type           String       @default("chat") @db.VarChar(20)
+  mediaUrl       String?      @db.Text
+  timestamp      DateTime     @default(now())
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+}

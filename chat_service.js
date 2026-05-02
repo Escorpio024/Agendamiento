@@ -1,18 +1,19 @@
-const prisma = require('./db');
+const medicalPrisma = require('./db');
+const botPrisma = require('./dbBot');
 
 class ChatService {
     /**
-     * Get or create a conversation
+     * Get or create a conversation (Local SQLite)
      * @param {string} phone - WhatsApp ID
      * @param {string} name - Contact name
      */
     async getOrCreateConversation(phone, name) {
-        let conversation = await prisma.conversation.findUnique({
+        let conversation = await botPrisma.conversation.findUnique({
             where: { id: phone }
         });
 
         if (!conversation) {
-            conversation = await prisma.conversation.create({
+            conversation = await botPrisma.conversation.create({
                 data: {
                     id: phone,
                     name: name || phone,
@@ -23,7 +24,7 @@ class ChatService {
             });
         } else if (name && conversation.name !== name) {
             // Update name if changed
-            conversation = await prisma.conversation.update({
+            conversation = await botPrisma.conversation.update({
                 where: { id: phone },
                 data: { name }
             });
@@ -33,7 +34,7 @@ class ChatService {
     }
 
     /**
-     * Save a message to the database
+     * Save a message to the local database (SQLite)
      * @param {string} phone - Conversation ID
      * @param {object} messageData - Message details
      */
@@ -43,11 +44,11 @@ class ChatService {
         // Ensure conversation exists
         const conversation = await this.getOrCreateConversation(phone, messageData.senderName);
 
-        // Upsert message (create if new, update if exists - though usually messages don't change)
-        const message = await prisma.message.upsert({
+        // Upsert message
+        const message = await botPrisma.message.upsert({
             where: { id: messageData.id },
             update: {
-                mediaUrl: messageData.mediaUrl, // Update media URL if it changes (e.g. enhanced later)
+                mediaUrl: messageData.mediaUrl,
             },
             create: {
                 id: messageData.id,
@@ -60,9 +61,9 @@ class ChatService {
             }
         });
 
-        // Update conversation last message only if this message is newer
+        // Update conversation last message local
         if (new Date(messageData.timestamp) > new Date(conversation.lastMessageAt)) {
-            await prisma.conversation.update({
+            await botPrisma.conversation.update({
                 where: { id: phone },
                 data: {
                     lastMessageAt: messageData.timestamp,
@@ -75,71 +76,77 @@ class ChatService {
     }
 
     /**
-     * Update conversation status (Bot <-> Human)
-     * @param {string} phone 
-     * @param {string} status 
+     * Update conversation status (Local SQLite)
      */
     async updateStatus(phone, status) {
-        return prisma.conversation.update({
+        return botPrisma.conversation.update({
             where: { id: phone },
             data: { status }
         });
     }
 
     /**
-     * Check if a conversation is in Human Mode
+     * Check if a conversation is in Human Mode (Local SQLite)
      */
     async isHumanMode(phone) {
-        const conversation = await prisma.conversation.findUnique({
+        const conversation = await botPrisma.conversation.findUnique({
             where: { id: phone }
         });
         return conversation && conversation.status !== 'bot';
     }
 
     /**
-     * Get all conversations, optionally filtered by status
-     * Includes patient information (name and document number)
+     * Get all conversations enriched with remote patient data
      */
     async getConversations(status) {
         const where = status ? { status } : {};
-        const conversations = await prisma.conversation.findMany({
+        const conversations = await botPrisma.conversation.findMany({
             where,
             orderBy: { lastMessageAt: 'desc' },
             include: { messages: { take: 1, orderBy: { timestamp: 'desc' } } }
         });
 
-        // Enrich with patient data
+        // Enrich with remote patient data (SQL Server)
         const enriched = await Promise.all(conversations.map(async (conv) => {
-            // Extract phone number from conversation ID
             const phoneClean = conv.id.replace(/@(c\.us|lid|s\.whatsapp\.net)/gi, '').replace(/\D/g, '');
             const phone10 = phoneClean.slice(-10);
+            const phone7 = phoneClean.slice(-7);
 
             let patientName = conv.name;
             let patientDocument = null;
 
             if (phone10) {
                 try {
-                    // Find patient by phone in TKCLIENTES
-                    const patient = await prisma.cliente.findFirst({
+                    // Lookup in REMOTE SQL Server - Priorizar TMUSUARIOSFACTURACION
+                    const pFact = await medicalPrisma.tMUSUARIOSFACTURACION.findFirst({
                         where: {
                             OR: [
-                                { KC_TEL1: { contains: phone10 } },
-                                { KC_TEL2: { contains: phone10 } },
-                                { KC_TEL3: { contains: phone10 } }
+                                { KC2_TEL_RESP: { contains: phone10 } },
+                                { KC2_TEL_RESP: { contains: phone7 } }
                             ]
-                        },
-                        select: {
-                            KC_NOM: true,
-                            KC_COD: true
                         }
                     });
 
-                    if (patient) {
-                        patientName = patient.KC_NOM?.trim() || conv.name;
-                        patientDocument = patient.KC_COD;
+                    if (pFact) {
+                        patientName = `${pFact.KC2_PNOMBRE || ''} ${pFact.KC2_PAPELLIDO || ''}`.trim() || pFact.KC2_NOM_RESP || conv.name;
+                        patientDocument = pFact.KC2_OACOD_NUI || pFact.KC2_COD;
+                    } else {
+                        // Fallback a Aseguramiento
+                        const pAseg = await medicalPrisma.paciente.findFirst({
+                            where: {
+                                OR: [
+                                    { KC0_RES_TEL: { contains: phone10 } },
+                                    { KC0_RES_TEL: { contains: phone7 } }
+                                ]
+                            }
+                        });
+                        if (pAseg) {
+                            patientName = pAseg.KC0_NOM || conv.name;
+                            patientDocument = pAseg.KC0_COD;
+                        }
                     }
                 } catch (e) {
-                    console.error("Error fetching patient for conversation:", e.message);
+                    console.error("Error fetching patient for conversation from remote DB:", e.message);
                 }
             }
 
@@ -154,10 +161,10 @@ class ChatService {
     }
 
     /**
-     * Get messages for a conversation
+     * Get messages for a conversation (Local SQLite)
      */
     async getMessages(conversationId) {
-        return prisma.message.findMany({
+        return botPrisma.message.findMany({
             where: { conversationId },
             orderBy: { timestamp: 'asc' }
         });
@@ -165,3 +172,4 @@ class ChatService {
 }
 
 module.exports = new ChatService();
+

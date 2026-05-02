@@ -2,6 +2,16 @@ const fs = require('fs');
 const path = require('path');
 const ffmpeg = require('fluent-ffmpeg');
 
+// Usar el binario de ffmpeg incluido en el paquete para evitar
+// depender de una instalación global (necesario en Windows)
+try {
+    const ffmpegInstaller = require('@ffmpeg-installer/ffmpeg');
+    ffmpeg.setFfmpegPath(ffmpegInstaller.path);
+    console.log(`[Media] ffmpeg path: ${ffmpegInstaller.path}`);
+} catch (e) {
+    console.warn('[Media] @ffmpeg-installer/ffmpeg no encontrado, usando ffmpeg del sistema.');
+}
+
 // Ensure media directory exists
 const MEDIA_DIR = path.join(__dirname, 'public/media');
 if (!fs.existsSync(MEDIA_DIR)) {
@@ -41,14 +51,16 @@ async function saveMedia(msg) {
 
             // Convert to MP3
             await new Promise((resolve, reject) => {
-                ffmpeg(oggPath)
+                let command = ffmpeg(oggPath);
+                try {
+                    const ffmpegInstaller = require('@ffmpeg-installer/ffmpeg');
+                    command.setFfmpegPath(ffmpegInstaller.path);
+                } catch (e) {}
+                
+                command
                     .toFormat('mp3')
                     .on('error', (err) => reject(err))
-                    .on('end', () => {
-                        // Optional: remove original ogg
-                        // fs.unlinkSync(oggPath); 
-                        resolve();
-                    })
+                    .on('end', () => resolve())
                     .save(mp3Path);
             });
 

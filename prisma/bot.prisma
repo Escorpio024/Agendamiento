@@ -1,0 +1,43 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/@prisma/bot-client"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("BOT_DATABASE_URL")
+}
+
+
+model Conversation {
+  id            String    @id
+  name          String?
+  status        String    @default("bot")
+  unreadCount   Int       @default(0)
+  lastMessageAt DateTime  @default(now())
+  messages      Message[]
+}
+
+model Message {
+  id             String       @id
+  conversationId String
+  fromMe         Boolean      @default(false)
+  body           String
+  type           String       @default("chat")
+  mediaUrl       String?
+  timestamp      DateTime     @default(now())
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+}
+
+model AppointmentLog {
+  id             String   @id @default(cuid())
+  patientName    String
+  patientDocument String
+  doctorId       String?
+  doctorName     String?
+  appointmentDate String
+  appointmentTime String
+  serviceType    String?
+  whatsappId     String
+  createdAt      DateTime @default(now())
+}

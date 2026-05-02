@@ -4,6 +4,7 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
+    "restart": "taskkill /F /IM chrome.exe /T 2>nul & taskkill /F /IM node.exe /T 2>nul & timeout /t 2 /nobreak >nul & node index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -11,6 +12,7 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "@ffmpeg-installer/ffmpeg": "^1.1.0",
     "@prisma/adapter-pg": "^7.4.0",
     "@prisma/client": "^5.22.0",
     "cors": "^2.8.6",

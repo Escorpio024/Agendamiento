@@ -11,6 +11,7 @@ export function useChat() {
     const [activeConversationId, setActiveConversationId] = useState(null);
     const [messages, setMessages] = useState([]);
     const [filter, setFilter] = useState('all'); // all, pending, assigned, bot
+    const [appointmentsCount, setAppointmentsCount] = useState(0);
 
     // Connect to Socket
     useEffect(() => {
@@ -58,9 +59,19 @@ export function useChat() {
             });
         });
 
+        socket.on('new_appointment', async () => {
+            try {
+                const res = await axios.get(`${API_URL}/appointments`);
+                setAppointmentsCount(res.data.length);
+            } catch (err) {
+                console.error('Failed to refresh appointment count', err);
+            }
+        });
+
         return () => {
             socket.off('new_message');
             socket.off('conversation_updated');
+            socket.off('new_appointment');
         };
     }, [socket, activeConversationId]);
 
@@ -68,6 +79,19 @@ export function useChat() {
     useEffect(() => {
         fetchConversations();
     }, [filter]);
+
+    // Load Appointments Count
+    useEffect(() => {
+        const fetchCount = async () => {
+            try {
+                const res = await axios.get(`${API_URL}/appointments`);
+                setAppointmentsCount(res.data.length);
+            } catch (err) {
+                console.error('Failed to fetch appointment count', err);
+            }
+        };
+        fetchCount();
+    }, []);
 
     const fetchConversations = async () => {
         try {
@@ -148,6 +172,7 @@ export function useChat() {
         sendMessage,
         filter,
         setFilter,
-        updateStatus
+        updateStatus,
+        appointmentsCount,
     };
 }

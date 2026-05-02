@@ -7,7 +7,7 @@ const { MessageMedia } = require('whatsapp-web.js');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
-const prisma = require('./db');
+const botPrisma = require('./dbBot');
 
 const app = express();
 const server = http.createServer(app);
@@ -58,12 +58,24 @@ app.get('/api/conversations', async (req, res) => {
 app.get('/api/conversations/:id/messages', async (req, res) => {
     try {
         const { id } = req.params;
-        const messages = await prisma.message.findMany({
+        const messages = await botPrisma.message.findMany({
             where: { conversationId: id },
             orderBy: { timestamp: 'desc' },
             take: 50
         });
         res.json(messages.reverse());
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Get Appointments History
+app.get('/api/appointments', async (req, res) => {
+    try {
+        const logs = await botPrisma.appointmentLog.findMany({
+            orderBy: { createdAt: 'desc' }
+        });
+        res.json(logs);
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
@@ -148,8 +160,16 @@ function emitConversationUpdate(conversation) {
     io.emit('conversation_updated', conversation);
 }
 
+/**
+ * Emit new appointment event to update frontend counter
+ */
+function emitAppointmentCreated() {
+    io.emit('new_appointment');
+}
+
 module.exports = {
     start,
     emitMessage,
-    emitConversationUpdate
+    emitConversationUpdate,
+    emitAppointmentCreated
 };
