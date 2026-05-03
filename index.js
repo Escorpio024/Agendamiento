@@ -430,6 +430,10 @@ client.on('message', async (msg) => {
                 await reply('⚠️ Por favor escribe un número de cédula válido (mínimo 5 dígitos).');
                 return;
             }
+            if (!prisma) {
+                await reply('⚠️ El sistema de consulta de pacientes no está disponible temporalmente. Por favor intenta de nuevo en unos minutos.');
+                return;
+            }
             const exactPadded = cedula.padStart(14, ' ');
 
             let pacienteExiste = null;
@@ -519,6 +523,10 @@ client.on('message', async (msg) => {
             const cedula = text.replace(/\D/g, '');
             if (cedula.length < 5) {
                 await reply("⚠️ Por favor escribe un número de cédula válido (mínimo 5 dígitos).");
+                return;
+            }
+            if (!prisma) {
+                await reply('⚠️ El sistema de consulta de pacientes no está disponible temporalmente. Por favor intenta de nuevo en unos minutos.');
                 return;
             }
             session.cedula = cedula;
