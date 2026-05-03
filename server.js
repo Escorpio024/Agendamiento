@@ -139,6 +139,7 @@ app.post('/api/conversations/:id/status', async (req, res) => {
  */
 function start(client, port = 3001) {
     whatsappClient = client;
+    if (server.listening) return; // Ya está escuchando, no volver a iniciar
     server.listen(port, () => {
         console.log(`🚀 Inbox API & Socket running on http://localhost:${port}`);
     });
