@@ -2,8 +2,11 @@ import { useState, useEffect, useCallback } from 'react';
 import io from 'socket.io-client';
 import axios from 'axios';
 
-const API_URL = 'http://localhost:3001/api';
-const SOCKET_URL = 'http://localhost:3001';
+// Auto-detectar si estamos en producción (nube) o local
+const IS_PROD = typeof window !== 'undefined' && window.location.hostname !== 'localhost';
+const SERVER_HOST = IS_PROD ? window.location.hostname : 'localhost';
+const API_URL = `http://${SERVER_HOST}:3001/api`;
+const SOCKET_URL = `http://${SERVER_HOST}:3001`;
 
 export function useChat() {
     const [socket, setSocket] = useState(null);
