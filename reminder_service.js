@@ -31,6 +31,10 @@ class ReminderService {
     }
 
     async sendReminders() {
+        if (!prisma) {
+            console.log('[ReminderService] Prisma no disponible, omitiendo recordatorios.');
+            return;
+        }
         try {
             // Calcular fecha de mañana en formato decimal YYYYMMDD
             const tomorrow = new Date();

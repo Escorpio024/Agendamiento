@@ -87,6 +87,7 @@ function timeLabel(hh, mm) {
 // Esta tabla almacena KC5_TEL_CEL (campo 'Celular' visible en Xenco > Maestro de Usuarios)
 // =========================================
 async function getPhoneFromAnexo5(searchTerms) {
+    if (!prisma) return null;
     try {
         const rec = await prisma.tKCLIENTESANEXO5.findFirst({
             where: { KC5_RACOD_CLI: { in: searchTerms } }
@@ -103,6 +104,7 @@ async function getPhoneFromAnexo5(searchTerms) {
 // Actualiza KC5_TEL_CEL en TKCLIENTESANEXO5 (campo 'Celular' visible en Xenco)
 // =========================================
 async function updateCelular(internalCod, newPhone) {
+    if (!prisma) return { ok: false, reason: 'db_unavailable' };
     const cleanNew = newPhone.replace(/\D/g, '');
     if (!/^\d{7,15}$/.test(cleanNew)) {
         return { ok: false, reason: 'formato_invalido' };
@@ -152,6 +154,7 @@ async function updateCelular(internalCod, newPhone) {
 }
 
 async function findPaciente(userId) {
+    if (!prisma) return null;
     const clean = userId.replace(/@(c\.us|lid|s\.whatsapp\.net)/gi, '').replace(/\D/g, '');
     const phone10 = clean.slice(-10);
     const phone7 = clean.slice(-7);
@@ -304,6 +307,7 @@ async function findPaciente(userId) {
 // =========================================
 
 async function getAvailableSlots(fechaStr, tipo = 'medicina general', preferredDoctor = null, skipLimit = false) {
+    if (!prisma) return [];
     const dateStr = parseRelativeDate(fechaStr);
     const dateDecimal = dateToDecimal(new Date(dateStr + 'T12:00:00'));
 
@@ -468,6 +472,7 @@ function getFieldsByEspecialidad(espCod) {
 }
 
 async function reserveSlot(fechaStr, hora, userId, tipo = 'medicina general', medicoId = null, pacienteData = null) {
+    if (!prisma) return false;
     try {
         const dateStr = parseRelativeDate(fechaStr);
         const dateDecimal = dateToDecimal(new Date(dateStr + 'T12:00:00'));
@@ -605,6 +610,7 @@ async function reserveSlot(fechaStr, hora, userId, tipo = 'medicina general', me
 // =========================================
 
 async function getUserAppointments(userId) {
+    if (!prisma) return [];
     try {
         // Estrategia dual: si el userId parece una cédula/ID directo de paciente,
         // buscar directamente en lugar de pasar por findPaciente (que busca por teléfono)
@@ -703,6 +709,7 @@ async function getUserAppointments(userId) {
 // =========================================
 
 async function cancelAppointment(appointmentId) {
+    if (!prisma) return false;
     try {
         // id = "medico-cod-seqk-fch-hh-mm"
         const parts = appointmentId.split('-');
