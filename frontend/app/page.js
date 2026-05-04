@@ -11,12 +11,16 @@ import {
 } from 'lucide-react';
 
 // ─── Appointments Modal ───────────────────────────────────────────────
+const IS_PROD = typeof window !== 'undefined' && window.location.hostname !== 'localhost';
+const SERVER_HOST = IS_PROD ? window.location.hostname : 'localhost';
+const API_BASE = `http://${SERVER_HOST}:3001`;
+
 function AppointmentsModal({ onClose }) {
     const [appointments, setAppointments] = useState([]);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        fetch('http://localhost:3001/api/appointments')
+        fetch(`${API_BASE}/api/appointments`)
             .then(r => r.json())
             .then(data => { setAppointments(data); setLoading(false); })
             .catch(() => setLoading(false));
