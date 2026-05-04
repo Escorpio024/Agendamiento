@@ -374,13 +374,33 @@ async function getAvailableSlots(fechaStr, tipo = 'medicina general', preferredD
         if (pref.length) filteredTurnos = pref;
     }
 
-    // 5. Citas ya agendadas para esa fecha
+    // 5. Citas ya agendadas para esa fecha (todas las del día)
     const allCitas = await prisma.cita.findMany({
         where: { KC3_FCH: dateDecimal }
     });
-    // SQL Server CHAR(2) puede tener espacios ('CA '), por lo que filtramos con trim
-    // Se consideran ocupadas todas las citas cuyo estado NO sea Cancelado ('CA') o nulo explícito
-    const citasExistentes = allCitas.filter(c => !c.KC3_ESTADO || c.KC3_ESTADO.trim() !== 'CA');
+
+    // Separar: citas ocupadas (tienen paciente real, no canceladas)
+    // vs. slots vacíos pre-generados por Xenco (KC3_COD null/spaces = disponibles en el Visor de Agenda)
+    const citasOcupadas = allCitas.filter(c => {
+        const estadoCancelado = c.KC3_ESTADO && c.KC3_ESTADO.trim() === 'CA';
+        if (estadoCancelado) return false;
+        const tienePaciente = c.KC3_COD && c.KC3_COD.trim() !== '' && c.KC3_COD.trim() !== '0';
+        return tienePaciente;
+    });
+
+    // Slots pre-generados por Xenco para cada doctor (sin paciente = disponibles reales del Visor)
+    // Si Xenco pre-popula KC3, estos son los únicos slots válidos que deben mostrarse
+    const slotsVaciosPorDoctor = {}; // { doctorId: Set([h*60+m]) }
+    for (const c of allCitas) {
+        const tienePaciente = c.KC3_COD && c.KC3_COD.trim() !== '' && c.KC3_COD.trim() !== '0';
+        const cancelado = c.KC3_ESTADO && c.KC3_ESTADO.trim() === 'CA';
+        if (!tienePaciente && !cancelado) {
+            const key = String(c.KC3_MEDICO).trim();
+            if (!slotsVaciosPorDoctor[key]) slotsVaciosPorDoctor[key] = new Set();
+            const tMin = parseInt(c.KC3_HH) * 60 + parseInt(c.KC3_MM);
+            slotsVaciosPorDoctor[key].add(tMin);
+        }
+    }
 
     // 6. Generar slots
     const now = new Date();
@@ -390,7 +410,42 @@ async function getAvailableSlots(fechaStr, tipo = 'medicina general', preferredD
         const medico = medicoMap[Number(turno.TME_CODM)];
         if (!medico) continue;
         const dur = Number(turno.TME_DUR_CITA) || 20;
+        const doctorKey = String(turno.TME_CODM).trim();
 
+        // ── MODO A: Xenco tiene slots pre-generados en KC3 para este doctor ──
+        // Usar esos como fuente de verdad (slots vacíos = disponibles en el Visor de Agenda)
+        const slotsVaciosDoctor = slotsVaciosPorDoctor[doctorKey];
+        if (slotsVaciosDoctor && slotsVaciosDoctor.size > 0) {
+            console.log(`[SLOTS-KC3] Dr.${medico.MED_NOMBRE?.trim()} | ${slotsVaciosDoctor.size} slots disponibles directo de KC3 (Visor de Agenda)`);
+            for (const tMin of [...slotsVaciosDoctor].sort((a, b) => a - b)) {
+                const currH = Math.floor(tMin / 60);
+                const currM = tMin % 60;
+                // Verificar que no esté ocupado por una cita real
+                const isBooked = citasOcupadas.some(c => {
+                    if (String(c.KC3_MEDICO).trim() !== doctorKey) return false;
+                    const cMin = parseInt(c.KC3_HH) * 60 + parseInt(c.KC3_MM);
+                    return cMin < tMin + dur && tMin < cMin + dur;
+                });
+                if (!isBooked) {
+                    const slotDate = createLocalDate(dateStr, currH, currM);
+                    if (slotDate > now || dateStr !== toLocalDateStr(now)) {
+                        slots.push({
+                            time: timeLabel(currH, currM),
+                            hh: currH, mm: currM,
+                            doctorId: Number(turno.TME_CODM),
+                            doctorName: medico.MED_NOMBRE?.trim() || `Médico ${turno.TME_CODM}`,
+                            especialidadCod: turno.TME_ESPECIALIDAD || especialidad?.ESP_COD,
+                            consultorio: turno.TME_CONSULTORIO,
+                            duracion: dur,
+                            sortValue: tMin
+                        });
+                    }
+                }
+            }
+            continue; // Ya procesamos este doctor, pasar al siguiente
+        }
+
+        // ── MODO B: Xenco no tiene slots pre-generados — generar desde el horario (TMTURNOSMEDICOS) ──
         const franjas = [];
         // Turno mañana: solo si TME_ACTIVIDAD_M está activo (no es null ni 'N')
         const mañanaActiva = turno.TME_ACTIVIDAD_M && turno.TME_ACTIVIDAD_M.trim() !== 'N' && turno.TME_ACTIVIDAD_M.trim() !== '';
@@ -412,7 +467,7 @@ async function getAvailableSlots(fechaStr, tipo = 'medicina general', preferredD
             }
         }
 
-        console.log(`[TURNO] Dr.${medico.MED_NOMBRE?.trim()} | ActM=${turno.TME_ACTIVIDAD_M} ActT=${turno.TME_ACTIVIDAD_T} | Franjas=${franjas.length} | Dur=${dur}min`);
+        console.log(`[SLOTS-TME] Dr.${medico.MED_NOMBRE?.trim()} | ActM=${turno.TME_ACTIVIDAD_M} ActT=${turno.TME_ACTIVIDAD_T} | Franjas=${franjas.length} | Dur=${dur}min (modo template)`);
 
         for (const f of franjas) {
             let totalMin = f.hi * 60 + f.mi;
@@ -423,10 +478,8 @@ async function getAvailableSlots(fechaStr, tipo = 'medicina general', preferredD
                 const currM = totalMin % 60;
                 
                 // Prevenir traslapes de citas verificando todo el bloque de tiempo
-                // Si el usuario pidió que una hora se bloquee para TODOS cuando alguien la agenda,
-                // omitimos la verificación por médico y lo hacemos a nivel global de la clínica.
-                const isBooked = citasExistentes.some(c => {
-                    if (String(c.KC3_MEDICO) !== String(turno.TME_CODM)) return false; // Evita conflicto entre distintos doctores
+                const isBooked = citasOcupadas.some(c => {
+                    if (String(c.KC3_MEDICO).trim() !== doctorKey) return false; 
                     const cMin = parseInt(c.KC3_HH) * 60 + parseInt(c.KC3_MM);
                     return cMin < totalMin + dur && totalMin < cMin + dur;
                 });
