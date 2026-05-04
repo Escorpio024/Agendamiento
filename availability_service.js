@@ -605,10 +605,10 @@ async function reserveSlot(fechaStr, hora, userId, tipo = 'medicina general', me
                 KC3_USUARIO:          'BOT',
                 KC3_ENTIDAD:          entidadPac,
                 KC3_ENTIDAD_OLD:      entidadPac,
-                KC3_NUM:              nextNum,        // Número de Factura correlativo
+                KC3_NUM:              0,              // Sin número de factura → muestra solo 'VD' en Documento
                 KC3_NUM_TURNO:        0,
                 KC3_VALOR:            54600,
-                KC3_GENERADA:         null,
+                KC3_GENERADA:         'S',            // 'S' = Generada por sistema → aparece como SI en Xenco
                 KC3_FCH_D:            fchDecimalHoy,
                 KC3_HH_D:             hhSist,
                 KC3_MM_D:             mmSist,
