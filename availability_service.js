@@ -481,21 +481,51 @@ async function getAvailableSlots(fechaStr, tipo = 'medicina general', preferredD
 
         console.log(`[SLOTS-TME] Dr.${medico.MED_NOMBRE?.trim()} | ActM=${turno.TME_ACTIVIDAD_M} ActT=${turno.TME_ACTIVIDAD_T} | Franjas=${franjas.length} | Dur=${dur}min (modo template)`);
 
-        for (const f of franjas) {
-            let totalMin = f.hi * 60 + f.mi;
-            const endMin = f.hf * 60 + f.mf;
+        // Tiempos KC3 conocidos para este doctor (slots que realmente existen en el Visor de Agenda)
+        const kc3Times = new Set(
+            allCitas
+                .filter(c => String(c.KC3_MEDICO).trim() === doctorKey)
+                .map(c => parseInt(c.KC3_HH) * 60 + parseInt(c.KC3_MM))
+        );
+        const doctorTieneKC3 = kc3Times.size > 0;
 
-            while (totalMin + dur <= endMin) {
+        for (const f of franjas) {
+            // Pre-calcular todos los slots posibles de esta franja
+            const slotsFragma = [];
+            let t = f.hi * 60 + f.mi;
+            const endMin = f.hf * 60 + f.mf;
+            while (t + dur <= endMin) { slotsFragma.push(t); t += dur; }
+
+            // Si el doctor tiene KC3 para esta fecha, detectar huecos de 2+ slots consecutivos
+            // (esos son slots eliminados del Visor de Agenda — almuerzo o pausa del doctor)
+            const esHuecoEliminado = new Set();
+            if (doctorTieneKC3) {
+                let racha = [];
+                for (const st of slotsFragma) {
+                    if (!kc3Times.has(st)) {
+                        racha.push(st);
+                    } else {
+                        racha = []; // reset al encontrar un slot con registro en KC3
+                    }
+                    if (racha.length >= 2) racha.forEach(s => esHuecoEliminado.add(s));
+                }
+            }
+
+            for (const totalMin of slotsFragma) {
                 const currH = Math.floor(totalMin / 60);
                 const currM = totalMin % 60;
-                
-                // Prevenir traslapes de citas verificando todo el bloque de tiempo
+
+                if (esHuecoEliminado.has(totalMin)) {
+                    console.log(`[SLOT-SKIP] Dr.${medico.MED_NOMBRE?.trim()} ${timeLabel(currH, currM)} → hueco eliminado del Visor (almuerzo/pausa)`);
+                    continue;
+                }
+
                 const isBooked = citasOcupadas.some(c => {
-                    if (String(c.KC3_MEDICO).trim() !== doctorKey) return false; 
+                    if (String(c.KC3_MEDICO).trim() !== doctorKey) return false;
                     const cMin = parseInt(c.KC3_HH) * 60 + parseInt(c.KC3_MM);
                     return cMin < totalMin + dur && totalMin < cMin + dur;
                 });
-                
+
                 if (!isBooked) {
                     const slotDate = createLocalDate(dateStr, currH, currM);
                     if (slotDate > now || dateStr !== toLocalDateStr(now)) {
@@ -511,10 +541,10 @@ async function getAvailableSlots(fechaStr, tipo = 'medicina general', preferredD
                         });
                     }
                 }
-                totalMin += dur;
             }
         }
     }
+
 
     slots.sort((a, b) => a.sortValue - b.sortValue);
 
