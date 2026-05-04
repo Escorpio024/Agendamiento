@@ -338,7 +338,21 @@ async function getAvailableSlots(fechaStr, tipo = 'medicina general', preferredD
     };
     if (especialidad) whereClause.TME_ESPECIALIDAD = especialidad.ESP_COD;
 
-    const turnos = await prisma.turnoMedico.findMany({ where: whereClause });
+    const turnosRaw = await prisma.turnoMedico.findMany({
+        where: whereClause,
+        orderBy: { TME_FCH: 'desc' } // Más reciente primero
+    });
+
+    // Deduplicar: por cada doctor, quedarse solo con el turno MÁS RECIENTE
+    // (evita que registros históricos/viejos generen slots incorrectos)
+    const turnosPorDoctor = {};
+    for (const t of turnosRaw) {
+        const key = String(t.TME_CODM);
+        if (!turnosPorDoctor[key]) turnosPorDoctor[key] = t;
+    }
+    const turnos = Object.values(turnosPorDoctor);
+
+    console.log(`[TURNOS] Fecha=${dateDecimal} tipo=${tipo}: ${turnosRaw.length} registros -> ${turnos.length} únicos por doctor`);
     if (!turnos.length) {
         console.error(`[HABEJICO] getAvailableSlots: 0 turnos encontrados para fecha=${dateDecimal}, espCod=${espCod}, tipo=${tipo}`);
         return [];
@@ -375,15 +389,30 @@ async function getAvailableSlots(fechaStr, tipo = 'medicina general', preferredD
     for (const turno of filteredTurnos) {
         const medico = medicoMap[Number(turno.TME_CODM)];
         if (!medico) continue;
-        const dur = Number(turno.TME_DUR_CITA) || 30;
+        const dur = Number(turno.TME_DUR_CITA) || 20;
 
         const franjas = [];
-        if (turno.TME_HH_I != null && turno.TME_HH_F != null) {
+        // Turno mañana: solo si TME_ACTIVIDAD_M está activo (no es null ni 'N')
+        const mañanaActiva = turno.TME_ACTIVIDAD_M && turno.TME_ACTIVIDAD_M.trim() !== 'N' && turno.TME_ACTIVIDAD_M.trim() !== '';
+        if (mañanaActiva && turno.TME_HH_I != null && turno.TME_HH_F != null) {
             franjas.push({ hi: Number(turno.TME_HH_I), mi: Number(turno.TME_MM_I || 0), hf: Number(turno.TME_HH_F), mf: Number(turno.TME_MM_F || 0) });
         }
-        if (turno.TME_HH_I_A != null && turno.TME_HH_F_A != null) {
+        // Turno tarde: solo si TME_ACTIVIDAD_T está activo
+        const tardeActiva = turno.TME_ACTIVIDAD_T && turno.TME_ACTIVIDAD_T.trim() !== 'N' && turno.TME_ACTIVIDAD_T.trim() !== '';
+        if (tardeActiva && turno.TME_HH_I_A != null && turno.TME_HH_F_A != null) {
             franjas.push({ hi: Number(turno.TME_HH_I_A), mi: Number(turno.TME_MM_I_A || 0), hf: Number(turno.TME_HH_F_A), mf: Number(turno.TME_MM_F_A || 0) });
         }
+        // Fallback: si ambos campos de actividad están vacíos, usar las horas directamente
+        if (!mañanaActiva && !tardeActiva) {
+            if (turno.TME_HH_I != null && turno.TME_HH_F != null) {
+                franjas.push({ hi: Number(turno.TME_HH_I), mi: Number(turno.TME_MM_I || 0), hf: Number(turno.TME_HH_F), mf: Number(turno.TME_MM_F || 0) });
+            }
+            if (turno.TME_HH_I_A != null && turno.TME_HH_F_A != null) {
+                franjas.push({ hi: Number(turno.TME_HH_I_A), mi: Number(turno.TME_MM_I_A || 0), hf: Number(turno.TME_HH_F_A), mf: Number(turno.TME_MM_F_A || 0) });
+            }
+        }
+
+        console.log(`[TURNO] Dr.${medico.MED_NOMBRE?.trim()} | ActM=${turno.TME_ACTIVIDAD_M} ActT=${turno.TME_ACTIVIDAD_T} | Franjas=${franjas.length} | Dur=${dur}min`);
 
         for (const f of franjas) {
             let totalMin = f.hi * 60 + f.mi;
