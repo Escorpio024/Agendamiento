@@ -412,6 +412,18 @@ async function getAvailableSlots(fechaStr, tipo = 'medicina general', preferredD
         const dur = Number(turno.TME_DUR_CITA) || 20;
         const doctorKey = String(turno.TME_CODM).trim();
 
+        // ── DIAGNÓSTICO ── Log completo del turno para detectar slots incorrectos
+        const citasOcupadasDoctor = citasOcupadas.filter(c => String(c.KC3_MEDICO).trim() === doctorKey);
+        const todasCitasDoctor = allCitas.filter(c => String(c.KC3_MEDICO).trim() === doctorKey);
+        console.log(`[DIAG] Dr.${medico.MED_NOMBRE?.trim()} (${doctorKey})`);
+        console.log(`       TME_HH_I=${turno.TME_HH_I}:${turno.TME_MM_I||0}→${turno.TME_HH_F}:${turno.TME_MM_F||0} (mañana) ActM=${turno.TME_ACTIVIDAD_M}`);
+        console.log(`       TME_HH_I_A=${turno.TME_HH_I_A}:${turno.TME_MM_I_A||0}→${turno.TME_HH_F_A}:${turno.TME_MM_F_A||0} (tarde) ActT=${turno.TME_ACTIVIDAD_T}`);
+        console.log(`       KC3 total para fecha: ${todasCitasDoctor.length} | Con paciente: ${citasOcupadasDoctor.length} | Sin paciente: ${todasCitasDoctor.length - citasOcupadasDoctor.length}`);
+        if (citasOcupadasDoctor.length > 0) {
+            const horasOcupadas = citasOcupadasDoctor.map(c => `${parseInt(c.KC3_HH)}:${String(parseInt(c.KC3_MM)).padStart(2,'0')}`).join(', ');
+            console.log(`       Horas ocupadas en KC3: ${horasOcupadas}`);
+        }
+
         // ── MODO A: Xenco tiene slots pre-generados en KC3 para este doctor ──
         // Usar esos como fuente de verdad (slots vacíos = disponibles en el Visor de Agenda)
         const slotsVaciosDoctor = slotsVaciosPorDoctor[doctorKey];
