@@ -130,7 +130,7 @@ app.post('/api/conversations/:id/status', async (req, res) => {
     }
 });
 
-// Enviar recordatorios manualmente
+// Enviar recordatorios manualmente a todos
 app.post('/api/send-reminders', async (req, res) => {
     try {
         if (!whatsappClient) {
@@ -144,6 +144,32 @@ app.post('/api/send-reminders', async (req, res) => {
         res.json({ success: true, sent });
     } catch (error) {
         console.error('Error enviando recordatorios:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Enviar recordatorio manual para UNA sola cita
+app.post('/api/appointments/:id/remind', async (req, res) => {
+    try {
+        if (!whatsappClient) {
+            return res.status(503).json({ error: 'WhatsApp no conectado' });
+        }
+        
+        const { id } = req.params;
+        const appt = await botPrisma.appointmentLog.findUnique({ where: { id } });
+        
+        if (!appt) {
+            return res.status(404).json({ error: 'Cita no encontrada en el historial' });
+        }
+
+        const mensaje = `🔔 *¡Hola! Te recordamos tu cita médica de mañana*\n\n👤 *Paciente:* ${appt.patientName}\n🏥 *Servicio:* ${appt.serviceType || 'Medicina General'}\n📅 *Fecha:* ${appt.appointmentDate}\n🕐 *Hora:* ${appt.appointmentTime || 'N/A'}\n👨‍⚕️ *Doctor:* ${appt.doctorName || 'Asignado'}\n\nPor favor llega con 15 minutos de anticipación. 😊`;
+        
+        await whatsappClient.sendMessage(appt.whatsappId, mensaje);
+        console.log(`[RECORDATORIO INDIVIDUAL] Enviado a ${appt.whatsappId} para cita ${id}`);
+        
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Error enviando recordatorio individual:', error);
         res.status(500).json({ error: error.message });
     }
 });

@@ -7,7 +7,7 @@ import InputArea from '../components/InputArea';
 import { useChat } from '../hooks/useChat';
 import {
     User, UserPlus, Bot, MessageCircle,
-    CalendarCheck2, X, Calendar, Clock, Stethoscope, Hash, Phone
+    CalendarCheck2, X, Calendar, Clock, Stethoscope, Hash, Phone, BellRing
 } from 'lucide-react';
 
 // ─── Appointments Modal ───────────────────────────────────────────────
@@ -18,6 +18,8 @@ const API_BASE = `http://${SERVER_HOST}:3001`;
 function AppointmentsModal({ onClose }) {
     const [appointments, setAppointments] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [sendingId, setSendingId] = useState(null);
+    const [toast, setToast] = useState(null);
 
     useEffect(() => {
         fetch(`${API_BASE}/api/appointments`)
@@ -29,6 +31,23 @@ function AppointmentsModal({ onClose }) {
     const fmt = (dateStr) => {
         if (!dateStr) return '—';
         return dateStr;
+    };
+
+    const sendIndividualReminder = async (apptId) => {
+        setSendingId(apptId);
+        try {
+            const res = await fetch(`${API_BASE}/api/appointments/${apptId}/remind`, { method: 'POST' });
+            if (res.ok) {
+                setToast({ text: '✅ Recordatorio enviado', type: 'success' });
+            } else {
+                setToast({ text: '❌ Error al enviar', type: 'error' });
+            }
+        } catch (e) {
+            setToast({ text: '❌ Error de conexión', type: 'error' });
+        } finally {
+            setSendingId(null);
+            setTimeout(() => setToast(null), 3000);
+        }
     };
 
     return (
@@ -95,12 +114,27 @@ function AppointmentsModal({ onClose }) {
                                         </div>
 
                                         <div className="flex-1 min-w-0">
-                                            {/* Patient name */}
+                                            {/* Patient name and actions */}
                                             <div className="flex items-center justify-between gap-2 mb-2">
                                                 <h3 className="font-semibold text-[#F5F5F7] truncate">{appt.patientName}</h3>
-                                                <span className="text-[10px] text-[#F5F5F7]/35 flex-shrink-0">
-                                                    {new Date(appt.createdAt).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: '2-digit' })}
-                                                </span>
+                                                <div className="flex items-center gap-3 flex-shrink-0">
+                                                    <span className="text-[10px] text-[#F5F5F7]/35">
+                                                        {new Date(appt.createdAt).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: '2-digit' })}
+                                                    </span>
+                                                    <button
+                                                        onClick={() => sendIndividualReminder(appt.id)}
+                                                        disabled={sendingId === appt.id}
+                                                        className="flex items-center gap-1.5 px-2 py-1 bg-[#8263B1]/20 hover:bg-[#8263B1]/40 text-[#C4AFED] rounded transition-colors text-[10px] font-semibold disabled:opacity-50"
+                                                        title="Enviar recordatorio por WhatsApp a este paciente"
+                                                    >
+                                                        {sendingId === appt.id ? (
+                                                            <span className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                                                        ) : (
+                                                            <BellRing size={12} />
+                                                        )}
+                                                        Recordar
+                                                    </button>
+                                                </div>
                                             </div>
 
                                             {/* Info grid */}
@@ -143,8 +177,15 @@ function AppointmentsModal({ onClose }) {
                     )}
                 </div>
 
-                {/* Footer */}
-                <div className="px-6 py-3 border-t border-[#2D283E] flex-shrink-0 flex justify-end">
+                {/* Footer with Toast */}
+                <div className="px-6 py-3 border-t border-[#2D283E] flex-shrink-0 flex justify-between items-center relative">
+                    <div className="flex-1">
+                        {toast && (
+                            <span className={`text-xs font-medium ${toast.type === 'success' ? 'text-[#A1E3D8]' : 'text-red-400'}`}>
+                                {toast.text}
+                            </span>
+                        )}
+                    </div>
                     <button
                         onClick={onClose}
                         className="px-4 py-2 text-sm rounded-lg bg-[#2D283E] hover:bg-[#3D3754] text-[#F5F5F7]/70 hover:text-[#F5F5F7] transition-colors"
