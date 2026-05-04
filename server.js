@@ -162,7 +162,7 @@ app.post('/api/appointments/:id/remind', async (req, res) => {
             return res.status(404).json({ error: 'Cita no encontrada en el historial' });
         }
 
-        const mensaje = `🔔 *¡Hola! Te recordamos tu cita médica de mañana*\n\n👤 *Paciente:* ${appt.patientName}\n🏥 *Servicio:* ${appt.serviceType || 'Medicina General'}\n📅 *Fecha:* ${appt.appointmentDate}\n🕐 *Hora:* ${appt.appointmentTime || 'N/A'}\n👨‍⚕️ *Doctor:* ${appt.doctorName || 'Asignado'}\n\nPor favor llega con 15 minutos de anticipación. 😊`;
+        const mensaje = `🔔 *¡Hola! Te recordamos tu cita médica para el ${appt.appointmentDate}*\n\n👤 *Paciente:* ${appt.patientName}\n🏥 *Servicio:* ${appt.serviceType || 'Medicina General'}\n📅 *Fecha:* ${appt.appointmentDate}\n🕐 *Hora:* ${appt.appointmentTime || 'N/A'}\n👨‍⚕️ *Doctor:* ${appt.doctorName || 'Asignado'}\n\nPor favor llega con 15 minutos de anticipación. 😊`;
         
         await whatsappClient.sendMessage(appt.whatsappId, mensaje);
         console.log(`[RECORDATORIO INDIVIDUAL] Enviado a ${appt.whatsappId} para cita ${id}`);
