@@ -130,6 +130,24 @@ app.post('/api/conversations/:id/status', async (req, res) => {
     }
 });
 
+// Enviar recordatorios manualmente
+app.post('/api/send-reminders', async (req, res) => {
+    try {
+        if (!whatsappClient) {
+            return res.status(503).json({ error: 'WhatsApp no conectado' });
+        }
+        const reminderService = require('./reminder_service');
+        reminderService.setClient(whatsappClient);
+        const result = await reminderService.sendReminders();
+        const sent = result || 0;
+        console.log(`[RECORDATORIOS MANUALES] Enviados: ${sent}`);
+        res.json({ success: true, sent });
+    } catch (error) {
+        console.error('Error enviando recordatorios:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // --- EXPORT ---
 
 /**

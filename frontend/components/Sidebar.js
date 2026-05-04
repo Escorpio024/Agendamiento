@@ -1,8 +1,33 @@
-import { User, Search, CalendarClock } from 'lucide-react';
+import { User, Search, CalendarClock, BellRing } from 'lucide-react';
 import { useState } from 'react';
+
+const IS_PROD = typeof window !== 'undefined' && window.location.hostname !== 'localhost';
+const SERVER_HOST = IS_PROD ? window.location.hostname : 'localhost';
+const API_BASE = `http://${SERVER_HOST}:3001`;
 
 export default function Sidebar({ conversations, activeId, onSelect, filter, setFilter, onOpenHistory, appointmentsCount }) {
     const [searchTerm, setSearchTerm] = useState('');
+    const [sendingReminders, setSendingReminders] = useState(false);
+    const [reminderMsg, setReminderMsg] = useState(null);
+
+    const handleSendReminders = async () => {
+        setSendingReminders(true);
+        setReminderMsg(null);
+        try {
+            const res = await fetch(`${API_BASE}/api/send-reminders`, { method: 'POST' });
+            const data = await res.json();
+            if (res.ok) {
+                setReminderMsg({ ok: true, text: `✅ ${data.sent} recordatorio${data.sent !== 1 ? 's' : ''} enviado${data.sent !== 1 ? 's' : ''}` });
+            } else {
+                setReminderMsg({ ok: false, text: `❌ ${data.error || 'Error al enviar'}` });
+            }
+        } catch (e) {
+            setReminderMsg({ ok: false, text: '❌ No se pudo conectar al servidor' });
+        } finally {
+            setSendingReminders(false);
+            setTimeout(() => setReminderMsg(null), 4000);
+        }
+    };
 
     const filteredConversations = conversations.filter(conv => {
         const matchesFilter = filter === 'all' || conv.status === filter;
@@ -25,16 +50,34 @@ export default function Sidebar({ conversations, activeId, onSelect, filter, set
                         <span className="text-[#A1E3D8] text-xl">🤖</span>
                         <h1 className="text-lg font-bold">Chat bot Aurora</h1>
                     </div>
-                    {/* Botón de Historial */}
-                    <button 
-                        onClick={onOpenHistory}
-                        className="flex items-center gap-2 bg-[#2D283E] hover:bg-[#8263B1] text-[#F5F5F7] px-3 py-1.5 rounded-md text-xs font-semibold transition-colors shadow-sm"
-                        title="Ver historial de citas"
-                    >
-                        <CalendarClock size={14} className="text-[#A1E3D8]" />
-                        <span>Citas: {appointmentsCount || 0}</span>
-                    </button>
+                    <div className="flex items-center gap-2">
+                        {/* Botón recordatorios */}
+                        <button
+                            onClick={handleSendReminders}
+                            disabled={sendingReminders}
+                            className="flex items-center gap-1.5 bg-[#2D283E] hover:bg-[#A1E3D8]/20 text-[#A1E3D8] px-2.5 py-1.5 rounded-md text-xs font-semibold transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                            title="Enviar recordatorios de citas de mañana"
+                        >
+                            <BellRing size={13} className={sendingReminders ? 'animate-pulse' : ''} />
+                            <span>{sendingReminders ? 'Enviando...' : 'Recordar'}</span>
+                        </button>
+                        {/* Botón de Historial */}
+                        <button
+                            onClick={onOpenHistory}
+                            className="flex items-center gap-2 bg-[#2D283E] hover:bg-[#8263B1] text-[#F5F5F7] px-3 py-1.5 rounded-md text-xs font-semibold transition-colors shadow-sm"
+                            title="Ver historial de citas"
+                        >
+                            <CalendarClock size={14} className="text-[#A1E3D8]" />
+                            <span>Citas: {appointmentsCount || 0}</span>
+                        </button>
+                    </div>
                 </div>
+                {/* Toast de resultado */}
+                {reminderMsg && (
+                    <div className={`px-4 py-2 text-xs font-medium text-center ${reminderMsg.ok ? 'bg-[#A1E3D8]/15 text-[#A1E3D8]' : 'bg-red-500/15 text-red-400'}`}>
+                        {reminderMsg.text}
+                    </div>
+                )}
 
                 {/* Search Bar */}
                 <div className="p-3 border-b border-[#2D283E] bg-[#1E1B26]">

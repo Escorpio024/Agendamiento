@@ -18,6 +18,10 @@ class ReminderService {
         console.log('✅ Servicio de recordatorios iniciado');
     }
 
+    setClient(whatsappClient) {
+        this.client = whatsappClient;
+    }
+
     startScheduler() {
         if (this.isRunning) return;
         // Ejecutar cada hora
