@@ -83,12 +83,7 @@ HORA / PERÍODO DEL DÍA:
 - Hora específica: "a las 2", "las 3 pm", "10am", "2:30" → convertir a HH:MM AM/PM
 - Si no hay hora → null
 
-TIPO DE CITA — acepta variaciones informales:
-- "médico", "médico general", "medicina", "doctor", "consulta", "999" → "medicina general"
-- "odonto", "denti", "dientes", "muela" → "odontología"
-- "niño", "niños", "bebé", "pediátrico" → "pediatría"
-- "especialista", "especialidad", "reuma", "cardio"... → "especialista"
-- Si el contexto del historial ya tiene tipo_cita, puedes usarlo aunque el mensaje no lo repita
+
 
 DOCTOR: nombre del médico si se menciona explícitamente, sino null
 SÍNTOMAS: lista de síntomas mencionados (puede ser vacía [])
@@ -98,7 +93,7 @@ Responde ÚNICAMENTE con este JSON válido, sin texto adicional ni comillas extr
 {
   "fecha": "YYYY-MM-DD",
   "hora": "AM" | "PM" | "HH:MM AM/PM" | null,
-  "tipo_cita": "medicina general" | "odontología" | "pediatría" | "especialista" | null,
+  "tipo_cita": "medicina general",
   "doctor": "string" | null,
   "sintomas": [],
   "urgencia": false

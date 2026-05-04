@@ -702,29 +702,12 @@ client.on('message', async (msg) => {
                     const clean = normalize(message);
 
                     // ═══════════════════════════════════════════════════════════
-                    // STEP: AI_ASKING_TYPE — Pide la especialidad o tipo de cita
+                    // STEP: AI_ASKING_TYPE (REMOVED - always medicina general)
                     // ═══════════════════════════════════════════════════════════
                     if (session.step === 'AI_ASKING_TYPE') {
-                        const entities = await aiService.extractEntities(message, historyStr);
-                        if (entities.tipo_cita) {
-                            session.tipoCita = availabilityService.normalizeTipoCita(entities.tipo_cita);
-                        } else if (clean.includes('general') || clean.includes('normal') || clean.includes('medica') || clean.includes('medico') || clean.includes('revisar')) {
-                            session.tipoCita = 'medicina general';
-                        } else if (clean.includes('examen') || clean.includes('laboratorio')) {
-                            session.tipoCita = 'examenes';
-                        } else if (
-                            // Si solo confirma que quiere cita sin dar especialidad → asumir medicina general
-                            clean.match(/^(si|s[ií]|ok|okay|quiero|si quiero|una cita|la cita|cita medica|una cita medica|quiero una|quiero una cita|necesito una cita|agendarla)$/i) ||
-                            clean.includes('quiero una cita') || clean.includes('si quiero') || clean.includes('si, quiero')
-                        ) {
-                            session.tipoCita = 'medicina general';
-                        } else {
-                            const resp = await aiService.generateNaturalResponse('No entendiste bien para qué especialidad, médico o examen quiere la cita. Pregúntale amablemente si es para medicina general, odontología, especialistas, o qué necesita.', {}, message, historyStr);
-                            await replyFn(resp);
-                            return;
-                        }
-                        if (entities.fecha) session.fechaPreferida = entities.fecha;
-                        if (entities.hora) session.horaPreferida = entities.hora;
+                        // Fallback in case old sessions are stuck here
+                        session.tipoCita = 'medicina general';
+                        session.step = null;
                         await handleAgendarCita(userId, message, session, replyFn, {}, historyStr);
                         return;
                     }
@@ -1109,7 +1092,7 @@ client.on('message', async (msg) => {
                 const intent = extracted.intent;
                 const entities = extracted.entities || {};
 
-                if (entities.tipo_cita) session.tipoCita = availabilityService.normalizeTipoCita(entities.tipo_cita);
+                if (entities.tipo_cita) session.tipoCita = 'medicina general';
                 // Para AGENDAR_CITA en paso WELCOME (inicio fresco), NO setear fechaPreferida desde la
                 // extracción automática de la IA — puede asumir "mañana" aunque el usuario no lo dijo.
                 // La semana de disponibilidad se mostrará primero para que el usuario elija.
@@ -1289,13 +1272,8 @@ client.on('message', async (msg) => {
             if (entities.hora && !session.horaPreferida) session.horaPreferida = entities.hora;
             if (entities.doctor && !session.doctorPreferido) session.doctorPreferido = entities.doctor;
 
-            // Si no tiene tipo de cita, preguntar antes de continuar
-            if (!session.tipoCita) {
-                session.step = 'AI_ASKING_TYPE';
-                const resp = await aiService.generateNaturalResponse('El paciente quiere agendar una cita pero no especificó qué especialidad necesita. Pregúntale amablemente qué tipo de cita está buscando (ej: medicina general, odontología, exámenes, especialista, etc).', {}, message, historyStr);
-                await replyFn(resp);
-                return;
-            }
+            // Forzar siempre Medicina General
+            session.tipoCita = 'medicina general';
 
             if (session.fechaPreferida && session.tipoCita && !isFreshStart) {
                 const isRange = session.isRangeRequest && session.step !== 'AI_SELECT_DAY';

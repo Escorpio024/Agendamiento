@@ -182,7 +182,6 @@ async function contextualQuestion(missingField) {
     } catch (error) {
         const fallbacks = {
             fecha: '¿Para qué día te queda mejor la cita?',
-            tipo_cita: '¿Sería de medicina general, odontología o con un especialista?',
             hora: '¿A qué hora prefieres que busquemos espacio?',
         };
         return fallbacks[missingField] || `¿Me puedes indicar ${missingField}?`;
