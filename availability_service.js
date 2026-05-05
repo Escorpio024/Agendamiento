@@ -379,22 +379,25 @@ async function getAvailableSlots(fechaStr, tipo = 'medicina general', preferredD
         where: { KC3_FCH: dateDecimal }
     });
 
+    // Helper: detecta si KC3_COD está vacío (null, espacios, ceros solos, o 0000...)
+    const esSlotVacio = (cod) => {
+        if (!cod) return true;
+        const t = cod.trim();
+        return t === '' || /^0+$/.test(t);
+    };
+
     // Separar: citas ocupadas (tienen paciente real, no canceladas)
-    // vs. slots vacíos pre-generados por Xenco (KC3_COD null/spaces = disponibles en el Visor de Agenda)
     const citasOcupadas = allCitas.filter(c => {
-        const estadoCancelado = c.KC3_ESTADO && c.KC3_ESTADO.trim() === 'CA';
-        if (estadoCancelado) return false;
-        const tienePaciente = c.KC3_COD && c.KC3_COD.trim() !== '' && c.KC3_COD.trim() !== '0';
-        return tienePaciente;
+        const cancelado = c.KC3_ESTADO && c.KC3_ESTADO.trim() === 'CA';
+        if (cancelado) return false;
+        return !esSlotVacio(c.KC3_COD);
     });
 
     // Slots pre-generados por Xenco para cada doctor (sin paciente = disponibles reales del Visor)
-    // Si Xenco pre-popula KC3, estos son los únicos slots válidos que deben mostrarse
     const slotsVaciosPorDoctor = {}; // { doctorId: Set([h*60+m]) }
     for (const c of allCitas) {
-        const tienePaciente = c.KC3_COD && c.KC3_COD.trim() !== '' && c.KC3_COD.trim() !== '0';
         const cancelado = c.KC3_ESTADO && c.KC3_ESTADO.trim() === 'CA';
-        if (!tienePaciente && !cancelado) {
+        if (esSlotVacio(c.KC3_COD) && !cancelado) {
             const key = String(c.KC3_MEDICO).trim();
             if (!slotsVaciosPorDoctor[key]) slotsVaciosPorDoctor[key] = new Set();
             const tMin = parseInt(c.KC3_HH) * 60 + parseInt(c.KC3_MM);
@@ -664,62 +667,93 @@ async function reserveSlot(fechaStr, hora, userId, tipo = 'medicina general', me
         };
         const contratoInfo = contratoPorEntidad[entidadPac] || { num: '0152-2025', seq: 2 };
 
-        // Obtener el siguiente KC3_NUM disponible (correlativo de Factura)
-        // Se toma el máximo actual + 1 para garantizar unicidad
-        const maxCita = await prisma.cita.findFirst({
-            where: { KC3_NUM: { gt: 0, lt: 2000000000 } },
-            orderBy: { KC3_NUM: 'desc' }
-        });
-        const nextNum = maxCita ? Number(maxCita.KC3_NUM) + 1 : 1000000;
-
-        // Obtener campos nativos según la especialidad del médico (para que Xenco los muestre)
+        // Campos nativos según especialidad
         const espCod = slot.especialidadCod || null;
         const fieldsEsp = getFieldsByEspecialidad(espCod);
 
-        // Crear cita en BD con los campos idénticos a los nativos de HABEJICO
-        await prisma.cita.create({
-            data: {
-                KC3_MEDICO:           slot.doctorId,
-                KC3_ZONA:             zonaUsar,
-                KC3_COD:              paciente.KC0_COD,
-                KC3_SEQK:             seqk,
-                KC3_FCH:              dateDecimal,
-                KC3_HH:               hh,
-                KC3_MM:               mm,
-                KC3_ESPECIALISTA:     espCod,
-                KC3_CONSULTORIO:      slot.consultorio || null,
-                KC3_ESTADO:           null,           // null = Asignada (como aparece en el Visor de Agenda)
-                KC3_TIPO:             fieldsEsp.KC3_TIPO,
-                KC3_TIPO_SERVICIO:    fieldsEsp.KC3_TIPO_SERVICIO,
-                KC3_CAUSAL_ATENC:     2,              // Causal: Enfermedad General
-                KC3_CARGART_EPS:      'N',            // N = No carta de autorización
-                KC3_GRUPO_ATENCION:   fieldsEsp.KC3_GRUPO_ATENCION,
-                KC3_C_COSTO:          fieldsEsp.KC3_C_COSTO,
-                KC3_ARTIC:            fieldsEsp.KC3_ARTIC,
-                KC3_OBSERVACION:      `WhatsApp - ${tipo}`.substring(0, 60),
-                KC3_USUARIO:          'BOT',
-                KC3_ENTIDAD:          entidadPac,
-                KC3_ENTIDAD_OLD:      entidadPac,
-                KC3_NUM:              nextNum,        // Número correlativo único para que Xenco lo muestre correctamente
-                KC3_NUM_TURNO:        0,
-                KC3_VALOR:            54600,
-                KC3_GENERADA:         'S',            // 'S' = Generada por sistema → aparece como SI en Xenco
-                KC3_FCH_D:            fchDecimalHoy,
-                KC3_HH_D:             hhSist,
-                KC3_MM_D:             mmSist,
-                KC3_HORA_SIST:        horaSist,
-                KC3_TERMINAL:         'BOT',
-                KC3_ONCOD_NUM_CTA:    0,
-                KC3_NUM_CONTRATO:     contratoInfo.num,   // Contrato según EPS del paciente
-                KC3_SEQ_TME2:         1,
-                KC3_SEQ_CONTRATO:     contratoInfo.seq,   // Secuencia del contrato
-                KC3_COD_PROGRAMA:     0,
+        const citaData = {
+            KC3_ZONA:             zonaUsar,
+            KC3_COD:              paciente.KC0_COD,
+            KC3_SEQK:             seqk,
+            KC3_ESPECIALISTA:     espCod,
+            KC3_ESTADO:           null,
+            KC3_TIPO:             fieldsEsp.KC3_TIPO,
+            KC3_TIPO_SERVICIO:    fieldsEsp.KC3_TIPO_SERVICIO,
+            KC3_CAUSAL_ATENC:     2,
+            KC3_CARGART_EPS:      'N',
+            KC3_GRUPO_ATENCION:   fieldsEsp.KC3_GRUPO_ATENCION,
+            KC3_C_COSTO:          fieldsEsp.KC3_C_COSTO,
+            KC3_ARTIC:            fieldsEsp.KC3_ARTIC,
+            KC3_OBSERVACION:      `WhatsApp - ${tipo}`.substring(0, 60),
+            KC3_USUARIO:          'BOT',
+            KC3_ENTIDAD:          entidadPac,
+            KC3_ENTIDAD_OLD:      entidadPac,
+            KC3_NUM:              0,              // 0 = sin número de factura → Documento muestra solo 'VD'
+            KC3_NUM_TURNO:        0,
+            KC3_VALOR:            54600,
+            KC3_GENERADA:         'S',
+            KC3_FCH_D:            fchDecimalHoy,
+            KC3_HH_D:             hhSist,
+            KC3_MM_D:             mmSist,
+            KC3_HORA_SIST:        horaSist,
+            KC3_TERMINAL:         'BOT',
+            KC3_ONCOD_NUM_CTA:    0,
+            KC3_NUM_CONTRATO:     contratoInfo.num,
+            KC3_SEQ_TME2:         1,
+            KC3_SEQ_CONTRATO:     contratoInfo.seq,
+            KC3_COD_PROGRAMA:     0,
+            KC3_COD_BARRIO:       0,
+            KC3_EDADFIN:          0,
+            KC3_FCH_ANUL:         0
+        };
 
-                KC3_COD_BARRIO:       0,
-                KC3_EDADFIN:          0,
-                KC3_FCH_ANUL:         0
+        // MODO A: Si Xenco tiene un slot pre-generado vacío para esta hora, ACTUALIZARLO
+        // (en lugar de crear un duplicado). Esto garantiza que el Visor de Agenda lo muestre.
+        const slotExistente = await prisma.cita.findFirst({
+            where: {
+                KC3_MEDICO: slot.doctorId,
+                KC3_FCH:    dateDecimal,
+                KC3_HH:     hh,
+                KC3_MM:     mm,
+                OR: [
+                    { KC3_COD: null },
+                    { KC3_COD: '' },
+                    { KC3_COD: { startsWith: '0' } }  // ceros de relleno = vacío
+                ]
             }
         });
+
+        if (slotExistente) {
+            // Actualizar el slot vacío preexistente con los datos del paciente
+            await prisma.cita.updateMany({
+                where: {
+                    KC3_MEDICO: slot.doctorId,
+                    KC3_FCH:    dateDecimal,
+                    KC3_HH:     hh,
+                    KC3_MM:     mm,
+                    OR: [
+                        { KC3_COD: null },
+                        { KC3_COD: '' },
+                        { KC3_COD: { startsWith: '0' } }
+                    ]
+                },
+                data: citaData
+            });
+            console.log(`[HABEJICO] ✅ Slot existente ACTUALIZADO: médico=${slot.doctorId} ${hh}:${mm}`);
+        } else {
+            // MODO B: no hay slot pre-generado, crear uno nuevo
+            await prisma.cita.create({
+                data: {
+                    KC3_MEDICO: slot.doctorId,
+                    KC3_FCH:    dateDecimal,
+                    KC3_HH:     hh,
+                    KC3_MM:     mm,
+                    KC3_CONSULTORIO: slot.consultorio || null,
+                    ...citaData
+                }
+            });
+            console.log(`[HABEJICO] ✅ Nueva cita CREADA: médico=${slot.doctorId} ${hh}:${mm}`);
+        }
 
         console.log(`✅ Cita confirmada en BD: médico=${slot.doctorId} fecha=${dateDecimal} hora=${hh}:${mm} entidad=${entidadPac} zona=${zonaUsar}`);
         return true;
