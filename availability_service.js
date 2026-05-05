@@ -708,40 +708,36 @@ async function reserveSlot(fechaStr, hora, userId, tipo = 'medicina general', me
         };
 
         // MODO A: Si Xenco tiene un slot pre-generado vacío para esta hora, ACTUALIZARLO
-        // (en lugar de crear un duplicado). Esto garantiza que el Visor de Agenda lo muestre.
+        // Se busca cualquier registro existente y se verifica en JS con esSlotVacio()
+        // para evitar falsos positivos de SQL con códigos que empiecen por 0.
+        const esSlotVacioFn = (cod) => {
+            if (!cod) return true;
+            const t = String(cod).trim();
+            return t === '' || /^0+$/.test(t);
+        };
+
         const slotExistente = await prisma.cita.findFirst({
             where: {
                 KC3_MEDICO: slot.doctorId,
                 KC3_FCH:    dateDecimal,
                 KC3_HH:     hh,
-                KC3_MM:     mm,
-                OR: [
-                    { KC3_COD: null },
-                    { KC3_COD: '' },
-                    { KC3_COD: { startsWith: '0' } }  // ceros de relleno = vacío
-                ]
+                KC3_MM:     mm
             }
         });
 
-        if (slotExistente) {
+        const debeActualizar = slotExistente && esSlotVacioFn(slotExistente.KC3_COD);
+
+        if (debeActualizar) {
             // Actualizar el slot vacío preexistente con los datos del paciente
-            await prisma.cita.updateMany({
-                where: {
-                    KC3_MEDICO: slot.doctorId,
-                    KC3_FCH:    dateDecimal,
-                    KC3_HH:     hh,
-                    KC3_MM:     mm,
-                    OR: [
-                        { KC3_COD: null },
-                        { KC3_COD: '' },
-                        { KC3_COD: { startsWith: '0' } }
-                    ]
-                },
-                data: citaData
-            });
-            console.log(`[HABEJICO] ✅ Slot existente ACTUALIZADO: médico=${slot.doctorId} ${hh}:${mm}`);
+            // Usamos el KC3_COD exacto encontrado como clave para no afectar otros registros
+            const whereUpdate = slotExistente.KC3_COD == null
+                ? { KC3_MEDICO: slot.doctorId, KC3_FCH: dateDecimal, KC3_HH: hh, KC3_MM: mm, KC3_COD: null }
+                : { KC3_MEDICO: slot.doctorId, KC3_FCH: dateDecimal, KC3_HH: hh, KC3_MM: mm, KC3_COD: slotExistente.KC3_COD };
+
+            await prisma.cita.updateMany({ where: whereUpdate, data: citaData });
+            console.log(`[HABEJICO] ✅ Slot ACTUALIZADO (KC3_COD era: "${slotExistente.KC3_COD}"): médico=${slot.doctorId} ${hh}:${mm}`);
         } else {
-            // MODO B: no hay slot pre-generado, crear uno nuevo
+            // MODO B: no hay slot pre-generado vacío, crear uno nuevo
             await prisma.cita.create({
                 data: {
                     KC3_MEDICO: slot.doctorId,
