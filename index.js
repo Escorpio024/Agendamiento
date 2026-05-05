@@ -103,11 +103,12 @@ client.on('ready', async () => {
 client.on('message_create', async (msg) => {
     if (msg.fromMe) {
         const chat = await msg.getChat();
+        const chatId = chat.id._serialized;
         let mediaUrl = null;
         if (msg.hasMedia) {
             mediaUrl = await mediaHandler.saveMedia(msg);
         }
-        await chatService.saveMessage(chat.id._serialized, {
+        const saved = await chatService.saveMessage(chatId, {
             id: msg.id._serialized,
             body: msg.body,
             fromMe: true,
@@ -115,8 +116,10 @@ client.on('message_create', async (msg) => {
             mediaUrl: mediaUrl,
             timestamp: new Date(msg.timestamp * 1000)
         });
-        server.emitMessage({
-            conversationId: chat.id._serialized,
+        // Emitir el objeto completo guardado en BD (incluye el id para deduplicación en el frontend)
+        server.emitMessage(saved || {
+            id: msg.id._serialized,
+            conversationId: chatId,
             fromMe: true,
             body: msg.body,
             mediaUrl: mediaUrl,
@@ -124,6 +127,7 @@ client.on('message_create', async (msg) => {
         });
     }
 });
+
 
 const processedMessages = new Set();
 // Lock por sender para evitar race conditions (doble confirmación de cita)

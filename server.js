@@ -9,6 +9,7 @@ const path = require('path');
 const fs = require('fs');
 const botPrisma = require('./dbBot');
 
+
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
@@ -92,22 +93,45 @@ app.post('/api/messages/send', upload.single('file'), async (req, res) => {
         }
 
         let sentMsg;
+        let mediaUrl = null;
         if (file) {
             const media = MessageMedia.fromFilePath(file.path);
             sentMsg = await whatsappClient.sendMessage(conversationId, media, { caption: text });
-            // Cleanup file if needed, or keep for history? keeping for history.
+            mediaUrl = `/media/${path.basename(file.path)}`;
         } else if (text) {
             sentMsg = await whatsappClient.sendMessage(conversationId, text);
         } else {
             return res.status(400).json({ error: 'Message or file required' });
         }
 
-        // Save to DB
-        // Note: whatsapp-web.js 'message_create' event usually triggers for own messages too,
-        // but to be safe and fast for UI, we can return the structure.
-        // The actual DB save might happen in the event listener in index.js to avoid duplicates.
+        // Save to DB immediately so the UI reflects the sent message in real-time.
+        // The 'message_create' event in index.js will try to upsert and skip the duplicate.
+        const msgId = sentMsg.id._serialized;
+        const timestamp = new Date();
+        let savedMsg;
+        try {
+            savedMsg = await botPrisma.message.upsert({
+                where: { id: msgId },
+                update: {},
+                create: {
+                    id: msgId,
+                    conversationId: conversationId,
+                    fromMe: true,
+                    body: text || '',
+                    type: file ? 'image' : 'chat',
+                    mediaUrl: mediaUrl,
+                    timestamp: timestamp
+                }
+            });
+        } catch (dbErr) {
+            console.warn('[Send] Could not save sent message to DB:', dbErr.message);
+            savedMsg = { id: msgId, conversationId, fromMe: true, body: text || '', timestamp };
+        }
 
-        res.json({ success: true, id: sentMsg.id._serialized });
+        // Emit the sent message to all connected frontend clients in real-time
+        io.emit('new_message', savedMsg);
+
+        res.json({ success: true, id: msgId });
 
     } catch (error) {
         console.error('Send Error:', error);

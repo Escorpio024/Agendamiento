@@ -28,8 +28,8 @@ export function useChat() {
     useEffect(() => {
         if (!socket) return;
 
-        socket.on('new_message', (msg) => {
-            // Update messages if active chat
+        socket.on('new_message', async (msg) => {
+            // 1. Si la conversación está activa, agregar el mensaje al hilo visible
             if (activeConversationId === msg.conversationId) {
                 setMessages((prev) => {
                     if (prev.some(m => m.id === msg.id)) return prev;
@@ -37,21 +37,30 @@ export function useChat() {
                 });
             }
 
-            // Update conversation list preview / unread
+            // 2. Actualizar la vista previa en el sidebar
             setConversations((prev) => {
                 const index = prev.findIndex(c => c.id === msg.conversationId);
-                if (index === -1) return prev; // Or fetch new conversation
+
+                if (index === -1) {
+                    // Conversación desconocida → solicitar lista actualizada al servidor
+                    axios.get(`${API_URL}/conversations`)
+                        .then(res => setConversations(res.data))
+                        .catch(() => {});
+                    return prev;
+                }
 
                 const updated = [...prev];
                 const conv = { ...updated[index] };
                 conv.lastMessageAt = msg.timestamp;
-                conv.messages = [msg]; // Start preview
+                conv.messages = [msg];
+                // Incrementar no leídos solo si el mensaje es entrante y la conv no está activa
                 if (activeConversationId !== msg.conversationId && !msg.fromMe) {
-                    conv.unreadCount += 1;
+                    conv.unreadCount = (conv.unreadCount || 0) + 1;
                 }
 
+                // Mover la conversación al tope de la lista
                 updated.splice(index, 1);
-                updated.unshift(conv); // Move to top
+                updated.unshift(conv);
                 return updated;
             });
         });
@@ -78,9 +87,17 @@ export function useChat() {
         };
     }, [socket, activeConversationId]);
 
-    // Load Conversations
+    // Load Conversations (re-fetch on filter change)
     useEffect(() => {
         fetchConversations();
+    }, [filter]);
+
+    // Polling de respaldo cada 30 segundos para no perder mensajes por fallos de socket
+    useEffect(() => {
+        const interval = setInterval(() => {
+            fetchConversations();
+        }, 30000);
+        return () => clearInterval(interval);
     }, [filter]);
 
     // Load Appointments Count
@@ -115,7 +132,7 @@ export function useChat() {
                 const res = await axios.get(`${API_URL}/conversations/${activeConversationId}/messages`);
                 setMessages(res.data);
 
-                // Mark as read locally (could call API)
+                // Marcar como leídos localmente
                 setConversations(prev =>
                     prev.map(c => c.id === activeConversationId ? { ...c, unreadCount: 0 } : c)
                 );
@@ -125,24 +142,15 @@ export function useChat() {
         };
 
         fetchMessages();
+
+        // Polling de mensajes cada 5 segundos mientras la conversación está activa
+        // Esto garantiza que nunca se pierda un mensaje aunque el socket falle
+        const pollInterval = setInterval(fetchMessages, 5000);
+        return () => clearInterval(pollInterval);
     }, [activeConversationId]);
 
     const sendMessage = async (text, file) => {
         if (!activeConversationId) return;
-
-        // Optimistic update
-        const tempId = Date.now().toString();
-        /*
-        const tempMsg = {
-            id: tempId,
-            conversationId: activeConversationId,
-            fromMe: true,
-            body: text || (file ? '[Archivo]' : ''),
-            timestamp: new Date().toISOString(),
-            pending: true
-        };
-        setMessages(prev => [...prev, tempMsg]);
-        */
 
         const formData = new FormData();
         formData.append('conversationId', activeConversationId);
@@ -153,6 +161,7 @@ export function useChat() {
             await axios.post(`${API_URL}/messages/send`, formData, {
                 headers: { 'Content-Type': 'multipart/form-data' }
             });
+            // El mensaje llegará via socket 'new_message' emitido por el servidor
         } catch (err) {
             console.error("Failed to send", err);
         }
