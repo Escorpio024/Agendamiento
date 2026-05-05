@@ -1096,6 +1096,30 @@ client.on('message', async (msg) => {
                 const intent = extracted.intent;
                 const entities = extracted.entities || {};
 
+                // Tipos de servicio NO disponibles via bot (solo Medicina General)
+                const SERVICIOS_NO_DISPONIBLES = [
+                    'odont', 'dental', 'dent', 'carie', 'muela',
+                    'examen', 'laboratorio', 'lab ', 'sangre', 'orina', 'rayos', 'radiogr', 'ecograf', 'imagen',
+                    'pediat', 'gineC', 'ginec', 'gineco',
+                    'cardio', 'ortop', 'dermat', 'nutri', 'psico', 'psiqui',
+                    'urgencia', 'emergencia',
+                    'vacun', 'inyecc',
+                    'ciruj', 'operat'
+                ];
+                const tipoRaw = (entities.tipo_cita || '').toLowerCase();
+                const msgLower = message.toLowerCase();
+                const esServicioNoDisponible = tipoRaw && SERVICIOS_NO_DISPONIBLES.some(k => tipoRaw.includes(k))
+                    || SERVICIOS_NO_DISPONIBLES.some(k => msgLower.includes(k));
+
+                if (esServicioNoDisponible) {
+                    await replyFn(
+                        `Lo siento 😔, en este momento el agente de citas solo está disponible para *Medicina General*.\n\n` +
+                        `Para otros servicios (odontología, exámenes, laboratorios, especialidades, etc.) debes comunicarte directamente con la institución o acercarte a nuestras instalaciones.\n\n` +
+                        `¿Te puedo ayudar a agendar una cita de *Medicina General*? 🩺`
+                    );
+                    return;
+                }
+
                 if (entities.tipo_cita) session.tipoCita = 'medicina general';
                 // Para AGENDAR_CITA en paso WELCOME (inicio fresco), NO setear fechaPreferida desde la
                 // extracción automática de la IA — puede asumir "mañana" aunque el usuario no lo dijo.
@@ -1275,6 +1299,22 @@ client.on('message', async (msg) => {
             if (entities.fecha && !session.fechaPreferida && !isFreshStart) session.fechaPreferida = entities.fecha;
             if (entities.hora && !session.horaPreferida) session.horaPreferida = entities.hora;
             if (entities.doctor && !session.doctorPreferido) session.doctorPreferido = entities.doctor;
+
+            // Validar que el servicio solicitado sea Medicina General
+            // Si el mensaje menciona otro servicio, rechazar educadamente
+            const KEYWORDS_NO_DISPONIBLES = [
+                'odont', 'dental', 'dent', 'examen', 'laboratorio', 'sangre', 'orina',
+                'rayos', 'radiogr', 'ecograf', 'pediat', 'ginec', 'cardio', 'ortop',
+                'dermat', 'nutri', 'psico', 'psiqui', 'vacun', 'inyecc', 'ciruj'
+            ];
+            const msgCheck = message.toLowerCase();
+            if (KEYWORDS_NO_DISPONIBLES.some(k => msgCheck.includes(k))) {
+                await replyFn(
+                    `Lo siento 😔, en este momento solo puedo agendar citas de *Medicina General*.\n\n` +
+                    `Para otros servicios, por favor comunícate directamente con la institución. ¿Te agendo una cita de Medicina General? 🩺`
+                );
+                return;
+            }
 
             // Forzar siempre Medicina General
             session.tipoCita = 'medicina general';
