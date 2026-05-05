@@ -1601,7 +1601,7 @@ client.on('message', async (msg) => {
                         doctorName: userData.doctorNameSeleccionado,
                         appointmentDate: userData.fechaPreferida,
                         appointmentTime: userData.horaSeleccionada,
-                        serviceType: String(userData.tipoCita),
+                        serviceType: nombreServicio,  // usar el nombre legible ya calculado arriba
                         whatsappId: userId
                     }
                 });

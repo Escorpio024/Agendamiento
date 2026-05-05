@@ -21,12 +21,27 @@ function AppointmentsModal({ onClose }) {
     const [sendingId, setSendingId] = useState(null);
     const [toast, setToast] = useState(null);
 
-    useEffect(() => {
+    const loadAppointments = useCallback(() => {
+        setLoading(true);
         fetch(`${API_BASE}/api/appointments`)
             .then(r => r.json())
             .then(data => { setAppointments(data); setLoading(false); })
             .catch(() => setLoading(false));
     }, []);
+
+    useEffect(() => {
+        loadAppointments();
+    }, [loadAppointments]);
+
+    // Escuchar evento de nueva cita via Socket para auto-refrescar
+    useEffect(() => {
+        const { io } = require('socket.io-client');
+        const SERVER_HOST = typeof window !== 'undefined' && window.location.hostname !== 'localhost'
+            ? window.location.hostname : 'localhost';
+        const socket = io(`http://${SERVER_HOST}:3001`);
+        socket.on('new_appointment', () => loadAppointments());
+        return () => socket.disconnect();
+    }, [loadAppointments]);
 
     const fmt = (dateStr) => {
         if (!dateStr) return '—';
@@ -62,16 +77,32 @@ function AppointmentsModal({ onClose }) {
                         <div>
                             <h2 className="text-[#F5F5F7] font-semibold text-base">Citas Agendadas</h2>
                             <p className="text-[11px] text-[#A1E3D8]/70 mt-0.5">
-                                {loading ? 'Cargando...' : `${appointments.length} cita${appointments.length !== 1 ? 's' : ''} registrada${appointments.length !== 1 ? 's' : ''}`}
+                                {loading ? 'Actualizando...' : `${appointments.length} cita${appointments.length !== 1 ? 's' : ''} registrada${appointments.length !== 1 ? 's' : ''}`}
                             </p>
                         </div>
                     </div>
-                    <button
-                        onClick={onClose}
-                        className="w-8 h-8 rounded-full flex items-center justify-center text-[#F5F5F7]/60 hover:text-[#F5F5F7] hover:bg-[#2D283E] transition-colors"
-                    >
-                        <X size={18} />
-                    </button>
+                    <div className="flex items-center gap-2">
+                        {/* Botón recargar manualmente */}
+                        <button
+                            onClick={loadAppointments}
+                            disabled={loading}
+                            title="Recargar citas"
+                            className="w-8 h-8 rounded-full flex items-center justify-center text-[#A1E3D8]/60 hover:text-[#A1E3D8] hover:bg-[#2D283E] transition-colors disabled:opacity-40"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={loading ? 'animate-spin' : ''}>
+                                <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+                                <path d="M3 3v5h5"/>
+                                <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/>
+                                <path d="M16 21h5v-5"/>
+                            </svg>
+                        </button>
+                        <button
+                            onClick={onClose}
+                            className="w-8 h-8 rounded-full flex items-center justify-center text-[#F5F5F7]/60 hover:text-[#F5F5F7] hover:bg-[#2D283E] transition-colors"
+                        >
+                            <X size={18} />
+                        </button>
+                    </div>
                 </div>
 
                 {/* Stats bar */}
