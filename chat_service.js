@@ -8,29 +8,32 @@ class ChatService {
      * @param {string} name - Contact name
      */
     async getOrCreateConversation(phone, name) {
-        let conversation = await botPrisma.conversation.findUnique({
-            where: { id: phone }
-        });
+        try {
+            let conversation = await botPrisma.conversation.findUnique({
+                where: { id: phone }
+            });
 
-        if (!conversation) {
-            conversation = await botPrisma.conversation.create({
-                data: {
-                    id: phone,
-                    name: name || phone,
-                    status: 'bot',
-                    unreadCount: 0,
-                    lastMessageAt: new Date()
-                }
-            });
-        } else if (name && conversation.name !== name) {
-            // Update name if changed
-            conversation = await botPrisma.conversation.update({
-                where: { id: phone },
-                data: { name }
-            });
+            if (!conversation) {
+                conversation = await botPrisma.conversation.create({
+                    data: {
+                        id: phone,
+                        name: name || phone,
+                        status: 'bot',
+                        unreadCount: 0,
+                        lastMessageAt: new Date()
+                    }
+                });
+            } else if (name && conversation.name !== name) {
+                conversation = await botPrisma.conversation.update({
+                    where: { id: phone },
+                    data: { name }
+                });
+            }
+            return conversation;
+        } catch (e) {
+            console.error('[DB] SQLite error en getOrCreateConversation. Fallback a memoria.', e.message);
+            return { id: phone, name: name || phone, status: 'bot', unreadCount: 0, lastMessageAt: new Date() };
         }
-
-        return conversation;
     }
 
     /**
@@ -39,60 +42,64 @@ class ChatService {
      * @param {object} messageData - Message details
      */
     async saveMessage(phone, messageData) {
-        // messageData: { id, body, fromMe, type, timestamp, mediaUrl? }
+        try {
+            const conversation = await this.getOrCreateConversation(phone, messageData.senderName);
 
-        // Ensure conversation exists
-        const conversation = await this.getOrCreateConversation(phone, messageData.senderName);
-
-        // Upsert message
-        const message = await botPrisma.message.upsert({
-            where: { id: messageData.id },
-            update: {
-                mediaUrl: messageData.mediaUrl,
-            },
-            create: {
-                id: messageData.id,
-                conversationId: phone,
-                fromMe: messageData.fromMe,
-                body: messageData.body,
-                type: messageData.type || 'chat',
-                mediaUrl: messageData.mediaUrl,
-                timestamp: messageData.timestamp || new Date()
-            }
-        });
-
-        // Update conversation last message local
-        if (new Date(messageData.timestamp) > new Date(conversation.lastMessageAt)) {
-            await botPrisma.conversation.update({
-                where: { id: phone },
-                data: {
-                    lastMessageAt: messageData.timestamp,
-                    unreadCount: messageData.fromMe ? conversation.unreadCount : conversation.unreadCount + 1
+            const message = await botPrisma.message.upsert({
+                where: { id: messageData.id },
+                update: { mediaUrl: messageData.mediaUrl },
+                create: {
+                    id: messageData.id,
+                    conversationId: phone,
+                    fromMe: messageData.fromMe,
+                    body: messageData.body,
+                    type: messageData.type || 'chat',
+                    mediaUrl: messageData.mediaUrl,
+                    timestamp: messageData.timestamp || new Date()
                 }
             });
-        }
 
-        return message;
+            if (new Date(messageData.timestamp) > new Date(conversation.lastMessageAt)) {
+                await botPrisma.conversation.update({
+                    where: { id: phone },
+                    data: {
+                        lastMessageAt: messageData.timestamp,
+                        unreadCount: messageData.fromMe ? conversation.unreadCount : conversation.unreadCount + 1
+                    }
+                });
+            }
+            return message;
+        } catch (e) {
+            console.error('[DB] SQLite error en saveMessage. Ignorando.', e.message);
+            return messageData; // Fallback
+        }
     }
 
     /**
      * Update conversation status (Local SQLite)
      */
     async updateStatus(phone, status) {
-        return botPrisma.conversation.update({
-            where: { id: phone },
-            data: { status }
-        });
+        try {
+            return await botPrisma.conversation.update({
+                where: { id: phone },
+                data: { status }
+            });
+        } catch (e) {
+            console.error('[DB] SQLite error en updateStatus:', e.message);
+            return null;
+        }
     }
 
-    /**
-     * Check if a conversation is in Human Mode (Local SQLite)
-     */
     async isHumanMode(phone) {
-        const conversation = await botPrisma.conversation.findUnique({
-            where: { id: phone }
-        });
-        return conversation && conversation.status !== 'bot';
+        try {
+            const conversation = await botPrisma.conversation.findUnique({
+                where: { id: phone }
+            });
+            return conversation && conversation.status !== 'bot';
+        } catch (e) {
+            console.error('[DB] SQLite error en isHumanMode. Forzando modo bot:', e.message);
+            return false;
+        }
     }
 
     /**
