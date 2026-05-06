@@ -1177,13 +1177,13 @@ client.on('message', async (msg) => {
                 }
                 case 'SALUDO': {
                     const saludoMsg = await aiService.generateNaturalResponse(
-                        `El paciente ${session.name} saludó. Responde cálidamente.`, { nombre: session.name }, message, historyStr);
-                    await replyFn(saludoMsg);
+                        `El paciente ${session.name} saludó. Responde cálidamente de forma muy corta.`, { nombre: session.name }, message, historyStr);
+                    await replyFn(saludoMsg + "\n\n¿Te gustaría agendar, cancelar o consultar una cita médica hoy?");
                     break;
                 }
                 case 'INFO_GENERAL': {
                     const infoMsg = await aiService.generateNaturalResponse('El usuario pide información general sobre la clínica. Explica brevemente.', {}, message, historyStr);
-                    await replyFn(infoMsg);
+                    await replyFn(infoMsg + "\n\n¿Deseas que te ayude a agendar una cita de Medicina General?");
                     break;
                 }
                 case 'CONSULTAR_DATOS': {
@@ -1206,11 +1206,11 @@ client.on('message', async (msg) => {
                 }
                 default: {
                     const defaultMsg = await aiService.generateNaturalResponse(
-                        `Responde a la pregunta del paciente usando la información que tengas disponible. Si pregunta por sus datos personales, dáselos. Nombre: ${session.name}, Cédula: ${session.cedula}, Celular: ${session.phone}. Si la pregunta no tiene sentido, pregunta amablemente qué necesita.`,
+                        `Responde a la pregunta del paciente de forma corta. Si pregunta por sus datos personales, dáselos. Nombre: ${session.name}, Cédula: ${session.cedula}, Celular: ${session.phone}.`,
                         { nombre: session.name, cedula: session.cedula, celular: session.phone },
                         message, historyStr
                     );
-                    await replyFn(defaultMsg);
+                    await replyFn(defaultMsg + "\n\nSi necesitas agendar una cita médica, solo escríbeme *'quiero una cita'*.");
                 }
             } // termins switch
         } // termina routeIntent
