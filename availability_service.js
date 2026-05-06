@@ -499,8 +499,9 @@ async function getAvailableSlots(fechaStr, tipo = 'medicina general', preferredD
             const endMin = f.hf * 60 + f.mf;
             while (t + dur <= endMin) { slotsFragma.push(t); t += dur; }
 
-            // Si el doctor tiene KC3 para esta fecha, detectar huecos de 2+ slots consecutivos
-            // (esos son slots eliminados del Visor de Agenda — almuerzo o pausa del doctor)
+            // Si el doctor tiene KC3 para esta fecha, detectar huecos en MEDIO del horario
+            // Un hueco "eliminado" es: 2+ slots SIN KC3 que tienen citas ANTES y DESPUÉS
+            // Los huecos al FINAL del horario son simplemente slots sin reservar → NO eliminar
             const esHuecoEliminado = new Set();
             if (doctorTieneKC3) {
                 let racha = [];
@@ -508,10 +509,14 @@ async function getAvailableSlots(fechaStr, tipo = 'medicina general', preferredD
                     if (!kc3Times.has(st)) {
                         racha.push(st);
                     } else {
-                        racha = []; // reset al encontrar un slot con registro en KC3
+                        // Hay registro KC3 DESPUÉS del hueco → el hueco es intermedio (almuerzo/pausa)
+                        if (racha.length >= 2) {
+                            racha.forEach(s => esHuecoEliminado.add(s));
+                        }
+                        racha = []; // reset
                     }
-                    if (racha.length >= 2) racha.forEach(s => esHuecoEliminado.add(s));
                 }
+                // Los slots de racha al final NO se marcan (son disponibles sin reservar)
             }
 
             for (const totalMin of slotsFragma) {
