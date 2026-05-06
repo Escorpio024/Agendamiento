@@ -1,6 +1,74 @@
 const prisma = require('./db');
 
 // =========================================
+// CACHE EN MEMORIA (datos semi-estáticos)
+// Las CITAS nunca se cachean — siempre tiempo real
+// =========================================
+const _cache = {
+    turnos:       null, turnosExpiry:       0,
+    medicos:      null, medicosExpiry:      0,
+    especialidades: {}
+};
+const TTL_TURNOS  = 3  * 60 * 1000; // 3 min  — turnos cambian diario
+const TTL_MEDICOS = 30 * 60 * 1000; // 30 min — nombres/estado raramente cambian
+const TTL_ESP     = 60 * 60 * 1000; // 60 min — especialidades muy estáticas
+
+/** Devuelve todos los turnos activos/futuros (sin filtro de fecha), cacheados 3 min */
+async function _getTurnosCache() {
+    const now = Date.now();
+    if (_cache.turnos && now < _cache.turnosExpiry) return _cache.turnos;
+    const todayDec = dateToDecimal(new Date());
+    _cache.turnos = await prisma.turnoMedico.findMany({
+        where: { OR: [{ TME_FCH_FIN: { gte: todayDec } }, { TME_FCH_FIN: null }] },
+        orderBy: { TME_FCH: 'desc' }
+    });
+    _cache.turnosExpiry = now + TTL_TURNOS;
+    console.log(`[CACHE] Turnos: ${_cache.turnos.length} registros cargados`);
+    return _cache.turnos;
+}
+
+/** Devuelve todos los médicos activos, cacheados 30 min */
+async function _getMedicosCache() {
+    const now = Date.now();
+    if (_cache.medicos && now < _cache.medicosExpiry) return _cache.medicos;
+    _cache.medicos = await prisma.medico.findMany({ where: { MED_EST_ESTADO: 'A' } });
+    _cache.medicosExpiry = now + TTL_MEDICOS;
+    console.log(`[CACHE] Médicos: ${_cache.medicos.length} activos cargados`);
+    return _cache.medicos;
+}
+
+/** Devuelve especialidad por espCod/tipo, cacheada 60 min */
+async function _getEspecialidadCache(espCod, tipo) {
+    const key = espCod || tipo || '_';
+    const now = Date.now();
+    if (_cache.especialidades[key] && now < _cache.especialidades[key].exp) {
+        return _cache.especialidades[key].val;
+    }
+    let esp = null;
+    if (espCod) {
+        esp = await prisma.especialidad.findFirst({ where: { ESP_COD: espCod } });
+        if (!esp && !/^\d+$/.test(tipo || '')) {
+            esp = await prisma.especialidad.findFirst({ where: { ESP_NOMBRE: { contains: String(tipo).toUpperCase() } } });
+        }
+    }
+    _cache.especialidades[key] = { val: esp, exp: now + TTL_ESP };
+    return esp;
+}
+
+/** Retry automático para errores P1001 (hasta 2 reintentos, 600ms de espera) */
+async function _withRetry(fn, label = '') {
+    for (let i = 0; i < 3; i++) {
+        try { return await fn(); }
+        catch (err) {
+            if (err.code === 'P1001' && i < 2) {
+                console.warn(`[DB] P1001 en ${label}, reintento ${i + 1}/2...`);
+                await new Promise(r => setTimeout(r, 600));
+            } else throw err;
+        }
+    }
+}
+
+// =========================================
 // UTILIDADES DE FECHA HABEJICO
 // Dates stored as Decimal YYYYMMDD
 // =========================================
@@ -311,40 +379,19 @@ async function getAvailableSlots(fechaStr, tipo = 'medicina general', preferredD
     const dateStr = parseRelativeDate(fechaStr);
     const dateDecimal = dateToDecimal(new Date(dateStr + 'T12:00:00'));
 
-    // 1. Buscar especialidad por código directo o nombre
+    // 1. Especialidad — cacheada 60 min (muy estática)
     const espCod = normalizeTipoCita(tipo);
-    let especialidad = null;
-    if (espCod) {
-        // Buscar primero por código exacto (más confiable)
-        especialidad = await prisma.especialidad.findFirst({ where: { ESP_COD: espCod } });
-        if (!especialidad && !/^\d+$/.test(tipo)) {
-            especialidad = await prisma.especialidad.findFirst({
-                where: { ESP_NOMBRE: { contains: String(tipo).toUpperCase() } }
-            });
-        }
-    }
+    const especialidad = await _getEspecialidadCache(espCod, tipo);
 
-    // 2. Buscar turnos activos para la fecha
-    const whereClause = {
-        AND: [
-            { TME_FCH: { lte: dateDecimal } },
-            {
-                OR: [
-                    { TME_FCH_FIN: { gte: dateDecimal } },
-                    { TME_FCH_FIN: null }
-                ]
-            }
-        ]
-    };
-    if (especialidad) whereClause.TME_ESPECIALIDAD = especialidad.ESP_COD;
-
-    const turnosRaw = await prisma.turnoMedico.findMany({
-        where: whereClause,
-        orderBy: { TME_FCH: 'desc' } // Más reciente primero
-    });
+    // 2. Turnos activos — cacheados 3 min, filtrados en JS por fecha
+    const allTurnosCache = await _getTurnosCache();
+    const turnosRaw = allTurnosCache.filter(t =>
+        t.TME_FCH <= dateDecimal &&
+        (!t.TME_FCH_FIN || t.TME_FCH_FIN >= dateDecimal) &&
+        (!especialidad || t.TME_ESPECIALIDAD == especialidad.ESP_COD)
+    );
 
     // Deduplicar: por cada doctor, quedarse solo con el turno MÁS RECIENTE
-    // (evita que registros históricos/viejos generen slots incorrectos)
     const turnosPorDoctor = {};
     for (const t of turnosRaw) {
         const key = String(t.TME_CODM);
@@ -352,19 +399,14 @@ async function getAvailableSlots(fechaStr, tipo = 'medicina general', preferredD
     }
     const turnos = Object.values(turnosPorDoctor);
 
-    console.log(`[TURNOS] Fecha=${dateDecimal} tipo=${tipo}: ${turnosRaw.length} registros -> ${turnos.length} únicos por doctor`);
-    if (!turnos.length) {
-        console.error(`[HABEJICO] getAvailableSlots: 0 turnos encontrados para fecha=${dateDecimal}, espCod=${espCod}, tipo=${tipo}`);
-        return [];
-    }
+    if (!turnos.length) return [];
 
-    // 3. Info médicos
-    const medicoCodes = [...new Set(turnos.map(t => Number(t.TME_CODM)))];
-    const medicos = await prisma.medico.findMany({
-        where: { MED_COD: { in: medicoCodes }, MED_EST_ESTADO: 'A' }
-    });
+    // 3. Médicos — cacheados 30 min, filtrados en JS
+    const allMedicos = await _getMedicosCache();
+    const medicoCodes = new Set(turnos.map(t => Number(t.TME_CODM)));
     const medicoMap = {};
-    medicos.forEach(m => { medicoMap[Number(m.MED_COD)] = m; });
+    allMedicos.filter(m => medicoCodes.has(Number(m.MED_COD)))
+              .forEach(m => { medicoMap[Number(m.MED_COD)] = m; });
 
     // 4. Filtrar por doctor preferido
     let filteredTurnos = turnos;
@@ -415,17 +457,9 @@ async function getAvailableSlots(fechaStr, tipo = 'medicina general', preferredD
         const dur = Number(turno.TME_DUR_CITA) || 20;
         const doctorKey = String(turno.TME_CODM).trim();
 
-        // ── DIAGNÓSTICO ── Log completo del turno para detectar slots incorrectos
+        // Log compacto (sin spam por doctor)
         const citasOcupadasDoctor = citasOcupadas.filter(c => String(c.KC3_MEDICO).trim() === doctorKey);
         const todasCitasDoctor = allCitas.filter(c => String(c.KC3_MEDICO).trim() === doctorKey);
-        console.log(`[DIAG] Dr.${medico.MED_NOMBRE?.trim()} (${doctorKey})`);
-        console.log(`       TME_HH_I=${turno.TME_HH_I}:${turno.TME_MM_I||0}→${turno.TME_HH_F}:${turno.TME_MM_F||0} (mañana) ActM=${turno.TME_ACTIVIDAD_M}`);
-        console.log(`       TME_HH_I_A=${turno.TME_HH_I_A}:${turno.TME_MM_I_A||0}→${turno.TME_HH_F_A}:${turno.TME_MM_F_A||0} (tarde) ActT=${turno.TME_ACTIVIDAD_T}`);
-        console.log(`       KC3 total para fecha: ${todasCitasDoctor.length} | Con paciente: ${citasOcupadasDoctor.length} | Sin paciente: ${todasCitasDoctor.length - citasOcupadasDoctor.length}`);
-        if (citasOcupadasDoctor.length > 0) {
-            const horasOcupadas = citasOcupadasDoctor.map(c => `${parseInt(c.KC3_HH)}:${String(parseInt(c.KC3_MM)).padStart(2,'0')}`).join(', ');
-            console.log(`       Horas ocupadas en KC3: ${horasOcupadas}`);
-        }
 
         // ── MODO A: Xenco tiene slots pre-generados en KC3 para este doctor ──
         // Usar esos como fuente de verdad (slots vacíos = disponibles en el Visor de Agenda)
@@ -900,35 +934,39 @@ async function cancelAppointment(appointmentId) {
 
 const DAY_NAMES_ES = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 
-// Escanea hasta maxScanDays días calendario desde startDateStr y devuelve
-// hasta maxResults días que tengan disponibilidad real.
-async function getWeekAvailability(startDateStr, tipo = 'medicina general', doctor = null, maxResults = 7, maxScanDays = 365) {
+// Escanea hasta maxScanDays días en paralelo (lotes de 3) y devuelve
+// hasta maxResults días con disponibilidad real. Las CITAS siempre en tiempo real.
+async function getWeekAvailability(startDateStr, tipo = 'medicina general', doctor = null, maxResults = 7, maxScanDays = 45) {
     const results = [];
+    const BATCH = 3; // 3 días en paralelo — seguro con connectionLimit=10
     try {
-        for (let i = 0; i < maxScanDays && results.length < maxResults; i++) {
-            const d = new Date(startDateStr + 'T12:00:00');
-            d.setDate(d.getDate() + i);
-            const dateStr = toLocalDateStr(d);
-            let slots = [];
-            try {
-                slots = await getAvailableSlots(dateStr, tipo, doctor);
-            } catch (innerErr) {
-                if (innerErr.code === 'P1001') {
-                    console.error(`[DB] Sin conexión al buscar slots para ${dateStr}. Abortando escaneo.`);
-                    break; // Detener el bucle, no seguir con más queries fallidas
+        for (let i = 0; i < maxScanDays && results.length < maxResults; i += BATCH) {
+            // Construir lote de fechas
+            const batch = [];
+            for (let j = i; j < Math.min(i + BATCH, maxScanDays); j++) {
+                const d = new Date(startDateStr + 'T12:00:00');
+                d.setDate(d.getDate() + j);
+                batch.push({ dateStr: toLocalDateStr(d), dayName: DAY_NAMES_ES[d.getDay()] });
+            }
+            // Ejecutar lote en paralelo con retry automático
+            const batchRes = await Promise.all(batch.map(async ({ dateStr, dayName }) => {
+                try {
+                    const slots = await _withRetry(() => getAvailableSlots(dateStr, tipo, doctor), `slots(${dateStr})`);
+                    if (slots.length) return { date: dateStr, dayName, slotCount: slots.length, firstSlot: slots[0].time, lastSlot: slots[slots.length - 1].time };
+                    return null;
+                } catch (err) {
+                    if (err.code === 'P1001') { console.error(`[DB] P1001 persistente en ${dateStr}, abortando.`); return 'ABORT'; }
+                    console.error(`[DB] Error slots(${dateStr}):`, err.message);
+                    return null;
                 }
-                console.error(`[DB] Error en getAvailableSlots(${dateStr}):`, innerErr.message);
-                continue;
+            }));
+
+            let abort = false;
+            for (const r of batchRes) {
+                if (r === 'ABORT') { abort = true; break; }
+                if (r && results.length < maxResults) results.push(r);
             }
-            if (slots.length) {
-                results.push({
-                    date: dateStr,
-                    dayName: DAY_NAMES_ES[d.getDay()],
-                    slotCount: slots.length,
-                    firstSlot: slots[0].time,
-                    lastSlot: slots[slots.length - 1].time
-                });
-            }
+            if (abort) break;
         }
     } catch (err) {
         console.error('[DB] Error crítico en getWeekAvailability:', err.message);
@@ -936,24 +974,31 @@ async function getWeekAvailability(startDateStr, tipo = 'medicina general', doct
     return results;
 }
 
-// Busca hasta 365 días calendario hacia adelante el primer día con disponibilidad.
+// Busca el primer día con disponibilidad, en lotes de 3 en paralelo.
 async function getNextAvailableSlots(startDateStr, tipo, doctor) {
-    const d = new Date(startDateStr + 'T12:00:00');
+    const BATCH = 3;
+    const MAX = 60;
     try {
-        for (let i = 0; i < 365; i++) {
-            d.setDate(d.getDate() + 1);
-            const dateStr = toLocalDateStr(d);
-            let slots = [];
-            try {
-                slots = await getAvailableSlots(dateStr, tipo, doctor);
-            } catch (innerErr) {
-                if (innerErr.code === 'P1001') {
-                    console.error('[DB] Sin conexión al buscar próximos slots. Abortando.');
+        for (let i = 1; i <= MAX; i += BATCH) {
+            const batch = [];
+            for (let j = i; j < Math.min(i + BATCH, MAX + 1); j++) {
+                const d = new Date(startDateStr + 'T12:00:00');
+                d.setDate(d.getDate() + j);
+                batch.push(toLocalDateStr(d));
+            }
+            const results = await Promise.all(batch.map(async dateStr => {
+                try {
+                    const slots = await _withRetry(() => getAvailableSlots(dateStr, tipo, doctor), `next(${dateStr})`);
+                    return slots.length ? { date: dateStr, slots } : null;
+                } catch (err) {
+                    if (err.code === 'P1001') return 'ABORT';
                     return null;
                 }
-                continue;
+            }));
+            for (const r of results) {
+                if (r === 'ABORT') return null;
+                if (r) return r;
             }
-            if (slots.length) return { date: dateStr, slots };
         }
     } catch (err) {
         console.error('[DB] Error crítico en getNextAvailableSlots:', err.message);
