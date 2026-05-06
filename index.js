@@ -733,8 +733,7 @@ client.on('message', async (msg) => {
                         if (session.fechaPreferida) {
                             await handleAgendarCita(userId, message, session, replyFn, {}, historyStr);
                         } else {
-                            const resp = await aiService.generateNaturalResponse('No entendiste la fecha. Pregúntale para qué día quiere la cita. Ejemplos: mañana, el viernes, esta semana.', {}, message, historyStr);
-                            await replyFn(resp);
+                            await replyFn('No logré entender la fecha. Por favor, dime para qué día de la semana o fecha exacta quieres tu cita (ejemplo: "mañana", "el próximo viernes" o "25 de octubre").');
                         }
                         return;
                     }
@@ -766,8 +765,7 @@ client.on('message', async (msg) => {
                         else {
                             session.step = 'AI_ASKING_DATE';
                             session.suggestedDate = null;
-                            const resp = await aiService.generateNaturalResponse('El paciente no quiso la cita en la fecha que le sugeriste. Pregúntale para qué día o semana diferente quiere buscar disponibilidad.', {}, message, historyStr);
-                            await replyFn(resp);
+                            await replyFn('Entendido. Por favor, dime para qué otra fecha, día de la semana o mes te gustaría buscar disponibilidad.');
                         }
                         return;
                     }
@@ -843,11 +841,9 @@ client.on('message', async (msg) => {
 
                             const fechaBonita = formatDateNatural(session.fechaPreferida);
                             const phoneClean = cleanPhone(session.phone);
-                            const promptMsg = phoneClean 
-                                ? `El usuario seleccionó las ${selectedSlot.time}. Dile EXACTAMENTE esto y no inventes nada: "Perfecto, agendaré tu cita con ${selectedSlot.doctorName} el ${fechaBonita} a las ${selectedSlot.time}. ¿Confirmas que tu número de contacto es ${phoneClean} o prefieres otro?"`
-                                : `El usuario seleccionó las ${selectedSlot.time}. Dile EXACTAMENTE esto y no inventes nada: "Perfecto, agendaré tu cita con ${selectedSlot.doctorName} el ${fechaBonita} a las ${selectedSlot.time}. Para confirmar, por favor dime tu número de celular (10 dígitos)."`;
-
-                            const confirmMsg = await aiService.generateNaturalResponse(promptMsg, {}, message, historyStr);
+                            const confirmMsg = phoneClean
+                                ? `¡Perfecto! Agendaré tu cita con ${selectedSlot.doctorName} el ${fechaBonita} a las ${selectedSlot.time}.\n\nPara terminar, ¿me confirmas que tu número de contacto es *${phoneClean}*? (Responde SÍ o escribe un número diferente)`
+                                : `¡Perfecto! Agendaré tu cita con ${selectedSlot.doctorName} el ${fechaBonita} a las ${selectedSlot.time}.\n\nPara terminar, por favor escribe tu número de celular (10 dígitos).`;
                             await replyFn(confirmMsg);
                         } else if (clean.includes('tarde') || clean.includes('noche')) {
                             session.horaPreferida = 'PM';
@@ -894,11 +890,9 @@ client.on('message', async (msg) => {
                                 await finalizarCita(userId, digits);
                             } else if (clean.includes('otro') || clean === 'no' || clean === 'b') {
                                 session.step = 'AI_ENTER_PHONE';
-                                const resp = await aiService.generateNaturalResponse('El usuario quiere dar otro número. Pídele el número de celular (10 dígitos).', {}, message, historyStr);
-                                await replyFn(resp);
+                                await replyFn('Entendido. Por favor, escribe tu número de celular de 10 dígitos.');
                             } else {
-                                const resp = await aiService.generateNaturalResponse(`No entendiste la respuesta. Pregúntale si confirma el número ${phoneClean} o si prefiere otro.`, {}, message, historyStr);
-                                await replyFn(resp);
+                                await replyFn(`No logré entenderte. ¿Confirmas que tu número es *${phoneClean}*? (Responde SÍ, o escribe el número correcto de 10 dígitos)`);
                             }
                         }
                         return;
@@ -924,11 +918,7 @@ client.on('message', async (msg) => {
                         if (wantsNewFlow) {
                             clearSessionData(session, userId);
                             // Redirigir al flujo de agendamiento desde cero
-                            const resp = await aiService.generateNaturalResponse(
-                                `El paciente ${session.name || 'Paciente'} quiere agendar una nueva cita. Pregúntale qué tipo de cita necesita.`,
-                                { nombre: session.name }, message, historyStr
-                            );
-                            await replyFn(resp);
+                            await replyFn(`¡Claro! Empecemos de nuevo. ¿Para qué fecha, día de la semana o mes te gustaría agendar tu cita de Medicina General?`);
                             return;
                         }
 
@@ -1015,14 +1005,13 @@ client.on('message', async (msg) => {
                                 session.appointmentToCancel = session.userAppointments[selectedIndex];
                                 const success = await availabilityService.cancelAppointment(session.appointmentToCancel.id);
                                 if (success) {
-                                    const resp = await aiService.generateNaturalResponse(`La cita de ${session.appointmentToCancel.tipo} fue cancelada exitosamente. Confírmale al usuario.`, {}, message, historyStr);
-                                    await replyFn(resp);
+                                    await replyFn(`✅ ¡Listo! Tu cita de *${session.appointmentToCancel.tipo}* ha sido cancelada exitosamente. Si necesitas algo más, aquí estaré.`);
                                 } else {
                                     await replyFn('Hubo un error al cancelar. Por favor intenta de nuevo.');
                                 }
                                 resetAppointmentSession(session);
                             } else if (clean.match(/no|cancelar|salir/)) {
-                                const resp = await aiService.generateNaturalResponse('El usuario decidió no cancelar ninguna cita. Confirma que todo sigue igual.', {}, message, historyStr);
+                                const resp = 'Entendido, no cancelaremos ninguna cita. Todo sigue igual. ¿Hay algo más en lo que pueda ayudarte?';
                                 await replyFn(resp);
                                 resetAppointmentSession(session);
                             } else {
@@ -1036,16 +1025,14 @@ client.on('message', async (msg) => {
                             if (session.appointmentToCancel) {
                                 const success = await availabilityService.cancelAppointment(session.appointmentToCancel.id);
                                 if (success) {
-                                    const resp = await aiService.generateNaturalResponse(`La cita de ${session.appointmentToCancel.tipo} fue cancelada exitosamente. Confírmale al usuario.`, {}, message, historyStr);
-                                    await replyFn(resp);
+                                    await replyFn(`✅ ¡Listo! Tu cita de *${session.appointmentToCancel.tipo}* ha sido cancelada exitosamente. Si necesitas algo más, avísame.`);
                                 } else {
                                     await replyFn('Hubo un error al cancelar. Por favor intenta de nuevo.');
                                 }
                                 resetAppointmentSession(session);
                             }
                         } else {
-                            const resp = await aiService.generateNaturalResponse('El usuario decidió mantener su cita. Confirma que la cita sigue en pie.', {}, message, historyStr);
-                            await replyFn(resp);
+                            await replyFn('Entendido, tu cita sigue en pie y no la cancelaré. ¡Te esperamos!');
                             resetAppointmentSession(session);
                         }
                         return;
@@ -1066,15 +1053,13 @@ client.on('message', async (msg) => {
                                 session.userAppointments = null;
                                 session.appointmentToCancel = null;
                                 session.step = 'AI_ASKING_DATE';
-                                const resp = await aiService.generateNaturalResponse(`La cita anterior fue cancelada. Ahora pregúntale para qué día quiere la nueva cita.`, {}, message, historyStr);
-                                await replyFn(resp);
+                                await replyFn(`✅ ¡Listo! Tu cita anterior ha sido cancelada para que podamos buscar una nueva.\n\n¿Para qué fecha, día de la semana o mes te gustaría agendar tu nueva cita?`);
                             } else {
                                 await replyFn('Hubo un error. Intenta de nuevo.');
                                 resetAppointmentSession(session);
                             }
                         } else if (clean.match(/no|cancelar|salir/)) {
-                            const resp = await aiService.generateNaturalResponse('El usuario decidió no modificar ninguna cita. Confirma que todo sigue igual.', {}, message, historyStr);
-                            await replyFn(resp);
+                            await replyFn('Entendido, no modificaremos tu cita. Todo sigue igual. ¿Puedo ayudarte en algo más?');
                             resetAppointmentSession(session);
                         } else {
                             await replyFn('No entendí. Escribe el número de la cita que quieres cambiar o "no" para salir.');
