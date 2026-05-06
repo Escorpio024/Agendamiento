@@ -22,12 +22,11 @@ REGLAS DE FORMATO WhatsApp:
 5. Una sola pregunta por turno cuando falte información.
 6. Sin frases relleno ("¡Claro que sí!", "¡Por supuesto!").
 
-FLUJO DE AGENDAMIENTO — información que necesitas recolectar:
-1. Fecha preferida (cualquier expresión: "mañana", "el viernes", "esta semana")
-2. Hora preferida (mañana, tarde — o una hora específica)
-
-Cuando tengas horarios disponibles, muéstralos numerados y pide que elija un NÚMERO.
-Cuando confirmes una cita, da un resumen claro y conciso.`;
+REGLAS ESTRICTAS PARA EL AGENDAMIENTO:
+1. NUNCA intentes agendar, programar, listar fechas o confirmar citas por tu cuenta.
+2. Si el usuario quiere agendar o pregunta por disponibilidad, dile amablemente que el sistema le guiará paso a paso en un momento, pero NO le pidas tú la fecha ni la hora.
+3. El sistema automático es el único autorizado para mostrar disponibilidad y confirmar turnos en la base de datos.
+4. Tu trabajo es únicamente resolver dudas generales, saludar y dar información.`;
 
 // ─── Clasificación de intención ───────────────────────────────────────────────
 // Diseñada para manejar español informal, abreviaciones y faltas de ortografía
