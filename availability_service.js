@@ -715,7 +715,7 @@ async function reserveSlot(fechaStr, hora, userId, tipo = 'medicina general', me
             KC3_COD:              paciente.KC0_COD,
             KC3_SEQK:             seqk,
             KC3_ESPECIALISTA:     espCod,
-            KC3_ESTADO:           null,
+            KC3_ESTADO:           '01',
             KC3_TIPO:             fieldsEsp.KC3_TIPO,
             KC3_TIPO_SERVICIO:    fieldsEsp.KC3_TIPO_SERVICIO,
             KC3_CAUSAL_ATENC:     2,
@@ -767,16 +767,29 @@ async function reserveSlot(fechaStr, hora, userId, tipo = 'medicina general', me
         const debeActualizar = slotExistente && esSlotVacioFn(slotExistente.KC3_COD);
 
         if (debeActualizar) {
-            // Actualizar el slot vacío preexistente con los datos del paciente
-            // Usamos el KC3_COD exacto encontrado como clave para no afectar otros registros
             const whereUpdate = slotExistente.KC3_COD == null
                 ? { KC3_MEDICO: slot.doctorId, KC3_FCH: dateDecimal, KC3_HH: hh, KC3_MM: mm, KC3_COD: null }
                 : { KC3_MEDICO: slot.doctorId, KC3_FCH: dateDecimal, KC3_HH: hh, KC3_MM: mm, KC3_COD: slotExistente.KC3_COD };
 
-            await prisma.cita.updateMany({ where: whereUpdate, data: citaData });
-            console.log(`[HABEJICO] ✅ Slot ACTUALIZADO (KC3_COD era: "${slotExistente.KC3_COD}"): médico=${slot.doctorId} ${hh}:${mm}`);
+            const updateResult = await prisma.cita.updateMany({ where: whereUpdate, data: citaData });
+            
+            if (updateResult.count > 0) {
+                console.log(`[HABEJICO] ✅ Slot ACTUALIZADO (KC3_COD era: "${slotExistente.KC3_COD}"): médico=${slot.doctorId} ${hh}:${mm}`);
+            } else {
+                console.log(`[HABEJICO] ⚠️ updateMany no afectó filas. Forzando creación...`);
+                await prisma.cita.create({
+                    data: {
+                        KC3_MEDICO: slot.doctorId,
+                        KC3_FCH:    dateDecimal,
+                        KC3_HH:     hh,
+                        KC3_MM:     mm,
+                        KC3_CONSULTORIO: slot.consultorio || null,
+                        ...citaData
+                    }
+                });
+                console.log(`[HABEJICO] ✅ Nueva cita CREADA (fallback): médico=${slot.doctorId} ${hh}:${mm}`);
+            }
         } else {
-            // MODO B: no hay slot pre-generado vacío, crear uno nuevo
             await prisma.cita.create({
                 data: {
                     KC3_MEDICO: slot.doctorId,
