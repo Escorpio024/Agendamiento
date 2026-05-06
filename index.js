@@ -1137,8 +1137,13 @@ client.on('message', async (msg) => {
                 await routeIntent(userId, message, intent, entities, session, replyFn, historyStr);
 
             } catch (error) {
-                console.error('[IA] Error procesando:', error);
-                await replyFn('Lo siento, tuve un pequeño problema técnico. ¿Me repites qué necesitas? 😊');
+                if (error.code === 'P1001') {
+                    console.error('[DB] ❌ Sin conexión a SQL Server (P1001):', error.message);
+                    await replyFn('⚠️ En este momento no puedo acceder al sistema de citas porque el servidor de la clínica no está disponible. Por favor intenta en unos minutos o comunícate directamente con la clínica. 🏥');
+                } else {
+                    console.error('[IA] Error procesando:', error);
+                    await replyFn('Lo siento, tuve un pequeño problema técnico. ¿Me repites qué necesitas? 😊');
+                }
             }
         }
 

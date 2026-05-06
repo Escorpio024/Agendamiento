@@ -904,20 +904,34 @@ const DAY_NAMES_ES = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Vie
 // hasta maxResults días que tengan disponibilidad real.
 async function getWeekAvailability(startDateStr, tipo = 'medicina general', doctor = null, maxResults = 7, maxScanDays = 365) {
     const results = [];
-    for (let i = 0; i < maxScanDays && results.length < maxResults; i++) {
-        const d = new Date(startDateStr + 'T12:00:00');
-        d.setDate(d.getDate() + i);
-        const dateStr = toLocalDateStr(d);
-        const slots = await getAvailableSlots(dateStr, tipo, doctor);
-        if (slots.length) {
-            results.push({
-                date: dateStr,
-                dayName: DAY_NAMES_ES[d.getDay()],
-                slotCount: slots.length,
-                firstSlot: slots[0].time,
-                lastSlot: slots[slots.length - 1].time
-            });
+    try {
+        for (let i = 0; i < maxScanDays && results.length < maxResults; i++) {
+            const d = new Date(startDateStr + 'T12:00:00');
+            d.setDate(d.getDate() + i);
+            const dateStr = toLocalDateStr(d);
+            let slots = [];
+            try {
+                slots = await getAvailableSlots(dateStr, tipo, doctor);
+            } catch (innerErr) {
+                if (innerErr.code === 'P1001') {
+                    console.error(`[DB] Sin conexión al buscar slots para ${dateStr}. Abortando escaneo.`);
+                    break; // Detener el bucle, no seguir con más queries fallidas
+                }
+                console.error(`[DB] Error en getAvailableSlots(${dateStr}):`, innerErr.message);
+                continue;
+            }
+            if (slots.length) {
+                results.push({
+                    date: dateStr,
+                    dayName: DAY_NAMES_ES[d.getDay()],
+                    slotCount: slots.length,
+                    firstSlot: slots[0].time,
+                    lastSlot: slots[slots.length - 1].time
+                });
+            }
         }
+    } catch (err) {
+        console.error('[DB] Error crítico en getWeekAvailability:', err.message);
     }
     return results;
 }
@@ -925,11 +939,24 @@ async function getWeekAvailability(startDateStr, tipo = 'medicina general', doct
 // Busca hasta 365 días calendario hacia adelante el primer día con disponibilidad.
 async function getNextAvailableSlots(startDateStr, tipo, doctor) {
     const d = new Date(startDateStr + 'T12:00:00');
-    for (let i = 0; i < 365; i++) {
-        d.setDate(d.getDate() + 1);
-        const dateStr = toLocalDateStr(d);
-        const slots = await getAvailableSlots(dateStr, tipo, doctor);
-        if (slots.length) return { date: dateStr, slots };
+    try {
+        for (let i = 0; i < 365; i++) {
+            d.setDate(d.getDate() + 1);
+            const dateStr = toLocalDateStr(d);
+            let slots = [];
+            try {
+                slots = await getAvailableSlots(dateStr, tipo, doctor);
+            } catch (innerErr) {
+                if (innerErr.code === 'P1001') {
+                    console.error('[DB] Sin conexión al buscar próximos slots. Abortando.');
+                    return null;
+                }
+                continue;
+            }
+            if (slots.length) return { date: dateStr, slots };
+        }
+    } catch (err) {
+        console.error('[DB] Error crítico en getNextAvailableSlots:', err.message);
     }
     return null;
 }
