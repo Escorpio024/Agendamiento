@@ -63,12 +63,22 @@ const activeSessions = new Map();
 
 // --- LIMPIEZA DE SESIONES INACTIVAS ---
 // Revisa cada 2 minutos y borra sesiones sin actividad en los últimos 10 minutos
-setInterval(() => {
+setInterval(async () => {
     const now = Date.now();
     const TIMEOUT_MS = 10 * 60 * 1000; // 10 minutos
     for (const [sender, session] of activeSessions.entries()) {
         if (session.lastActivity && (now - session.lastActivity > TIMEOUT_MS)) {
             console.log(`[SESSION] 🧹 Limpiando sesión inactiva por más de 10 min: ${sender}`);
+            
+            // Avisar al paciente solo si dejó el flujo de citas a medias
+            if (session.step && session.step !== 'WELCOME') {
+                try {
+                    await client.sendMessage(sender, "⚠️ Por tu seguridad, he cerrado esta sesión por inactividad ya que pasaron más de 10 minutos.\n\nSi deseas continuar agendando tu cita, por favor escríbeme de nuevo.");
+                } catch (error) {
+                    console.error('[SESSION] Error enviando mensaje de expiración:', error.message);
+                }
+            }
+            
             activeSessions.delete(sender);
         }
     }
