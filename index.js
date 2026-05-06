@@ -1429,26 +1429,18 @@ client.on('message', async (msg) => {
                             return `${i + 1}) 📅 *${d.dayName} ${dayNum} de ${mesNom}* — ${d.slotCount} horario${d.slotCount > 1 ? 's' : ''} disponible${d.slotCount > 1 ? 's' : ''} (${d.firstSlot} – ${d.lastSlot})`;
                         }).join('\n');
 
-                        const introMsg = await aiService.generateNaturalResponse(
-                            `El paciente quiere una cita pero no especificó el día. Dile amablemente que estos son los días disponibles y que elija un número de la lista.`,
-                            {}, message, historyStr
-                        );
+                        const introMsg = `¡Claro que sí! Tengo los siguientes días disponibles para tu cita.`;
                         await replyFn(`${introMsg}\n\n${dayList}\n\n¿Cuál día te queda mejor? Escribe el *número* de tu preferencia.`);
                     } else {
                         // El primer día con slots existe pero getWeekAvailability no devolvió nada (raro), fallback
                         session.step = 'AI_SUGGEST_NEXT_DATE';
                         session.suggestedDate = firstAvail.date;
                         const fechaBonita = formatDateNatural(firstAvail.date);
-                        const resp = await aiService.generateNaturalResponse(
-                            `El paciente quiere una cita. La primera disponibilidad que tienes es el ${fechaBonita}. Ofrécele ese día y pregúntale si quiere ver los horarios o prefiere otra fecha.`,
-                            {}, message, historyStr
-                        );
-                        await replyFn(resp);
+                        await replyFn(`La primera disponibilidad que tengo es el *${fechaBonita}*.\n\n¿Deseas ver los horarios de ese día, o prefieres buscar en otra fecha?`);
                     }
                 } else {
                     session.step = 'AI_ASKING_DATE';
-                    const resp = await aiService.generateNaturalResponse('El paciente quiere una cita de Medicina General pero no tienes ninguna fecha próxima disponible cargada. Pregúntale amablemente para qué día, mes o semana la desea.', {}, message, historyStr);
-                    await replyFn(resp);
+                    await replyFn('¡Claro que sí! ¿Para qué fecha, día de la semana o mes te gustaría agendar tu cita de Medicina General?');
                 }
             }
         }
