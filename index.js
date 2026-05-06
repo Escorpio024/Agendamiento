@@ -61,6 +61,19 @@ const client = new Client({
 // SESIÓN ACTIVA (RAM)
 const activeSessions = new Map();
 
+// --- LIMPIEZA DE SESIONES INACTIVAS ---
+// Revisa cada 2 minutos y borra sesiones sin actividad en los últimos 10 minutos
+setInterval(() => {
+    const now = Date.now();
+    const TIMEOUT_MS = 10 * 60 * 1000; // 10 minutos
+    for (const [sender, session] of activeSessions.entries()) {
+        if (session.lastActivity && (now - session.lastActivity > TIMEOUT_MS)) {
+            console.log(`[SESSION] 🧹 Limpiando sesión inactiva por más de 10 min: ${sender}`);
+            activeSessions.delete(sender);
+        }
+    }
+}, 2 * 60 * 1000);
+
 // Helper para limpiar el estado de la sesión y dejarla lista para nuevas solicitudes
 function clearSessionData(session, sender) {
     // Restaurar datos del dueño original si se había cambiado a un tercero
@@ -290,7 +303,8 @@ client.on('message', async (msg) => {
                     entidad: paciente.KC0_ENTIDAD || null,
                     history: [],
                     doctorPreferido: null,
-                    doctorIdSeleccionado: null
+                    doctorIdSeleccionado: null,
+                    lastActivity: Date.now()
                 });
                 const welcomeMsg = await aiService.generateNaturalResponse(
                     `El paciente ${nombre} regresa. Salúdalo cálidamente y pregunta en qué puedes ayudar.`,
@@ -299,13 +313,17 @@ client.on('message', async (msg) => {
                 await reply(welcomeMsg);
             } else {
                 // Paciente no encontrado por teléfono → pedir cédula primero
-                activeSessions.set(sender, { step: 'REGISTER_CEDULA', mode: 'STRUCTURED', history: [] });
+                activeSessions.set(sender, { step: 'REGISTER_CEDULA', mode: 'STRUCTURED', history: [], lastActivity: Date.now() });
                 await reply("👋 ¡Hola! Soy *Aurora* 🤖, tu asistente de citas médicas.\n\nPara atenderte, por favor escribe tu número de *Cédula*:");
             }
             return;
         }
 
         const session = activeSessions.get(sender);
+        // Actualizar la última actividad de la sesión
+        if (session) {
+            session.lastActivity = Date.now();
+        }
 
         // Alimentar memoria de corto plazo
         session.history = session.history || [];
