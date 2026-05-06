@@ -37,29 +37,28 @@ class ReminderService {
     async sendReminders() {
         if (!prisma) {
             console.log('[ReminderService] Prisma no disponible, omitiendo recordatorios.');
-            return;
+            return 0;
         }
+        let sent = 0;
         try {
-            // Calcular fecha de mañana en formato decimal YYYYMMDD
             const tomorrow = new Date();
             tomorrow.setDate(tomorrow.getDate() + 1);
             const tomorrowDecimal = dateToDecimal(tomorrow);
 
-            // Buscar citas de mañana en TMCITASUSUARIOS
             const citas = await prisma.cita.findMany({
                 where: {
                     KC3_FCH: tomorrowDecimal,
-                    KC3_ESTADO: { not: 'CA' }  // No canceladas
+                    KC3_ESTADO: { not: 'CA' }
                 }
             });
 
-            console.log(`📅 Encontradas ${citas.length} citas para mañana`);
+            // Filtrar solo citas con paciente real (KC3_COD no vacio)
+            const citasReales = citas.filter(c => c.KC3_COD && c.KC3_COD.trim() !== '' && !/^0+$/.test(c.KC3_COD.trim()));
+            console.log(`📅 Encontradas ${citasReales.length} citas con paciente para mañana (de ${citas.length} total)`);
 
-            for (const cita of citas) {
+            for (const cita of citasReales) {
                 const pacienteId = cita.KC3_COD;
 
-                // 1. Buscar en TMUSUARIOSFACTURACION (Reemplaza TKCLIENTES)
-                // Buscamos tanto por código interno como por documento (OACOD_NUI)
                 let factMatch = await prisma.tMUSUARIOSFACTURACION.findFirst({
                     where: { OR: [{ KC2_COD: pacienteId }, { KC2_OACOD_NUI: pacienteId }] }
                 });
@@ -72,7 +71,6 @@ class ReminderService {
                     nom = `${factMatch.KC2_PNOMBRE || ''} ${factMatch.KC2_PAPELLIDO || ''}`.trim() || factMatch.KC2_NOM_RESP;
                 }
 
-                // 2. Si no se encontró o no tiene teléfono, buscar en TMUSUARIOSASEGURAMIENTO (Paciente)
                 if (!tel) {
                     const asegMatch = await prisma.paciente.findFirst({
                         where: { KC0_COD: pacienteId }
@@ -83,43 +81,34 @@ class ReminderService {
                     }
                 }
 
-                // 3. Si no hay teléfono, no se puede enviar recordatorio
                 if (!tel) {
-                    console.log(`⚠️ Paciente ${pacienteId} sin teléfono registrado en Facturación o Aseguramiento`);
+                    console.log(`⚠️ Paciente ${pacienteId} sin teléfono`);
                     continue;
                 }
 
-                // Objeto simulado para compatibilidad con el resto de la función
-                const paciente = {
-                    KC_TEL1: tel,
-                    KC_NOM: nom
-                };
+                const paciente = { KC_TEL1: tel, KC_NOM: nom };
+                const medico = await prisma.medico.findFirst({ where: { MED_COD: cita.KC3_MEDICO } });
 
-                // Buscar médico
-                const medico = await prisma.medico.findFirst({
-                    where: { MED_COD: cita.KC3_MEDICO }
-                });
-
-                await this.sendReminderMessage(cita, paciente, medico);
-                // Esperar entre mensajes
+                const ok = await this.sendReminderMessage(cita, paciente, medico);
+                if (ok) sent++;
                 await new Promise(r => setTimeout(r, 2000));
             }
 
         } catch (error) {
             console.error('❌ Error enviando recordatorios:', error);
         }
+        return sent;
     }
 
     async sendReminderMessage(cita, paciente, medico) {
         if (!this.client) {
             console.error('❌ Cliente de WhatsApp no inicializado');
-            return;
+            return false;
         }
 
         const rawPhone = paciente.KC_TEL1?.replace(/\D/g, '');
-        if (!rawPhone || rawPhone.length < 10) return;
+        if (!rawPhone || rawPhone.length < 10) return false;
 
-        // Asume prefijo colombiano si son exactamente 10 dígitos (típico en HABEJICO)
         const phone = rawPhone.length === 10 ? `57${rawPhone}` : rawPhone;
 
         const fechaDate = decimalToDate(cita.KC3_FCH);
@@ -133,7 +122,6 @@ class ReminderService {
         const period = hh < 12 ? 'AM' : 'PM';
         const horaFormateada = `${h12}:${String(mm).padStart(2, '0')} ${period}`;
 
-        // Almacenado en TKCLIENTES
         const nombrePaciente = paciente.KC_NOM?.split(' ')[0] || 'Paciente';
         const nombreMedico = medico?.MED_NOMBRE?.trim() || 'tu médico asignado';
         const consultorio = cita.KC3_CONSULTORIO || '';
@@ -141,7 +129,7 @@ class ReminderService {
         const mensaje =
             `🔔 *RECORDATORIO DE CITA MÉDICA*\n\n` +
             `Hola *${nombrePaciente}*,\n\n` +
-            `Te recordamos que tienes una cita programada para *mañana*:\n\n` +
+            `Te recordamos que tienes una cita programada para el *${fechaFormateada}*:\n\n` +
             `📅 *Fecha:* ${fechaFormateada}\n` +
             `🕐 *Hora:* ${horaFormateada}\n` +
             `👨‍⚕️ *Médico:* ${nombreMedico}\n` +
@@ -155,8 +143,10 @@ class ReminderService {
         try {
             await this.client.sendMessage(whatsappId, mensaje);
             console.log(`✅ Recordatorio enviado a ${nombrePaciente} (${phone})`);
+            return true;
         } catch (error) {
             console.error(`❌ Error enviando recordatorio a ${phone}:`, error.message);
+            return false;
         }
     }
 }
