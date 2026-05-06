@@ -818,14 +818,14 @@ client.on('message', async (msg) => {
                             session.isRangeRequest = false;
                             await handleAgendarCita(userId, message, session, replyFn, {}, historyStr);
                         } else {
-                            const dayList = session.diasDisponibles.map((d, i) =>
-                                `${i + 1}) ${d.dayName} ${new Date(d.date + 'T12:00:00').getDate()}`
-                            ).join('\n');
-                            const resp = await aiService.generateNaturalResponse(
-                                'El paciente no eligió un día. IMPORTANTE: NO respondas a otras preguntas ni des información adicional. Solo pídele que elija de la lista con el número.',
-                                { dias: dayList }, message, historyStr
-                            );
-                            await replyFn(resp + '\n\n' + dayList);
+                            const dayList = session.diasDisponibles.map((d, i) => {
+                                const dateObj = new Date(d.date + 'T12:00:00');
+                                const dayNum = dateObj.getDate();
+                                const meses = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+                                const mesNom = meses[dateObj.getMonth()];
+                                return `${i + 1}) 📅 *${d.dayName} ${dayNum} de ${mesNom}* — ${d.slotCount} horario${d.slotCount > 1 ? 's' : ''} disponible${d.slotCount > 1 ? 's' : ''} (${d.firstSlot} – ${d.lastSlot})`;
+                            }).join('\n');
+                            await replyFn(`No logré entender qué día elegiste. Por favor, escribe únicamente el *NÚMERO* de tu preferencia de esta lista:\n\n${dayList}`);
                         }
                         return;
                     }
@@ -859,15 +859,11 @@ client.on('message', async (msg) => {
                             const slotsText = session.horariosDisponibles.slice(0, 8).map((s, i) => `${i + 1}. ${s.time} — ${s.doctorName}`).join('\n');
                             
                             const userMentionedHour = /\\b([1-9]|1[0-2])\\b/.test(message) || /\\b(a las|las)\\b/.test(message.toLowerCase());
-                            const promptContext = userMentionedHour 
-                                ? 'El usuario intentó elegir una hora que NO está disponible en la lista o está ocupada. Dile amablemente que ese horario no está disponible y que debe elegir un NÚMERO de los horarios enviados previamente.'
-                                : 'El paciente no eligió un horario válido. IMPORTANTE: Solo dile amablemente que para continuar debe elegir un NÚMERO de la lista.';
+                            const resp = userMentionedHour 
+                                ? 'Ese horario no está disponible o no logré entenderlo. Por favor, escribe únicamente el *NÚMERO* de una de las siguientes opciones:'
+                                : 'Por favor, escribe únicamente el *NÚMERO* de la opción que prefieres para poder agendar tu cita:';
                                 
-                            const resp = await aiService.generateNaturalResponse(
-                                promptContext,
-                                {}, message, historyStr
-                            );
-                            await replyFn(resp + '\n\n' + slotsText);
+                            await replyFn(`${resp}\n\n${slotsText}`);
                         }
                         return;
                     }
