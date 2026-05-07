@@ -243,13 +243,18 @@ async function findPaciente(userId) {
         });
         if (byNUI) {
             const internalCod = byNUI.KCN_COD || byNUI.KCN_COD_NUI;
-            // Buscar entidad (EPS) en TMUSUARIOSFACTURACION
+            // Fuente autoritativa de entidad: TMUSUARIOSASEGURAMIENTO (Maestro de Usuarios)
+            const asegParaEntidad = await prisma.paciente.findFirst({ where: { KC0_COD: internalCod } });
+            // Fallback: TMUSUARIOSFACTURACION si no hay dato en aseguramiento
             const factParaEntidad = await prisma.tMUSUARIOSFACTURACION.findFirst({
                 where: { OR: [
                     { KC2_OACOD_NUI: { in: searchTerms } },
                     { KC2_COD: { in: searchTerms } }
                 ] }
             });
+            const entidadFinal = asegParaEntidad?.KC0_ENTIDAD
+                ? Number(asegParaEntidad.KC0_ENTIDAD)
+                : (factParaEntidad?.KC2_EPS_POS ? Number(factParaEntidad.KC2_EPS_POS) : null);
             // Obtener celular real desde TKCLIENTESANEXO5 (campo visible en Xenco)
             const celularAnexo = await getPhoneFromAnexo5(searchTerms);
             const telFact = factParaEntidad?.KC2_TEL_RESP;
@@ -261,7 +266,7 @@ async function findPaciente(userId) {
                 KC0_NOM: byNUI.KCN_NOM,
                 KC0_PNOMBRE: byNUI.KCN_NOM?.split(/[\s,]+/)[0] || 'Paciente',
                 KC0_RES_TEL: realTel,
-                KC0_ENTIDAD: factParaEntidad?.KC2_EPS_POS ? Number(factParaEntidad.KC2_EPS_POS) : null,
+                KC0_ENTIDAD: entidadFinal,
                 email: null,
                 zona: byNUI.KCN_ZONA || factParaEntidad?.KC2_ZONA || '001',
                 cod: internalCod,
@@ -315,8 +320,13 @@ async function findPaciente(userId) {
         if (kc5ByTel?.KC5_RACOD_CLI) {
             // Obtener datos completos del paciente por su código interno
             const codPac = kc5ByTel.KC5_RACOD_CLI.trim();
-            const nuiByCode = await prisma.pacienteNUI.findFirst({ where: { KCN_COD: codPac } });
+            const nuiByCode  = await prisma.pacienteNUI.findFirst({ where: { KCN_COD: codPac } });
             const factByCode = await prisma.tMUSUARIOSFACTURACION.findFirst({ where: { KC2_COD: codPac } });
+            // Fuente autoritativa de entidad: TMUSUARIOSASEGURAMIENTO (Maestro de Usuarios)
+            const asegByCode = await prisma.paciente.findFirst({ where: { KC0_COD: codPac } });
+            const entidadFinal = asegByCode?.KC0_ENTIDAD
+                ? Number(asegByCode.KC0_ENTIDAD)
+                : (factByCode?.KC2_EPS_POS ? Number(factByCode.KC2_EPS_POS) : null);
             const nomComp = nuiByCode?.KCN_NOM
                 || (factByCode ? `${factByCode.KC2_PNOMBRE || ''} ${factByCode.KC2_PAPELLIDO || ''}`.trim() : null)
                 || 'Paciente';
@@ -325,7 +335,7 @@ async function findPaciente(userId) {
                 KC0_NOM: nomComp,
                 KC0_PNOMBRE: nomComp.split(/[\s,]+/)[0] || 'Paciente',
                 KC0_RES_TEL: kc5ByTel.KC5_TEL_CEL.trim(),
-                KC0_ENTIDAD: factByCode?.KC2_EPS_POS ? Number(factByCode.KC2_EPS_POS) : null,
+                KC0_ENTIDAD: entidadFinal,
                 email: null,
                 zona: nuiByCode?.KCN_ZONA || factByCode?.KC2_ZONA || '001',
                 cod: codPac,
