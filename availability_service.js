@@ -712,7 +712,7 @@ async function reserveSlot(fechaStr, hora, userId, tipo = 'medicina general', me
 
         const citaData = {
             KC3_ZONA:             zonaUsar,
-            KC3_COD:              paciente.KC0_COD,
+            KC3_COD:              String(paciente.KC0_COD).trim().padStart(14, '0'),
             KC3_SEQK:             seqk,
             KC3_ESPECIALISTA:     espCod,
             KC3_ESTADO:           null,
@@ -834,6 +834,63 @@ async function reserveSlot(fechaStr, hora, userId, tipo = 'medicina general', me
                 }
             });
             console.log(`[HABEJICO] ✅ Nueva cita CREADA: médico=${slot.doctorId} ${hh}:${mm}`);
+        }
+
+        // ════════════════════════════════════════════════════════════════
+        // CRÍTICO: Actualizar TMTURNOSMEDICOSDETALLE (TME2)
+        // El Visor de Agenda de Xenco lee ESTA tabla para mostrar nombres.
+        // Sin este UPDATE, la cita existe en BD pero el Visor la muestra vacía.
+        // ════════════════════════════════════════════════════════════════
+        const pacCod14 = String(paciente.KC0_COD).trim().padStart(14, '0');
+        const pacZona  = zonaUsar;
+        try {
+            // Intentar UPDATE primero (si Xenco ya generó el slot en TME2)
+            const tme2Updated = await prisma.$executeRaw`
+                UPDATE TMTURNOSMEDICOSDETALLE
+                SET TME2_COD     = ${pacCod14},
+                    TME2_ZONA    = ${pacZona},
+                    TME2_SEQK    = ${''},
+                    TME2_USU     = ${'BOT'},
+                    TME2_FCH_DIG = ${fchDecimalHoy}
+                WHERE TME2_CODM = ${slot.doctorId}
+                  AND TME2_FCH  = ${dateDecimal}
+                  AND TME2_HH   = ${hh}
+                  AND TME2_MM   = ${mm}
+            `;
+
+            if (tme2Updated > 0) {
+                console.log(`[TME2] ✅ TMTURNOSMEDICOSDETALLE actualizado: médico=${slot.doctorId} ${hh}:${mm} → paciente=${pacCod14}`);
+            } else {
+                // No existe fila TME2 — calcular SEQ e insertar nueva fila
+                const tme2CountResult = await prisma.$queryRaw`
+                    SELECT ISNULL(MAX(TME2_SEQ), 0) + 1 as NEXT_SEQ
+                    FROM TMTURNOSMEDICOSDETALLE
+                    WHERE TME2_CODM = ${slot.doctorId}
+                      AND TME2_FCH  = ${dateDecimal}
+                `;
+                const nextSeq = Number(tme2CountResult[0]?.NEXT_SEQ || 1);
+                const espTME2 = slot.especialidadCod ? String(slot.especialidadCod) : '999';
+                const consulTME2 = slot.consultorio || null;
+
+                await prisma.$executeRaw`
+                    INSERT INTO TMTURNOSMEDICOSDETALLE
+                        (TME2_CODM, TME2_FCH, TME2_SEQ, TME2_HH, TME2_MM,
+                         TME2_ZONA, TME2_COD, TME2_SEQK,
+                         TME2_ACTIVIDAD, TME2_CONSULTORIO,
+                         TME2_EDADFIN, TME2_FCH_DIG, TME2_USU,
+                         TME2_HORA_SIS, TME2_ESPECIALIDAD, TME2_NUM_CITAS_BL)
+                    VALUES
+                        (${slot.doctorId}, ${dateDecimal}, ${nextSeq}, ${hh}, ${mm},
+                         ${pacZona}, ${pacCod14}, ${''},
+                         ${'01'}, ${consulTME2},
+                         ${0}, ${fchDecimalHoy}, ${'BOT'},
+                         ${horaSist}, ${espTME2}, ${0})
+                `;
+                console.log(`[TME2] ✅ TMTURNOSMEDICOSDETALLE INSERTADO (SEQ=${nextSeq}): médico=${slot.doctorId} ${hh}:${mm} → paciente=${pacCod14}`);
+            }
+        } catch (tme2Err) {
+            // No es fatal — la cita ya fue guardada en TMCITASUSUARIOS
+            console.warn(`[TME2] ⚠️ No se pudo actualizar TMTURNOSMEDICOSDETALLE: ${tme2Err.message}`);
         }
 
         console.log(`✅ Cita confirmada en BD: médico=${slot.doctorId} fecha=${dateDecimal} hora=${hh}:${mm} entidad=${entidadPac} zona=${zonaUsar}`);
