@@ -9,6 +9,7 @@
  *  4. Corre UNA vez al día a las 9 AM (no cada hora)
  */
 const prisma = require('./db');
+const botPrisma = require('./dbBot');  // SQLite del bot (conversaciones WhatsApp reales)
 const cron = require('node-cron');
 
 class ReminderService {
@@ -99,6 +100,45 @@ class ReminderService {
         return null;
     }
 
+    /**
+     * Obtener el WhatsApp ID real del paciente.
+     * Prioridad:
+     *   1. Conversación existente en SQLite del bot (WhatsApp ID exacto, soporta @lid)
+     *   2. Teléfono de Xenco formateado como @c.us
+     */
+    async getWhatsAppId(codigoPac) {
+        const rawPhone = await this.getPhoneForPatient(codigoPac);
+        if (!rawPhone) return null;
+
+        // Buscar en SQLite si este número ya habló con el bot
+        // El conversation ID puede ser: 573016404175@c.us  O  199737538044121@lid
+        try {
+            const phone10 = rawPhone.slice(-10);
+            const phone7  = rawPhone.slice(-7);
+            // Buscar conversaciones cuyo ID contenga los últimos 10 o 7 dígitos
+            const convs = await botPrisma.conversation.findMany({
+                where: {
+                    OR: [
+                        { id: { contains: phone10 } },
+                        { id: { contains: phone7  } }
+                    ]
+                },
+                orderBy: { lastMessageAt: 'desc' },
+                take: 1
+            });
+            if (convs.length > 0) {
+                console.log(`[Recordatorios] 📱 WA ID del bot: ${convs[0].id} (paciente ${codigoPac})`);
+                return convs[0].id; // WhatsApp ID real y exacto (puede ser @lid)
+            }
+        } catch (e) {
+            console.warn('[Recordatorios] No se pudo consultar SQLite:', e.message);
+        }
+
+        // Fallback: construir @c.us desde el teléfono de Xenco
+        const phone = rawPhone.length === 10 ? `57${rawPhone}` : rawPhone;
+        return `${phone}@c.us`;
+    }
+
     /** Buscar nombre del paciente */
     async getNombreForPatient(codigoPac) {
         const cod = codigoPac.trim();
@@ -156,9 +196,9 @@ class ReminderService {
                     continue;
                 }
 
-                const telefono = await this.getPhoneForPatient(cod);
-                if (!telefono || telefono.length < 7) {
-                    console.log(`[Recordatorios] ⚠️  Sin teléfono: ${cod}`);
+                const waId = await this.getWhatsAppId(cod);
+                if (!waId) {
+                    console.log(`[Recordatorios] ⚠️  Sin teléfono/WA: ${cod}`);
                     continue;
                 }
 
@@ -167,7 +207,7 @@ class ReminderService {
                     where: { MED_COD: Number(cita.KC3_MEDICO) }
                 }).catch(() => null);
 
-                const ok = await this.sendReminderMessage(cita, nombre, telefono, medico);
+                const ok = await this.sendReminderMessage(cita, nombre, waId, medico);
                 if (ok) {
                     this.sentToday.add(clave); // Marcar como enviado
                     sent++;
@@ -185,14 +225,12 @@ class ReminderService {
         return sent;
     }
 
-    async sendReminderMessage(cita, nombre, telefono, medico) {
+    async sendReminderMessage(cita, nombre, waId, medico) {
         try {
-            const rawPhone = String(telefono).replace(/\D/g, '');
-            if (rawPhone.length < 7) return false;
-
-            // Agregar prefijo Colombia si es número local de 10 dígitos
-            const phone = rawPhone.length === 10 ? `57${rawPhone}` : rawPhone;
-            const whatsappId = `${phone}@c.us`;
+            // waId puede ser: '573016404175@c.us' (Xenco) o '199737538044121@lid' (bot SQLite)
+            if (!waId) return false;
+            // Asegurar que tiene sufijo @...
+            const whatsappId = waId.includes('@') ? waId : `57${waId}@c.us`;
 
             // Formatear fecha
             const fchStr = String(cita.KC3_FCH);
