@@ -719,7 +719,7 @@ async function reserveSlot(fechaStr, hora, userId, tipo = 'medicina general', me
             KC3_TIPO:             fieldsEsp.KC3_TIPO,
             KC3_TIPO_SERVICIO:    fieldsEsp.KC3_TIPO_SERVICIO,
             KC3_CAUSAL_ATENC:     2,
-            KC3_CARGART_EPS:      'N',
+            KC3_CARGART_EPS:      'C',
             KC3_GRUPO_ATENCION:   fieldsEsp.KC3_GRUPO_ATENCION,
             KC3_C_COSTO:          fieldsEsp.KC3_C_COSTO,
             KC3_ARTIC:            fieldsEsp.KC3_ARTIC,
@@ -730,7 +730,7 @@ async function reserveSlot(fechaStr, hora, userId, tipo = 'medicina general', me
             KC3_NUM:              0,              // 0 = sin número de factura → Documento muestra solo 'VD'
             KC3_NUM_TURNO:        0,
             KC3_VALOR:            54600,
-            KC3_GENERADA:         'S',
+            KC3_GENERADA:         'G',
             KC3_FCH_D:            fchDecimalHoy,
             KC3_HH_D:             hhSist,
             KC3_MM_D:             mmSist,
