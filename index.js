@@ -446,17 +446,14 @@ client.on('message', async (msg) => {
             session.ownerZona   = null;
         }
 
-        // --- POST-CONFIRMACIÓN: ¿Agendar otra cita? ---
-        // Este estado se activa brevemente después de confirmar una cita.
-        // Si el usuario dice "no", cerramos amablemente pero seguimos DISPONIBLES.
-        // Si dice cualquier otra cosa (si, hola, quiero, etc.), abrimos el flujo de "para quién".
+        // --- POST-CONFIRMACIÓN: Estado después de confirmar una cita ---
+        // REGLA: Solo reiniciar flujo si el usuario lo pide EXPLÍCITAMENTE.
+        // "gracias", "ok", "listo", "perfecto" → respuesta amable, NO nueva cita.
         if (session.step === 'POST_CONFIRM') {
             const normalize = s => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
             const clean = normalize(text);
-            // Palabras de cierre definitivo
-            const isNo = /\b(no|chao|adios|adiós|hasta luego|ya no|no gracias)\b/.test(clean) && !clean.match(/\b(si|sí|ok|quiero|cita|agendar|otra)\b/);
 
-            // Siempre restaurar datos del dueño si se agendó para un tercero
+            // Restaurar datos del dueño si se agendó para un tercero
             if (session.ownerCedula) {
                 session.name   = session.ownerName;
                 session.cedula = session.ownerCedula;
@@ -466,19 +463,72 @@ client.on('message', async (msg) => {
                 session.ownerName = session.ownerCedula = session.ownerId = session.ownerPhone = session.ownerZona = null;
             }
 
-            if (isNo) {
+            // 1. Solicitud EXPLÍCITA de nueva cita → iniciar flujo
+            const isExplicitNewBooking = /\b(otra cita|nuevo turno|nueva cita|quiero otra|necesito otra|agendar otra|agenda.*tambien|tambien.*agenda|para mi mama|para mi papa|para mi hijo|para mi esposa|para un familiar|para otra persona)\b/.test(clean);
+
+            // 2. Cierre definitivo
+            const isClose = /\b(no|chao|adios|hasta luego|ya no|no gracias|nada mas|eso es todo|bye|gracias chao|gracias adios)\b/.test(clean)
+                            && !clean.match(/\b(si|sí|quiero|cita|otra|nueva)\b/);
+
+            // 3. Agradecimiento / confirmación simple → NO reiniciar
+            const isGratitude = /\b(gracias|muchas gracias|thank|ok|okay|listo|perfecto|vale|de acuerdo|entendido|claro|excelente|genial|super|bacano|chevere|bien|bueno|que bueno|muy bien)\b/.test(clean)
+                                && !isExplicitNewBooking;
+
+            if (isExplicitNewBooking) {
+                // Solicitud explícita → preguntar para quién
+                session.step = 'POST_CONFIRM_WHO';
+                const ownerName = session.name;
+                await reply(
+                    `¡Claro! Con mucho gusto. 😊\n\n¿La nueva cita es para *ti* (${ownerName}) o para otra persona que esté en la clínica?\n\n• *1* → Para mí (${ownerName})\n• *2* → Para otra persona (buscar por cédula)`
+                );
+                return;
+            }
+
+            if (isClose) {
                 clearSessionData(session, sender);
                 await reply('¡Fue un placer atenderte! 😊 Recuerda que puedes escribirme en cualquier momento para agendar una cita.');
                 return;
             }
 
-            // Cualquier otra respuesta (sí, hola, quiero, o cualquier texto) → preguntar para quién
-            session.step = 'POST_CONFIRM_WHO';
-            const ownerName = session.name;
-            await reply(
-                `¡Claro! Con mucho gusto. 😊\n\n¿La nueva cita es para *ti* (${ownerName}) o para otra persona que esté en la clínica?\n\n• *1* → Para mí (${ownerName})\n• *2* → Para otra persona (buscar por cédula)`
-            );
+            if (isGratitude) {
+                // Respuesta educada — preguntar sin presionar
+                session.step = 'POST_CONFIRM_OFFER';
+                await reply('Con mucho gusto 😊\n\n¿Deseas agendar otra cita o puedo dar por finalizada la conversación?');
+                return;
+            }
+
+            // 4. Mensaje ambiguo → no asumir, preguntar educadamente
+            session.step = 'POST_CONFIRM_OFFER';
+            await reply('Claro. ¿Necesitas ayuda con algo más relacionado con tu cita ya agendada, o deseas agendar una nueva?');
             return;
+        }
+
+        // --- POST_CONFIRM_OFFER: Esperando respuesta a "¿deseas otra cita?" ---
+        if (session.step === 'POST_CONFIRM_OFFER') {
+            const normalize = s => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+            const clean = normalize(text);
+
+            // Solicitud explícita de nueva cita
+            const wantsNew = /\b(si|sí|claro|dale|quiero|otra|nueva|agendar|cita|tambien|también)\b/.test(clean)
+                             && !clean.match(/\b(no quiero|no necesito|no gracias)\b/);
+            // Cierre
+            const wantsEnd = /\b(no|ya no|nada|chao|adios|hasta luego|no gracias|bye|finaliza|termina|eso es todo|listo no|no gracias|ya|ya esta)\b/.test(clean)
+                             || clean.trim() === 'no';
+
+            if (wantsEnd || (!wantsNew)) {
+                clearSessionData(session, sender);
+                await reply('Perfecto, muchas gracias por comunicarte. Tu cita ya quedó registrada. ¡Que tengas un excelente día! 😊');
+                return;
+            }
+
+            if (wantsNew) {
+                session.step = 'POST_CONFIRM_WHO';
+                const ownerName = session.name;
+                await reply(
+                    `¡Claro! Con mucho gusto. 😊\n\n¿La nueva cita es para *ti* (${ownerName}) o para otra persona que esté en la clínica?\n\n• *1* → Para mí (${ownerName})\n• *2* → Para otra persona (buscar por cédula)`
+                );
+                return;
+            }
         }
 
         // --- POST_CONFIRM_WHO: ¿Para quién es la nueva cita? ---
