@@ -1,21 +1,29 @@
+/**
+ * SERVICIO DE RECORDATORIOS v2
+ * ─────────────────────────────────────────────────────────────
+ * Fixes aplicados:
+ *  1. Envía solo 1 recordatorio por cita (deduplicación por clave única)
+ *  2. Lee TODAS las citas (bot + Xenco) desde TMCITASUSUARIOS
+ *  3. Busca teléfono desde TKCLIENTESANEXO5 (fuente real de Xenco)
+ *     → fallback a TMUSUARIOSFACTURACION → TMUSUARIOSASEGURAMIENTO
+ *  4. Corre UNA vez al día a las 9 AM (no cada hora)
+ */
 const prisma = require('./db');
 const cron = require('node-cron');
-const { dateToDecimal, decimalToDate } = require('./availability_service');
 
-/**
- * Servicio para enviar recordatorios automáticos de citas
- * Adaptado a tablas reales de HABEJICO
- */
 class ReminderService {
     constructor() {
         this.client = null;
         this.isRunning = false;
+        // Claves de recordatorios ya enviados hoy: "COD-FCH-HH-MM"
+        // Se limpia automáticamente a medianoche
+        this.sentToday = new Set();
     }
 
     init(whatsappClient) {
         this.client = whatsappClient;
         this.startScheduler();
-        console.log('✅ Servicio de recordatorios iniciado');
+        console.log('✅ Servicio de recordatorios v2 iniciado (9 AM, sin duplicados)');
     }
 
     setClient(whatsappClient) {
@@ -24,128 +32,214 @@ class ReminderService {
 
     startScheduler() {
         if (this.isRunning) return;
-        // Ejecutar cada hora
-        cron.schedule('0 * * * *', async () => {
-            console.log('🔔 Verificando recordatorios pendientes...');
+
+        // ── Enviar recordatorios UNA VEZ al día a las 9:00 AM ──
+        cron.schedule('0 9 * * *', async () => {
+            console.log('🔔 [Recordatorios] Enviando recordatorios del día...');
             await this.sendReminders();
         });
-        // También ejecutar al iniciar (5 segundos después)
-        setTimeout(() => this.sendReminders(), 5000);
+
+        // ── Limpiar deduplicación a medianoche ──
+        cron.schedule('0 0 * * *', () => {
+            this.sentToday.clear();
+            console.log('[Recordatorios] Set de deduplicación limpiado para el nuevo día.');
+        });
+
         this.isRunning = true;
     }
 
+    /** Calcular la fecha de mañana en formato decimal YYYYMMDD */
+    getTomorrowDecimal() {
+        const d = new Date();
+        d.setDate(d.getDate() + 1);
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return parseInt(`${y}${m}${day}`);
+    }
+
+    /** Buscar el teléfono del paciente usando las 3 fuentes disponibles */
+    async getPhoneForPatient(codigoPac) {
+        if (!codigoPac || !codigoPac.trim()) return null;
+        const cod = codigoPac.trim();
+        const codSinCeros = cod.replace(/^0+/, '');
+
+        // 1ª fuente: TKCLIENTESANEXO5 (celular real de Xenco — la más confiable)
+        try {
+            const kc5 = await prisma.tKCLIENTESANEXO5.findFirst({
+                where: { KC5_RACOD_CLI: { in: [cod, codSinCeros] } }
+            });
+            const tel5 = kc5?.KC5_TEL_CEL?.trim();
+            if (tel5 && !/^0+$/.test(tel5) && tel5.replace(/\D/g, '').length >= 7) {
+                return tel5.replace(/\D/g, '');
+            }
+        } catch (_) {}
+
+        // 2ª fuente: TMUSUARIOSFACTURACION
+        try {
+            const fact = await prisma.tMUSUARIOSFACTURACION.findFirst({
+                where: { OR: [{ KC2_COD: cod }, { KC2_OACOD_NUI: codSinCeros }] },
+                orderBy: { KC2_FCH_DIG: 'desc' }
+            });
+            const tel2 = fact?.KC2_TEL_RESP?.trim();
+            if (tel2 && !/^0+$/.test(tel2) && tel2.replace(/\D/g, '').length >= 7) {
+                return tel2.replace(/\D/g, '');
+            }
+        } catch (_) {}
+
+        // 3ª fuente: TMUSUARIOSASEGURAMIENTO
+        try {
+            const aseg = await prisma.paciente.findFirst({ where: { KC0_COD: cod } });
+            const tel3 = aseg?.KC0_RES_TEL?.trim();
+            if (tel3 && !/^0+$/.test(tel3) && tel3.replace(/\D/g, '').length >= 7) {
+                return tel3.replace(/\D/g, '');
+            }
+        } catch (_) {}
+
+        return null;
+    }
+
+    /** Buscar nombre del paciente */
+    async getNombreForPatient(codigoPac) {
+        const cod = codigoPac.trim();
+        const codSinCeros = cod.replace(/^0+/, '');
+        try {
+            const nui = await prisma.pacienteNUI.findFirst({
+                where: { OR: [{ KCN_COD: cod }, { KCN_COD_NUI: codSinCeros }] }
+            });
+            if (nui?.KCN_NOM) return nui.KCN_NOM.trim();
+        } catch (_) {}
+        try {
+            const fact = await prisma.tMUSUARIOSFACTURACION.findFirst({
+                where: { OR: [{ KC2_COD: cod }, { KC2_OACOD_NUI: codSinCeros }] },
+                orderBy: { KC2_FCH_DIG: 'desc' }
+            });
+            if (fact) return `${fact.KC2_PNOMBRE || ''} ${fact.KC2_PAPELLIDO || ''}`.trim();
+        } catch (_) {}
+        return 'Paciente';
+    }
+
     async sendReminders() {
-        if (!prisma) {
-            console.log('[ReminderService] Prisma no disponible, omitiendo recordatorios.');
+        if (!prisma || !this.client) {
+            console.log('[Recordatorios] Prisma o cliente WA no disponible.');
             return 0;
         }
+
+        const tomorrowDec = this.getTomorrowDecimal();
+        console.log(`[Recordatorios] Buscando citas para mañana (${tomorrowDec})...`);
+
         let sent = 0;
         try {
-            const tomorrow = new Date();
-            tomorrow.setDate(tomorrow.getDate() + 1);
-            const tomorrowDecimal = dateToDecimal(tomorrow);
+            // ─── TODAS las citas de mañana: bot + Xenco ───
+            // Usamos $queryRaw para máximo control y evitar filtros del modelo Prisma
+            const citas = await prisma.$queryRaw`
+                SELECT KC3_MEDICO, KC3_FCH, KC3_HH, KC3_MM,
+                       KC3_COD, KC3_CONSULTORIO, KC3_USUARIO
+                FROM TMCITASUSUARIOS
+                WHERE KC3_FCH = ${tomorrowDec}
+                  AND (KC3_ESTADO IS NULL OR KC3_ESTADO <> 'CA')
+                  AND KC3_COD IS NOT NULL
+                  AND LEN(LTRIM(RTRIM(KC3_COD))) = 14
+                  AND KC3_COD <> '00000000000000'
+                  AND CAST(KC3_COD AS BIGINT) > 0
+            `;
 
-            const citas = await prisma.cita.findMany({
-                where: {
-                    KC3_FCH: tomorrowDecimal,
-                    KC3_ESTADO: { not: 'CA' }
-                }
-            });
+            console.log(`📅 [Recordatorios] ${citas.length} cita(s) encontradas para mañana`);
 
-            // Filtrar solo citas con paciente real (KC3_COD no vacio)
-            const citasReales = citas.filter(c => c.KC3_COD && c.KC3_COD.trim() !== '' && !/^0+$/.test(c.KC3_COD.trim()));
-            console.log(`📅 Encontradas ${citasReales.length} citas con paciente para mañana (de ${citas.length} total)`);
+            for (const cita of citas) {
+                const cod = String(cita.KC3_COD).trim();
+                const clave = `${cod}-${cita.KC3_FCH}-${cita.KC3_HH}-${cita.KC3_MM}`;
 
-            for (const cita of citasReales) {
-                const pacienteId = cita.KC3_COD;
-
-                let factMatch = await prisma.tMUSUARIOSFACTURACION.findFirst({
-                    where: { OR: [{ KC2_COD: pacienteId }, { KC2_OACOD_NUI: pacienteId }] }
-                });
-
-                let tel = null;
-                let nom = 'Paciente';
-
-                if (factMatch) {
-                    tel = factMatch.KC2_TEL_RESP || factMatch.KC2_TEL_ACOMP;
-                    nom = `${factMatch.KC2_PNOMBRE || ''} ${factMatch.KC2_PAPELLIDO || ''}`.trim() || factMatch.KC2_NOM_RESP;
-                }
-
-                if (!tel) {
-                    const asegMatch = await prisma.paciente.findFirst({
-                        where: { KC0_COD: pacienteId }
-                    });
-                    if (asegMatch) {
-                        tel = asegMatch.KC0_RES_TEL;
-                        nom = asegMatch.KC0_NOM || nom;
-                    }
-                }
-
-                if (!tel) {
-                    console.log(`⚠️ Paciente ${pacienteId} sin teléfono`);
+                // ── DEDUPLICACIÓN: saltar si ya se envió este recordatorio hoy ──
+                if (this.sentToday.has(clave)) {
+                    console.log(`[Recordatorios] ⏭️  Ya enviado hoy: ${clave}`);
                     continue;
                 }
 
-                const paciente = { KC_TEL1: tel, KC_NOM: nom };
-                const medico = await prisma.medico.findFirst({ where: { MED_COD: cita.KC3_MEDICO } });
+                const telefono = await this.getPhoneForPatient(cod);
+                if (!telefono || telefono.length < 7) {
+                    console.log(`[Recordatorios] ⚠️  Sin teléfono: ${cod}`);
+                    continue;
+                }
 
-                const ok = await this.sendReminderMessage(cita, paciente, medico);
-                if (ok) sent++;
-                await new Promise(r => setTimeout(r, 2000));
+                const nombre = await this.getNombreForPatient(cod);
+                const medico = await prisma.medico.findFirst({
+                    where: { MED_COD: Number(cita.KC3_MEDICO) }
+                }).catch(() => null);
+
+                const ok = await this.sendReminderMessage(cita, nombre, telefono, medico);
+                if (ok) {
+                    this.sentToday.add(clave); // Marcar como enviado
+                    sent++;
+                }
+
+                // Pausa entre mensajes para no saturar WhatsApp
+                await new Promise(r => setTimeout(r, 2500));
             }
 
         } catch (error) {
-            console.error('❌ Error enviando recordatorios:', error);
+            console.error('[Recordatorios] ❌ Error:', error.message);
         }
+
+        console.log(`[Recordatorios] ✅ ${sent} recordatorio(s) enviado(s).`);
         return sent;
     }
 
-    async sendReminderMessage(cita, paciente, medico) {
-        if (!this.client) {
-            console.error('❌ Cliente de WhatsApp no inicializado');
-            return false;
-        }
-
-        const rawPhone = paciente.KC_TEL1?.replace(/\D/g, '');
-        if (!rawPhone || rawPhone.length < 10) return false;
-
-        const phone = rawPhone.length === 10 ? `57${rawPhone}` : rawPhone;
-
-        const fechaDate = decimalToDate(cita.KC3_FCH);
-        const fechaFormateada = fechaDate.toLocaleDateString('es-CO', {
-            weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
-        });
-
-        const hh = Number(cita.KC3_HH);
-        const mm = Number(cita.KC3_MM);
-        const h12 = hh % 12 || 12;
-        const period = hh < 12 ? 'AM' : 'PM';
-        const horaFormateada = `${h12}:${String(mm).padStart(2, '0')} ${period}`;
-
-        const nombrePaciente = paciente.KC_NOM?.split(' ')[0] || 'Paciente';
-        const nombreMedico = medico?.MED_NOMBRE?.trim() || 'tu médico asignado';
-        const consultorio = cita.KC3_CONSULTORIO || '';
-
-        const mensaje =
-            `🔔 *RECORDATORIO DE CITA MÉDICA*\n\n` +
-            `Hola *${nombrePaciente}*,\n\n` +
-            `Te recordamos que tienes una cita programada para el *${fechaFormateada}*:\n\n` +
-            `📅 *Fecha:* ${fechaFormateada}\n` +
-            `🕐 *Hora:* ${horaFormateada}\n` +
-            `👨‍⚕️ *Médico:* ${nombreMedico}\n` +
-            (consultorio ? `🚪 *Consultorio:* ${consultorio}\n` : '') +
-            `\nPor favor, llega 15 minutos antes de tu cita.\n\n` +
-            `Si necesitas cancelar o reprogramar, dímelo por este chat.\n\n` +
-            `_Mensaje automático_ 🤖`;
-
-        const whatsappId = `${phone}@c.us`;
-
+    async sendReminderMessage(cita, nombre, telefono, medico) {
         try {
+            const rawPhone = String(telefono).replace(/\D/g, '');
+            if (rawPhone.length < 7) return false;
+
+            // Agregar prefijo Colombia si es número local de 10 dígitos
+            const phone = rawPhone.length === 10 ? `57${rawPhone}` : rawPhone;
+            const whatsappId = `${phone}@c.us`;
+
+            // Formatear fecha
+            const fchStr = String(cita.KC3_FCH);
+            const fechaObj = new Date(
+                parseInt(fchStr.slice(0,4)),
+                parseInt(fchStr.slice(4,6)) - 1,
+                parseInt(fchStr.slice(6,8))
+            );
+            const fechaFmt = fechaObj.toLocaleDateString('es-CO', {
+                weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+            });
+
+            // Formatear hora
+            const hh = Number(cita.KC3_HH);
+            const mm = Number(cita.KC3_MM);
+            const h12 = hh % 12 || 12;
+            const period = hh < 12 ? 'AM' : 'PM';
+            const horaFmt = `${h12}:${String(mm).padStart(2,'0')} ${period}`;
+
+            const primerNombre = nombre.split(/[\s,]+/)[0] || 'Paciente';
+            const nomMedico = medico?.MED_NOMBRE?.trim() || 'tu médico asignado';
+            const consultorio = cita.KC3_CONSULTORIO?.trim() || '';
+
+            const mensaje =
+                `🔔 *RECORDATORIO DE CITA MÉDICA*\n\n` +
+                `Hola *${primerNombre}*,\n\n` +
+                `Te recordamos que tienes una cita programada para *mañana*:\n\n` +
+                `📅 *Fecha:* ${fechaFmt}\n` +
+                `🕐 *Hora:* ${horaFmt}\n` +
+                `👨‍⚕️ *Médico:* ${nomMedico}\n` +
+                (consultorio ? `🚪 *Consultorio:* ${consultorio}\n` : '') +
+                `\nPor favor, llega *15 minutos antes* de tu cita.\n\n` +
+                `Si necesitas cancelar o reprogramar, escríbeme por este chat.\n\n` +
+                `_Aurora — Asistente de citas médicas_ 🤖`;
+
+            // Verificar que WhatsApp esté conectado antes de enviar
+            const waState = await this.client.getState().catch(() => null);
+            if (waState !== 'CONNECTED') {
+                console.warn(`[Recordatorios] ⚠️  WA no conectado (${waState}), omitiendo envío a ${phone}`);
+                return false;
+            }
+
             await this.client.sendMessage(whatsappId, mensaje);
-            console.log(`✅ Recordatorio enviado a ${nombrePaciente} (${phone})`);
+            console.log(`[Recordatorios] ✅ Enviado a ${primerNombre} (${phone})`);
             return true;
         } catch (error) {
-            console.error(`❌ Error enviando recordatorio a ${phone}:`, error.message);
+            console.error(`[Recordatorios] ❌ Error enviando a ${telefono}:`, error.message);
             return false;
         }
     }
