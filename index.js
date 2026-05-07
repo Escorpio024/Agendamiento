@@ -123,6 +123,43 @@ client.on('ready', async () => {
     await loadHistoricalMessages();
 });
 
+// ── RECONEXIÓN AUTOMÁTICA ─────────────────────────────────────────────────
+// WhatsApp Web desconecta periódicamente (cada ~1h si hay inactividad).
+// Sin estos handlers el bot queda muerto hasta reinicio manual.
+client.on('disconnected', (reason) => {
+    console.warn(`[WA] ⚠️ Desconectado: ${reason}. Reconectando en 15s...`);
+    activeSessions.clear(); // Limpiar sesiones en RAM para empezar limpio
+    setTimeout(() => {
+        client.initialize().catch(e => {
+            console.error('[WA] ❌ Error al reconectar:', e.message);
+        });
+    }, 15000);
+});
+
+client.on('auth_failure', (msg) => {
+    console.error(`[WA] ❌ Error de autenticación: ${msg}. Reintentando en 20s...`);
+    setTimeout(() => {
+        client.initialize().catch(e => {
+            console.error('[WA] ❌ Error al reiniciar tras auth_failure:', e.message);
+        });
+    }, 20000);
+});
+
+// ── KEEPALIVE ─────────────────────────────────────────────────────────────
+// Ping cada 4 minutos para evitar que WhatsApp cierre la conexión por idle.
+setInterval(async () => {
+    try {
+        const state = await client.getState();
+        console.log(`[KEEPALIVE] Estado WA: ${state}`);
+        if (state !== 'CONNECTED') {
+            console.warn('[KEEPALIVE] ⚠️ No conectado, forzando reinicio...');
+            client.initialize().catch(() => {});
+        }
+    } catch (e) {
+        console.warn('[KEEPALIVE] Error comprobando estado:', e.message);
+    }
+}, 4 * 60 * 1000); // cada 4 minutos
+
 client.on('message_create', async (msg) => {
     if (msg.fromMe) {
         const chat = await msg.getChat();
@@ -1741,4 +1778,7 @@ async function loadHistoricalMessages() {
     }
 }
 
-client.initialize();
+client.initialize().catch(e => {
+    console.error('[WA] ❌ Error al iniciar el cliente:', e.message);
+    process.exit(1); // PM2 reiniciará el proceso automáticamente
+});
