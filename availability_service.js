@@ -781,9 +781,13 @@ async function reserveSlot(fechaStr, hora, userId, tipo = 'medicina general', me
         const debeActualizar = slotExistente && esSlotVacioFn(slotExistente.KC3_COD);
 
         if (debeActualizar) {
-            const whereUpdate = slotExistente.KC3_COD == null
-                ? { KC3_MEDICO: slot.doctorId, KC3_FCH: dateDecimal, KC3_HH: hh, KC3_MM: mm, KC3_COD: null }
-                : { KC3_MEDICO: slot.doctorId, KC3_FCH: dateDecimal, KC3_HH: hh, KC3_MM: mm, KC3_COD: slotExistente.KC3_COD };
+            // Actualizar usando solo las claves principales para evitar fallos de matching por espacios en blanco en KC3_COD
+            const whereUpdate = { 
+                KC3_MEDICO: slot.doctorId, 
+                KC3_FCH: dateDecimal, 
+                KC3_HH: hh, 
+                KC3_MM: mm 
+            };
 
             const updateResult = await prisma.cita.updateMany({ where: whereUpdate, data: citaData });
             
