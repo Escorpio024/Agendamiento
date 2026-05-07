@@ -740,7 +740,7 @@ async function reserveSlot(fechaStr, hora, userId, tipo = 'medicina general', me
             KC3_C_COSTO:          fieldsEsp.KC3_C_COSTO,
             KC3_ARTIC:            fieldsEsp.KC3_ARTIC,
             KC3_OBSERVACION:      `WhatsApp - ${tipo}`.substring(0, 60),
-            KC3_USUARIO:          'BOT',
+            KC3_USUARIO:          'AURORA',
             KC3_ENTIDAD:          entidadPac,
             KC3_ENTIDAD_OLD:      entidadPac,
             KC3_NUM:              0,              // 0 = sin número de factura → Documento muestra solo 'VD'
@@ -751,7 +751,7 @@ async function reserveSlot(fechaStr, hora, userId, tipo = 'medicina general', me
             KC3_HH_D:             hhSist,
             KC3_MM_D:             mmSist,
             KC3_HORA_SIST:        horaSist,
-            KC3_TERMINAL:         'BOT',
+            KC3_TERMINAL:         'BOT',   // max 3 chars — no cabe AURORA
             KC3_ONCOD_NUM_CTA:    0,
             KC3_NUM_CONTRATO:     contratoInfo.num,
             KC3_SEQ_TME2:         1,
@@ -866,7 +866,7 @@ async function reserveSlot(fechaStr, hora, userId, tipo = 'medicina general', me
                 SET TME2_COD     = ${pacCod14},
                     TME2_ZONA    = ${pacZona},
                     TME2_SEQK    = ${''},
-                    TME2_USU     = ${'BOT'},
+                    TME2_USU     = ${'AURORA'},
                     TME2_FCH_DIG = ${fchDecimalHoy}
                 WHERE TME2_CODM = ${slot.doctorId}
                   AND TME2_FCH  = ${dateDecimal}
@@ -899,7 +899,7 @@ async function reserveSlot(fechaStr, hora, userId, tipo = 'medicina general', me
                         (${slot.doctorId}, ${dateDecimal}, ${nextSeq}, ${hh}, ${mm},
                          ${pacZona}, ${pacCod14}, ${''},
                          ${'01'}, ${consulTME2},
-                         ${0}, ${fchDecimalHoy}, ${'BOT'},
+                         ${0}, ${fchDecimalHoy}, ${'AURORA'},
                          ${horaSist}, ${espTME2}, ${0})
                 `;
                 console.log(`[TME2] ✅ TMTURNOSMEDICOSDETALLE INSERTADO (SEQ=${nextSeq}): médico=${slot.doctorId} ${hh}:${mm} → paciente=${pacCod14}`);
