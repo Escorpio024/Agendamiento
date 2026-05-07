@@ -250,7 +250,8 @@ async function findPaciente(userId) {
                 where: { OR: [
                     { KC2_OACOD_NUI: { in: searchTerms } },
                     { KC2_COD: { in: searchTerms } }
-                ] }
+                ] },
+                orderBy: { KC2_FCH_DIG: 'desc' }  // Usar el registro más reciente (EPS vigente)
             });
             const entidadFinal = asegParaEntidad?.KC0_ENTIDAD
                 ? Number(asegParaEntidad.KC0_ENTIDAD)
@@ -279,7 +280,8 @@ async function findPaciente(userId) {
             where: { OR: [
                 { KC2_OACOD_NUI: { in: searchTerms } },
                 { KC2_COD: { in: searchTerms } }
-            ] }
+            ] },
+            orderBy: { KC2_FCH_DIG: 'desc' }  // Usar el registro más reciente
         });
         if (byFact) {
             const nomComp = `${byFact.KC2_PNOMBRE || ''} ${byFact.KC2_PAPELLIDO || ''}`.trim();
@@ -321,7 +323,10 @@ async function findPaciente(userId) {
             // Obtener datos completos del paciente por su código interno
             const codPac = kc5ByTel.KC5_RACOD_CLI.trim();
             const nuiByCode  = await prisma.pacienteNUI.findFirst({ where: { KCN_COD: codPac } });
-            const factByCode = await prisma.tMUSUARIOSFACTURACION.findFirst({ where: { KC2_COD: codPac } });
+            const factByCode = await prisma.tMUSUARIOSFACTURACION.findFirst({
+                where: { KC2_COD: codPac },
+                orderBy: { KC2_FCH_DIG: 'desc' }  // Usar el registro más reciente (EPS vigente)
+            });
             // Fuente autoritativa de entidad: TMUSUARIOSASEGURAMIENTO (Maestro de Usuarios)
             const asegByCode = await prisma.paciente.findFirst({ where: { KC0_COD: codPac } });
             const entidadFinal = asegByCode?.KC0_ENTIDAD
@@ -351,7 +356,8 @@ async function findPaciente(userId) {
                 { KC2_TEL_RESP: { contains: phone10 } },
                 { KC2_TEL_RESP: { contains: phone7 } }
             ]
-        }
+        },
+        orderBy: { KC2_FCH_DIG: 'desc' }  // Usar el registro más reciente
     });
 
     if (factByTel) {
