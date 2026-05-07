@@ -766,21 +766,50 @@ async function reserveSlot(fechaStr, hora, userId, tipo = 'medicina general', me
 
         const debeActualizar = slotExistente && esSlotVacioFn(slotExistente.KC3_COD);
 
-        if (debeActualizar) {
-            // Actualizar usando solo las claves principales para evitar fallos de matching por espacios en blanco en KC3_COD
+        let slotAActualizar = slotExistente;
+        let medicoActualizar = slot.doctorId;
+
+        if (!debeActualizar) {
+            // MODO FALLBACK: buscar cualquier slot vacío en esa hora (puede ser de otro médico de la misma agenda)
+            // Xenco preasigna slots al médico 'tronco' (ej: 111), aunque la cita sea de la Dra. Ordoñez
+            const slotVacioAlternativo = await prisma.cita.findFirst({
+                where: {
+                    KC3_FCH: dateDecimal,
+                    KC3_HH:  hh,
+                    KC3_MM:  mm
+                }
+            });
+
+            if (slotVacioAlternativo && esSlotVacioFn(slotVacioAlternativo.KC3_COD)) {
+                slotAActualizar = slotVacioAlternativo;
+                medicoActualizar = slotVacioAlternativo.KC3_MEDICO;
+                console.log(`[HABEJICO] 🔄 Slot vacío alternativo encontrado para médico=${medicoActualizar} ${hh}:${mm} (el slot real de Xenco)`);
+            }
+        }
+
+        const debeActualizarFinal = slotAActualizar && esSlotVacioFn(slotAActualizar.KC3_COD);
+
+        if (debeActualizarFinal) {
             const whereUpdate = { 
-                KC3_MEDICO: slot.doctorId, 
+                KC3_MEDICO: medicoActualizar, 
                 KC3_FCH: dateDecimal, 
                 KC3_HH: hh, 
                 KC3_MM: mm 
             };
 
-            const updateResult = await prisma.cita.updateMany({ where: whereUpdate, data: citaData });
+            // Preservar el médico y consultorio originales del slot de Xenco para no romper la agenda
+            const citaDataFinal = {
+                ...citaData,
+                KC3_MEDICO: medicoActualizar,  // mantener el médico del slot original de Xenco
+                KC3_CONSULTORIO: slotAActualizar.KC3_CONSULTORIO || slot.consultorio || null,
+            };
+
+            const updateResult = await prisma.cita.updateMany({ where: whereUpdate, data: citaDataFinal });
             
             if (updateResult.count > 0) {
-                console.log(`[HABEJICO] ✅ Slot ACTUALIZADO (KC3_COD era: "${slotExistente.KC3_COD}"): médico=${slot.doctorId} ${hh}:${mm}`);
+                console.log(`[HABEJICO] ✅ Slot ACTUALIZADO (médico=${medicoActualizar} ${hh}:${mm}) -> paciente=${paciente.KC0_COD}`);
             } else {
-                console.log(`[HABEJICO] ⚠️ updateMany no afectó filas. Forzando creación...`);
+                console.log(`[HABEJICO] ⚠️ updateMany no afectó filas. Creando nueva fila...`);
                 await prisma.cita.create({
                     data: {
                         KC3_MEDICO: slot.doctorId,
