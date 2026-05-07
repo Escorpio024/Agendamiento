@@ -679,6 +679,20 @@ async function reserveSlot(fechaStr, hora, userId, tipo = 'medicina general', me
             return false;
         }
 
+        // Helper para agregar puntos a la cédula (ej. 1054478593 -> 1.054.478.593)
+        // ya que el Visor de Agenda de Xenco cruza la información con este formato.
+        const formatCedulaPuntos = (ced) => {
+            if (!ced) return ced;
+            const cedStr = String(ced).trim();
+            // Solo formatear si es numérico
+            if (/^\d+$/.test(cedStr)) {
+                return cedStr.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+            }
+            return cedStr;
+        };
+
+        const cedulaConPuntos = formatCedulaPuntos(paciente.KC0_COD);
+
         // Xenco por lo general usa string vacío '' para la cita del día independientemente,
         // ya que el horario HH y MM son únicos, permitiendo evitar problemas de correlatividad.
         const seqk = '';
@@ -712,7 +726,7 @@ async function reserveSlot(fechaStr, hora, userId, tipo = 'medicina general', me
 
         const citaData = {
             KC3_ZONA:             zonaUsar,
-            KC3_COD:              paciente.KC0_COD,
+            KC3_COD:              cedulaConPuntos,
             KC3_SEQK:             seqk,
             KC3_ESPECIALISTA:     espCod,
             KC3_ESTADO:           '01',
