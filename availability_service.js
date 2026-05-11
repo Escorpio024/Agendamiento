@@ -451,15 +451,41 @@ async function getAvailableSlots(fechaStr, tipo = 'medicina general', preferredD
         return !esSlotVacio(c.KC3_COD);
     });
 
-    // Slots pre-generados por Xenco para cada doctor (sin paciente = disponibles reales del Visor)
+    // ── FUENTE DE VERDAD: TMTURNOSMEDICOSDETALLE (TME2) ──────────────────────────────────────
+    // Lee los slots "Libre" directamente de TME2 — la misma tabla que usa el Visor de Agenda.
+    // ─────────────────────────────────────────────────────────────────────────────────────────
     const slotsVaciosPorDoctor = {}; // { doctorId: Set([h*60+m]) }
-    for (const c of allCitas) {
-        const cancelado = c.KC3_ESTADO && c.KC3_ESTADO.trim() === 'CA';
-        if (esSlotVacio(c.KC3_COD) && !cancelado) {
-            const key = String(c.KC3_MEDICO).trim();
+    let tme2Libres = [];
+    try {
+        tme2Libres = await prisma.$queryRaw`
+            SELECT TME2_CODM, TME2_HH, TME2_MM
+            FROM TMTURNOSMEDICOSDETALLE
+            WHERE TME2_FCH = ${dateDecimal}
+              AND (
+                  TME2_COD IS NULL
+                  OR LTRIM(RTRIM(TME2_COD)) = ''
+                  OR TME2_COD = '00000000000000'
+                  OR TRY_CAST(LTRIM(RTRIM(TME2_COD)) AS BIGINT) = 0
+              )
+        `;
+        for (const r of tme2Libres) {
+            const key = String(r.TME2_CODM).trim();
             if (!slotsVaciosPorDoctor[key]) slotsVaciosPorDoctor[key] = new Set();
-            const tMin = parseInt(c.KC3_HH) * 60 + parseInt(c.KC3_MM);
+            const tMin = parseInt(r.TME2_HH) * 60 + parseInt(r.TME2_MM);
             slotsVaciosPorDoctor[key].add(tMin);
+        }
+        console.log(`[SLOTS-TME2] ${tme2Libres.length} slots libres en ${Object.keys(slotsVaciosPorDoctor).length} doctores para fecha=${dateDecimal}`);
+    } catch (e) {
+        console.warn('[SLOTS-TME2] Error consultando TME2, usando fallback KC3:', e.message);
+        // Fallback a KC3 si TME2 falla
+        for (const c of allCitas) {
+            const cancelado = c.KC3_ESTADO && c.KC3_ESTADO.trim() === 'CA';
+            if (esSlotVacio(c.KC3_COD) && !cancelado) {
+                const key = String(c.KC3_MEDICO).trim();
+                if (!slotsVaciosPorDoctor[key]) slotsVaciosPorDoctor[key] = new Set();
+                const tMin = parseInt(c.KC3_HH) * 60 + parseInt(c.KC3_MM);
+                slotsVaciosPorDoctor[key].add(tMin);
+            }
         }
     }
 
@@ -924,39 +950,30 @@ async function reserveSlot(fechaStr, hora, userId, tipo = 'medicina general', me
 async function getUserAppointments(userId) {
     if (!prisma) return [];
     try {
-        // Estrategia dual: si el userId parece una cédula/ID directo de paciente,
-        // buscar directamente en lugar de pasar por findPaciente (que busca por teléfono)
+        // ─── Resolver el código interno del paciente (14 dígitos con ceros) ───
         let pacienteId = null;
         const cleanId = String(userId).replace(/@(c\.us|lid|s\.whatsapp\.net)/gi, '').replace(/\D/g, '');
         const isWhatsAppSender = userId.includes('@') || userId.includes('.us');
 
         if (!isWhatsAppSender && /^\d{5,15}$/.test(cleanId)) {
             const cleanNoZeros = cleanId.replace(/^0+/, '');
-            const exactPadded = cleanId.padStart(14, ' ');
-            const zeroPadded = cleanId.padStart(14, '0');
-            const searchTerms = [...new Set([cleanId, cleanNoZeros, exactPadded, zeroPadded])];
+            const exactPadded  = cleanId.padStart(14, ' ');
+            const zeroPadded   = cleanId.padStart(14, '0');
+            const searchTerms  = [...new Set([cleanId, cleanNoZeros, exactPadded, zeroPadded])];
 
             const nuiMatch = await prisma.pacienteNUI.findFirst({
-                where: { OR: [
-                    { KCN_COD_NUI: { in: searchTerms } },
-                    { KCN_COD: { in: searchTerms } }
-                ] }
+                where: { OR: [{ KCN_COD_NUI: { in: searchTerms } }, { KCN_COD: { in: searchTerms } }] }
             });
             if (nuiMatch) {
                 pacienteId = nuiMatch.KCN_COD || nuiMatch.KCN_COD_NUI;
             } else {
                 const factMatch = await prisma.tMUSUARIOSFACTURACION.findFirst({
-                    where: { OR: [
-                        { KC2_OACOD_NUI: { in: searchTerms } },
-                        { KC2_COD: { in: searchTerms } }
-                    ] }
+                    where: { OR: [{ KC2_OACOD_NUI: { in: searchTerms } }, { KC2_COD: { in: searchTerms } }] }
                 });
                 if (factMatch) {
                     pacienteId = factMatch.KC2_COD;
                 } else {
-                    const directPac = await prisma.paciente.findFirst({
-                        where: { KC0_COD: { in: searchTerms } }
-                    });
+                    const directPac = await prisma.paciente.findFirst({ where: { KC0_COD: { in: searchTerms } } });
                     if (directPac) pacienteId = directPac.KC0_COD;
                 }
             }
@@ -971,44 +988,53 @@ async function getUserAppointments(userId) {
             pacienteId = paciente.KC0_COD;
         }
 
+        // ─── FUENTE DE VERDAD: TMTURNOSMEDICOSDETALLE (TME2) ────────────────────
+        // Se usa TME2 como fuente primaria para ver TODAS las citas del paciente,
+        // sin importar si las agendó el bot (AURORA) o el personal de Xenco (CINDY, etc.).
+        // TMCITASUSUARIOS (KC3) se hace JOIN solo para obtener el estado de cancelación.
+        // ─────────────────────────────────────────────────────────────────────────
         const todayDecimal = dateToDecimal(new Date());
-        const cleanPacId = String(pacienteId).trim().replace(/^0+/, '');
-        const allCitas = await prisma.cita.findMany({
-            where: {
-                OR: [
-                    { KC3_COD: pacienteId },
-                    { KC3_COD: cleanPacId },
-                    { KC3_COD: String(pacienteId).padStart(14, ' ') },
-                    { KC3_COD: String(pacienteId).padStart(14, '0') }
-                ],
-                KC3_FCH: { gte: todayDecimal }
-            },
-            orderBy: [{ KC3_FCH: 'asc' }, { KC3_HH: 'asc' }]
-        });
-        
-        // Filtrar 'CA' (Cancelada) en JS para evadir problemas de collation o espacios en SQL
-        const citas = allCitas.filter(c => !c.KC3_ESTADO || c.KC3_ESTADO.trim() !== 'CA');
+        const pacCod14 = String(pacienteId).trim().padStart(14, '0');
 
-        console.log(`[HABEJICO] getUserAppointments: ID=${pacienteId}, FechaGTE=${todayDecimal}, DB=${allCitas.length}, Validas=${citas.length}`);
+        console.log(`[HABEJICO] getUserAppointments: buscando citas para cod=${pacCod14}, fechaGTE=${todayDecimal}`);
 
-        const medicoCodes = [...new Set(citas.map(c => parseInt(c.KC3_MEDICO)))];
-        const medicos = medicoCodes.length
-            ? await prisma.medico.findMany({ where: { MED_COD: { in: medicoCodes } } })
-            : [];
-        const medicoMap = {};
-        medicos.forEach(m => { medicoMap[parseInt(m.MED_COD)] = m; });
+        const rows = await prisma.$queryRaw`
+            SELECT
+                t.TME2_CODM         AS medicoId,
+                t.TME2_FCH          AS fecha,
+                t.TME2_HH           AS hh,
+                t.TME2_MM           AS mm,
+                t.TME2_COD          AS cod,
+                t.TME2_CONSULTORIO  AS consultorio,
+                LTRIM(RTRIM(m.MED_NOMBRE)) AS medicoNombre,
+                c.KC3_ESTADO        AS estado,
+                c.KC3_OBSERVACION   AS observacion,
+                c.KC3_ESPECIALISTA  AS especialidadCod
+            FROM TMTURNOSMEDICOSDETALLE t
+            INNER JOIN TMMEDICOS m ON m.MED_COD = t.TME2_CODM
+            LEFT JOIN TMCITASUSUARIOS c
+                ON  c.KC3_MEDICO = t.TME2_CODM
+                AND c.KC3_FCH    = t.TME2_FCH
+                AND c.KC3_HH     = t.TME2_HH
+                AND c.KC3_MM     = t.TME2_MM
+            WHERE LTRIM(RTRIM(t.TME2_COD)) = LTRIM(RTRIM(${pacCod14}))
+              AND t.TME2_FCH >= ${todayDecimal}
+              AND (c.KC3_ESTADO IS NULL OR c.KC3_ESTADO <> 'CA')
+            ORDER BY t.TME2_FCH, t.TME2_HH, t.TME2_MM
+        `;
 
-        return citas.map(c => ({
-            id: `${c.KC3_MEDICO}-${c.KC3_COD}-${c.KC3_SEQK}-${c.KC3_FCH}-${c.KC3_HH}-${c.KC3_MM}`,
-            fecha: toLocalDateStr(decimalToDate(parseInt(c.KC3_FCH))),
-            hora: timeLabel(parseInt(c.KC3_HH), parseInt(c.KC3_MM)),
-            medico: medicoMap[parseInt(c.KC3_MEDICO)]?.MED_NOMBRE?.trim() || `Médico ${c.KC3_MEDICO}`,
-            // KC3_TIPO suele decir 'EXT'. La especialidad real (texto) la intentaremos sacar de la observación
-            tipo: c.KC3_OBSERVACION ? c.KC3_OBSERVACION.replace('WhatsApp - ', '') : 'Medicina General',
-            // La especialidad real en código (ej: 999) para restaurar al modificar
-            especialidadCod: c.KC3_ESPECIALISTA || null,
-            estado: c.KC3_ESTADO,
-            consultorio: c.KC3_CONSULTORIO
+        console.log(`[HABEJICO] getUserAppointments: ${rows.length} citas encontradas (fuente TME2)`);
+
+        return rows.map(r => ({
+            // ID robusto usando '|' como separador — los campos son numéricos, nunca contienen '|'
+            id:            `${Number(r.medicoId)}|${Number(r.fecha)}|${Number(r.hh)}|${Number(r.mm)}`,
+            fecha:         toLocalDateStr(decimalToDate(Number(r.fecha))),
+            hora:          timeLabel(Number(r.hh), Number(r.mm)),
+            medico:        r.medicoNombre || `Médico ${r.medicoId}`,
+            tipo:          r.observacion ? String(r.observacion).replace('WhatsApp - ', '').trim() : 'Medicina General',
+            especialidadCod: r.especialidadCod || null,
+            estado:        r.estado || null,
+            consultorio:   r.consultorio || null,
         }));
     } catch (e) {
         console.error('[HABEJICO] getUserAppointments:', e.message);
@@ -1023,23 +1049,56 @@ async function getUserAppointments(userId) {
 async function cancelAppointment(appointmentId) {
     if (!prisma) return false;
     try {
-        // id = "medico-cod-seqk-fch-hh-mm"
-        const parts = appointmentId.split('-');
-        const medico = parts[0];
-        const cod = parts[1];
-        const seqk = parts[2]; // puede tener espacios del padding
-        const fch = parts[3];
-        await prisma.cita.updateMany({
-            where: {
-                KC3_MEDICO: parseInt(medico),
-                KC3_COD: cod,
-                KC3_SEQK: { contains: seqk.trim() },
-                KC3_FCH: parseInt(fch)
-            },
-            data: {
-                KC3_ESTADO: 'CA'
-            }
-        });
+        // ID formato robusto: "medicoId|fecha|hh|mm"  (separador '|', nunca aparece en los campos)
+        const parts = appointmentId.split('|');
+        if (parts.length !== 4) {
+            console.error(`[HABEJICO] cancelAppointment: ID inválido "${appointmentId}"`);
+            return false;
+        }
+        const medicoId = parseInt(parts[0]);
+        const fch      = parseInt(parts[1]);
+        const hh       = parseInt(parts[2]);
+        const mm       = parseInt(parts[3]);
+
+        console.log(`[HABEJICO] cancelAppointment: médico=${medicoId}, fecha=${fch}, hora=${hh}:${mm}`);
+
+        // 1. Marcar como cancelada en TMCITASUSUARIOS (KC3_ESTADO = 'CA')
+        try {
+            await prisma.$executeRaw`
+                UPDATE TMCITASUSUARIOS
+                SET KC3_ESTADO = 'CA'
+                WHERE KC3_MEDICO = ${medicoId}
+                  AND KC3_FCH    = ${fch}
+                  AND KC3_HH     = ${hh}
+                  AND KC3_MM     = ${mm}
+            `;
+            console.log(`[HABEJICO] ✅ KC3 marcado CA: médico=${medicoId} ${hh}:${mm} fecha=${fch}`);
+        } catch (e1) {
+            console.warn(`[HABEJICO] ⚠️ No se pudo marcar CA en KC3: ${e1.message}`);
+            // Continuar — puede ser una cita de Xenco sin registro en KC3
+        }
+
+        // 2. Liberar el slot en TMTURNOSMEDICOSDETALLE (lo que ve el Visor de Agenda)
+        //    TME2_COD = '00000000000000' → el Visor lo mostrará como slot libre
+        const fchHoy = dateToDecimal(new Date());
+        try {
+            const tme2Updated = await prisma.$executeRaw`
+                UPDATE TMTURNOSMEDICOSDETALLE
+                SET TME2_COD     = '00000000000000',
+                    TME2_ZONA    = '001',
+                    TME2_SEQK    = '',
+                    TME2_USU     = 'AURORA',
+                    TME2_FCH_DIG = ${fchHoy}
+                WHERE TME2_CODM = ${medicoId}
+                  AND TME2_FCH  = ${fch}
+                  AND TME2_HH   = ${hh}
+                  AND TME2_MM   = ${mm}
+            `;
+            console.log(`[HABEJICO] ✅ TME2 liberado: médico=${medicoId} ${hh}:${mm} (${tme2Updated} fila/s)`);
+        } catch (e2) {
+            console.warn(`[HABEJICO] ⚠️ No se pudo liberar TME2: ${e2.message}`);
+        }
+
         return true;
     } catch (e) {
         console.error('[HABEJICO] cancelAppointment:', e.message);

@@ -1,11 +1,11 @@
-import { User, Search, CalendarClock, BellRing } from 'lucide-react';
+import { User, Search, CalendarClock, BellRing, MonitorCheck } from 'lucide-react';
 import { useState } from 'react';
 
 const IS_PROD = typeof window !== 'undefined' && window.location.hostname !== 'localhost';
 const SERVER_HOST = IS_PROD ? window.location.hostname : 'localhost';
 const API_BASE = `http://${SERVER_HOST}:3001`;
 
-export default function Sidebar({ conversations, activeId, onSelect, filter, setFilter, onOpenHistory, appointmentsCount }) {
+export default function Sidebar({ conversations, activeId, onSelect, filter, setFilter, onOpenHistory, onOpenVisor, appointmentsCount }) {
     const [searchTerm, setSearchTerm] = useState('');
     const [sendingReminders, setSendingReminders] = useState(false);
     const [reminderMsg, setReminderMsg] = useState(null);
@@ -37,38 +37,72 @@ export default function Sidebar({ conversations, activeId, onSelect, filter, set
     });
 
     const formatDate = (dateString) => {
+        if (!dateString) return '';
         const date = new Date(dateString);
-        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        if (isNaN(date.getTime())) return '';
+
+        const now = new Date();
+
+        // Reset times to midnight for day comparison
+        const today    = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const msgDay   = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+        const diffDays = Math.round((today - msgDay) / (1000 * 60 * 60 * 24));
+
+        if (diffDays === 0) {
+            // Today → only time  (e.g. "3:46 p.m.")
+            return date.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' });
+        } else if (diffDays === 1) {
+            // Yesterday → "Ayer"
+            return 'Ayer';
+        } else if (diffDays <= 6) {
+            // This week → weekday name  (e.g. "Lunes")
+            return date.toLocaleDateString('es-CO', { weekday: 'long' })
+                       .replace(/^\w/, c => c.toUpperCase());
+        } else {
+            // Older → short date  (e.g. "5/10/26")
+            return date.toLocaleDateString('es-CO', { day: 'numeric', month: 'numeric', year: '2-digit' });
+        }
     };
 
     return (
         <div className="flex flex-col h-full bg-[#1E1B26] text-[#F5F5F7]">
             {/* Header */}
             <div className="flex-shrink-0">
-                <div className="h-16 bg-[#1A1721] px-4 flex justify-between items-center border-b border-[#2D283E]">
-                    <div className="flex items-center gap-2">
+                <div className="bg-[#1A1721] border-b border-[#2D283E]">
+                    {/* Fila 1: Logo + Título */}
+                    <div className="px-4 pt-3 pb-2 flex items-center gap-2">
                         <span className="text-[#A1E3D8] text-xl">🤖</span>
-                        <h1 className="text-lg font-bold">Chat bot Aurora</h1>
+                        <h1 className="text-base font-bold tracking-tight whitespace-nowrap">Chat bot Aurora</h1>
                     </div>
-                    <div className="flex items-center gap-2">
+                    {/* Fila 2: Botones de acción */}
+                    <div className="px-3 pb-3 flex items-center gap-2">
+                        {/* Botón Visor */}
+                        <button
+                            onClick={onOpenVisor}
+                            className="flex-1 flex items-center justify-center gap-1.5 bg-[#2D283E] hover:bg-[#8263B1]/40 text-[#C4A7FF] px-2 py-1.5 rounded-lg text-xs font-semibold transition-all shadow-sm border border-[#8263B1]/20 hover:border-[#8263B1]/50"
+                            title="Visor de agenda médica"
+                        >
+                            <MonitorCheck size={12} />
+                            <span>Visor</span>
+                        </button>
                         {/* Botón recordatorios */}
                         <button
                             onClick={handleSendReminders}
                             disabled={sendingReminders}
-                            className="flex items-center gap-1.5 bg-[#2D283E] hover:bg-[#A1E3D8]/20 text-[#A1E3D8] px-2.5 py-1.5 rounded-md text-xs font-semibold transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="flex-1 flex items-center justify-center gap-1.5 bg-[#2D283E] hover:bg-[#A1E3D8]/20 text-[#A1E3D8] px-2 py-1.5 rounded-lg text-xs font-semibold transition-all shadow-sm border border-[#A1E3D8]/20 hover:border-[#A1E3D8]/40 disabled:opacity-50 disabled:cursor-not-allowed"
                             title="Enviar recordatorios de citas de mañana"
                         >
-                            <BellRing size={13} className={sendingReminders ? 'animate-pulse' : ''} />
+                            <BellRing size={12} className={sendingReminders ? 'animate-pulse' : ''} />
                             <span>{sendingReminders ? 'Enviando...' : 'Recordar'}</span>
                         </button>
-                        {/* Botón de Historial */}
+                        {/* Botón Citas */}
                         <button
                             onClick={onOpenHistory}
-                            className="flex items-center gap-2 bg-[#2D283E] hover:bg-[#8263B1] text-[#F5F5F7] px-3 py-1.5 rounded-md text-xs font-semibold transition-colors shadow-sm"
+                            className="flex-1 flex items-center justify-center gap-1.5 bg-[#2D283E] hover:bg-[#8263B1]/40 text-[#F5F5F7] px-2 py-1.5 rounded-lg text-xs font-semibold transition-all shadow-sm border border-[#2D283E] hover:border-[#8263B1]/50"
                             title="Ver historial de citas"
                         >
-                            <CalendarClock size={14} className="text-[#A1E3D8]" />
-                            <span>Citas: {appointmentsCount || 0}</span>
+                            <CalendarClock size={12} className="text-[#A1E3D8]" />
+                            <span>Citas {appointmentsCount > 0 ? `(${appointmentsCount})` : ''}</span>
                         </button>
                     </div>
                 </div>

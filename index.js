@@ -116,6 +116,7 @@ function clearSessionData(session, sender) {
     session.doctorNameSeleccionado = null;
     session.userAppointments = null;
     session.appointmentToCancel = null;
+    session.citaALiberar = null; // Fase 3: limpiar cita pendiente de liberar al modificar
     // Garantizar que el status en BD esté en 'bot' para que el bot no quede silenciado
     if (sender) {
         chatService.updateStatus(sender, 'bot').catch(() => {});
@@ -405,22 +406,31 @@ client.on('message', async (msg) => {
         if (session.history.length > 20) session.history.shift();
 
         // --- GLOBAL EXIT / RESET GUARD ---
-        // Detectar en cualquier fase si el usuario quiere reiniciar o cancelar
+        // Detectar en cualquier fase si el usuario quiere reiniciar o CANCELAR EL PROCESO ACTUAL.
+        // IMPORTANTE: 'cancelar' a secas NO está aquí — puede significar CANCELAR UNA CITA (intent),
+        // no cancelar el proceso de agendamiento. Solo se aplica dentro de un booking step.
         const normalizeForExit = s => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
         const cleanExitMsg = normalizeForExit(text);
+
+        // Palabras que SIEMPRE significan "quiero salir/empezar de nuevo", sin ambigüedad
         const globalExitWords = [
             'chao', 'adios', 'adiós', 'salir', 'dejemos', 'olvida', 'no importa',
-            'mejor no', 'cancelar', 'volvamos a empezar', 'empezar de nuevo',
+            'mejor no', 'volvamos a empezar', 'empezar de nuevo',
             'reiniciar', 'comenzar de nuevo', 'no quiero cita', 'ya no quiero',
             'no quiero nada', 'no gracias', 'gracias no', 'no me interesa'
         ];
-        
-        if (globalExitWords.some(w => cleanExitMsg.includes(w))) {
-            const isBookingStep = ['AI_ASKING_TYPE', 'AI_ASKING_DATE', 'AI_SELECT_DAY', 'AI_SELECT_TIME', 'AI_CONFIRM_PHONE', 'AI_ENTER_PHONE'].includes(session.step);
-            
-            // Función auxiliar para resetear global
-            clearSessionData(session);
 
+        // Palabras que solo son exit si estamos dentro de un proceso de agendamiento
+        const bookingOnlyExitWords = ['cancelar'];
+
+        const bookingSteps = ['AI_ASKING_TYPE', 'AI_ASKING_DATE', 'AI_SELECT_DAY', 'AI_SELECT_TIME', 'AI_CONFIRM_PHONE', 'AI_ENTER_PHONE'];
+        const isBookingStep = bookingSteps.includes(session.step);
+
+        const isGlobalExit    = globalExitWords.some(w => cleanExitMsg.includes(w));
+        const isBookingExit   = isBookingStep && bookingOnlyExitWords.some(w => cleanExitMsg === w || cleanExitMsg.startsWith(w + ' '));
+
+        if (isGlobalExit || isBookingExit) {
+            clearSessionData(session);
             if (isBookingStep) {
                 await reply('Entendido, dejamos eso así. ¿En qué más puedo ayudarte hoy? 😊');
             } else {
@@ -821,7 +831,8 @@ client.on('message', async (msg) => {
                                        /opci[oó]n|la\s+\d/i.test(message) ||
                                        /primera|segunda|tercera/i.test(message) ||
                                        /\b(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\b/i.test(message) ||
-                                       /\b(el\s+\d{1,2})\b/i.test(message);
+                                       /\b(el\s+\d{1,2})\b/i.test(message) ||
+                                       /\b(otro|otra|más|mas|otras|diferente|siguiente|horario|doctor|medico|médico)\b/i.test(message);
                                        
                     if (stepsWithTopicSwitch.includes(session.step) && !isTimePref && !message.match(/^\d+$|^[a-cA-C]$|^s[ií]$|^no$/i)) {
                         const newIntent = await aiService.extractIntent(message);
@@ -998,10 +1009,38 @@ client.on('message', async (msg) => {
                         } else if (clean.includes('mana') && !clean.includes('pasado')) {
                             session.horaPreferida = 'AM';
                             await handleAgendarCita(userId, message, session, replyFn, {}, historyStr);
+                        } else if (
+                            // Paciente pide ver más opciones — paginar sin re-consultar la BD
+                            /\b(otro|otra|más|mas|otras|diferente|siguiente|hay más|hay mas|ver más|ver mas|ninguno|no me gusta|más opciones|otras opciones|otro medico|otro doctor|otro horario|otra hora)\b/.test(clean) ||
+                            clean.includes('otras opcion') || clean.includes('mas opcion') ||
+                            clean.includes('no me convence') || clean.includes('no me parece')
+                        ) {
+                            const todosList = session.todosLosHorarios || session.horariosDisponibles || [];
+                            const currentOffset = session.slotOffset || 0;
+                            const nextOffset    = currentOffset + 8;
+                            const nextBatch     = todosList.slice(nextOffset, nextOffset + 8);
+
+                            if (nextBatch.length > 0) {
+                                session.slotOffset          = nextOffset;
+                                session.horariosDisponibles = nextBatch;
+                                const slotsText  = nextBatch.map((s, i) => `${i + 1}. ${s.time} — ${s.doctorName}`).join('\n');
+                                const remaining  = todosList.length - nextOffset - nextBatch.length;
+                                const moreHint   = remaining > 0 ? `\n\n_(Hay ${remaining} opciones más disponibles. Escribe "ver más" si quieres verlas)_` : '';
+                                await replyFn(`Aquí tienes más horarios disponibles ese día:\n\n${slotsText}${moreHint}\n\nEscribe el *NÚMERO* de tu preferencia:`);
+                            } else if (todosList.length > 8) {
+                                // Volver al inicio
+                                session.slotOffset          = 0;
+                                session.horariosDisponibles = todosList.slice(0, 8);
+                                const slotsText = session.horariosDisponibles.map((s, i) => `${i + 1}. ${s.time} — ${s.doctorName}`).join('\n');
+                                await replyFn(`Ya te mostré todas las opciones para ese día. Volviendo al inicio:\n\n${slotsText}\n\nEscribe el *NÚMERO* de tu preferencia:`);
+                            } else {
+                                const slotsText = (session.horariosDisponibles || []).map((s, i) => `${i + 1}. ${s.time} — ${s.doctorName}`).join('\n');
+                                await replyFn(`Esas son todas las opciones disponibles para ese día 😊 ¿Quieres buscar en otra fecha?\n\n${slotsText}`);
+                            }
                         } else {
                             const slotsText = session.horariosDisponibles.slice(0, 8).map((s, i) => `${i + 1}. ${s.time} — ${s.doctorName}`).join('\n');
                             
-                            const userMentionedHour = /\\b([1-9]|1[0-2])\\b/.test(message) || /\\b(a las|las)\\b/.test(message.toLowerCase());
+                            const userMentionedHour = /\b([1-9]|1[0-2])\b/.test(message) || /\b(a las|las)\b/.test(message.toLowerCase());
                             const resp = userMentionedHour 
                                 ? 'Ese horario no está disponible o no logré entenderlo. Por favor, escribe únicamente el *NÚMERO* de una de las siguientes opciones:'
                                 : 'Por favor, escribe únicamente el *NÚMERO* de la opción que prefieres para poder agendar tu cita:';
@@ -1187,24 +1226,26 @@ client.on('message', async (msg) => {
 
                     // ═══════════════════════════════════════════════════════════
                     // STEP: AI_MODIFY_SELECT
+                    // Flujo atómico: guardar la cita vieja en session.citaALiberar
+                    // y cancelarla SOLO después de que la nueva quede confirmada.
+                    // Si el paciente abandona antes, la cita original permanece intacta.
                     // ═══════════════════════════════════════════════════════════
                     if (session.step === 'AI_MODIFY_SELECT') {
                         const selectedIndex = parseInt(message.trim()) - 1;
                         if (!isNaN(selectedIndex) && session.userAppointments && session.userAppointments[selectedIndex]) {
                             const appt = session.userAppointments[selectedIndex];
-                            const success = await availabilityService.cancelAppointment(appt.id);
-                            if (success) {
-                                // Usar el nombre de la especialidad original en texto para que el modelo lo entienda
-                                session.tipoCita = appt.tipo || 'Medicina General';
-                                session.fechaPreferida = null;
-                                session.userAppointments = null;
-                                session.appointmentToCancel = null;
-                                session.step = 'AI_ASKING_DATE';
-                                await replyFn(`✅ ¡Listo! Tu cita anterior ha sido cancelada para que podamos buscar una nueva.\n\n¿Para qué fecha, día de la semana o mes te gustaría agendar tu nueva cita?`);
-                            } else {
-                                await replyFn('Hubo un error. Intenta de nuevo.');
-                                resetAppointmentSession(session);
-                            }
+                            // Guardar la cita vieja — NO cancelar todavía
+                            session.citaALiberar = appt;
+                            session.tipoCita = 'medicina general';
+                            session.fechaPreferida = null;
+                            session.userAppointments = null;
+                            session.appointmentToCancel = null;
+                            session.step = 'AI_ASKING_DATE';
+                            await replyFn(
+                                `📅 Perfecto. Tu cita actual del *${appt.fecha}* a las *${appt.hora}* con *${appt.medico}* ` +
+                                `quedará cancelada en cuanto confirmemos la nueva.\n\n` +
+                                `¿Para qué fecha, día de la semana o mes te gustaría agendar la nueva cita?`
+                            );
                         } else if (clean.match(/no|cancelar|salir/)) {
                             await replyFn('Entendido, no modificaremos tu cita. Todo sigue igual. ¿Puedo ayudarte en algo más?');
                             resetAppointmentSession(session);
@@ -1477,9 +1518,13 @@ client.on('message', async (msg) => {
                     return;
                 }
 
-                const slots = await availabilityService.getAvailableSlots(session.fechaPreferida, session.tipoCita, session.doctorPreferido);
+                // Obtener TODOS los slots (sin límite) y guardar en sesión para paginación
+                const todosSlots = await availabilityService.getAvailableSlots(session.fechaPreferida, session.tipoCita, session.doctorPreferido, true);
+                const slots = todosSlots.slice(0, 8);
 
-                if (slots.length > 0) {
+                if (todosSlots.length > 0) {
+                    session.todosLosHorarios    = todosSlots; // Lista completa — sin re-consultar
+                    session.slotOffset          = 0;          // Reiniciar página
                     session.horariosDisponibles = slots;
                     session.step = 'AI_SELECT_TIME';
 
@@ -1579,13 +1624,14 @@ client.on('message', async (msg) => {
             const tipo = 'medicina general';
             const fecha = entities.fecha || 'mañana';
 
-            let slots = await availabilityService.getAvailableSlots(fecha, tipo, entities.doctor);
+            let todosSlots = await availabilityService.getAvailableSlots(fecha, tipo, entities.doctor, true);
             let responseMsg = "";
 
-            if (slots.length === 0) {
+            if (todosSlots.length === 0) {
+                // If there are none, get the next available ones
                 const nextData = await availabilityService.getNextAvailableSlots(fecha, tipo, entities.doctor);
                 if (nextData) {
-                    slots = nextData.slots;
+                    todosSlots = nextData.slots; // This also gets all slots internally
                     session.fechaPreferida = nextData.date;
                     responseMsg = `⚠️ No hay horarios para el ${fecha}. Pero encontré esta disponibilidad el *${nextData.date}*:`;
                 } else {
@@ -1597,13 +1643,18 @@ client.on('message', async (msg) => {
                 responseMsg = `📅 Claro, aquí tienes los horarios disponibles para el ${fecha}:`;
             }
 
-            const slotsToShow = slots.slice(0, 8);
+            const slotsToShow = todosSlots.slice(0, 8);
             const slotsText = slotsToShow.map((s, i) => `${i + 1}. ⏰ ${s.time} - ${s.doctorName}`).join('\n');
-            await replyFn(`${responseMsg}\n\n${slotsText}\n\nPor favor, responde únicamente con el *NÚMERO* de la opción si deseas agendar alguno:`);
+            const remaining = todosSlots.length - slotsToShow.length;
+            const moreHint  = remaining > 0 ? `\n\n_(Hay ${remaining} opciones más. Escribe "ver más" si quieres verlas)_` : '';
+            
+            await replyFn(`${responseMsg}\n\n${slotsText}${moreHint}\n\nPor favor, responde únicamente con el *NÚMERO* de la opción si deseas agendar alguno:`);
 
             session.tipoCita = tipo;
             session.doctorPreferido = entities.doctor;
-            session.horariosDisponibles = slots;
+            session.todosLosHorarios = todosSlots;
+            session.slotOffset = 0;
+            session.horariosDisponibles = slotsToShow;
             session.step = 'AI_SELECT_TIME';
         }
 
@@ -1757,6 +1808,23 @@ client.on('message', async (msg) => {
             const phoneDisplay = cleanPhone(contacto);
             const nombreServicio = codigoToNombreServicio(userData.tipoCita);
 
+            // ── FASE 3: Si es una modificación, cancelar la cita vieja AHORA que la nueva está confirmada ──
+            if (userData.citaALiberar) {
+                const citaVieja = userData.citaALiberar;
+                console.log(`[BOT] 🔄 Modificación: cancelando cita vieja ${citaVieja.id} (${citaVieja.fecha} ${citaVieja.hora})`);
+                try {
+                    const cancelOk = await availabilityService.cancelAppointment(citaVieja.id);
+                    if (cancelOk) {
+                        console.log(`[BOT] ✅ Cita vieja cancelada exitosamente en Xenco.`);
+                    } else {
+                        console.warn(`[BOT] ⚠️ No se pudo cancelar la cita vieja ${citaVieja.id} (la nueva ya quedó agendada).`);
+                    }
+                } catch (cancelErr) {
+                    console.warn(`[BOT] ⚠️ Error cancelando cita vieja: ${cancelErr.message}`);
+                }
+                userData.citaALiberar = null;
+            }
+
             try {
                 await botPrisma.appointmentLog.create({
                     data: {
@@ -1766,12 +1834,11 @@ client.on('message', async (msg) => {
                         doctorName: userData.doctorNameSeleccionado,
                         appointmentDate: userData.fechaPreferida,
                         appointmentTime: userData.horaSeleccionada,
-                        serviceType: nombreServicio,  // usar el nombre legible ya calculado arriba
+                        serviceType: nombreServicio,
                         whatsappId: userId
                     }
                 });
                 console.log(`[BOT] ✅ AppointmentLog guardado correctamente.`);
-                // Notificar al frontend en tiempo real
                 server.emitAppointmentCreated && server.emitAppointmentCreated();
             } catch(e) {
                 console.error('[BOT] Error guardando AppointmentLog:', e.message);
@@ -1786,7 +1853,7 @@ client.on('message', async (msg) => {
                 `👨‍⚕️ *Doctor:* ${userData.doctorNameSeleccionado || 'Asignado'}\n` +
                 `📱 *Contacto:* ${phoneDisplay}\n\n` +
                 `Te enviaremos un recordatorio antes de la cita. 😊\n\n` +
-                `¿Necesitas agendar otra cita? Puedo hacerlo para ti o para alguien más de la clínica. Solo escíbeme cuando quieras.`
+                `¿Necesitas agendar otra cita? Puedo hacerlo para ti o para alguien más de la clínica. Solo escríbeme cuando quieras.`
             );
 
             // Restaurar datos del dueño si se agendó para un tercero
@@ -1803,18 +1870,15 @@ client.on('message', async (msg) => {
             chatService.updateStatus(userId, 'bot').catch(() => {});
             server.emitConversationUpdate && server.emitConversationUpdate({ id: userId, status: 'bot' });
 
-            // Limpiar campos de la cita y dejar la sesión en POST_CONFIRM para ofrecer
-            // agendar otra cita. Si el usuario vuelve a escribir (hoy, mañana, en un mes),
-            // el ALWAYS-AVAILABLE GUARD del inicio del handler garantiza respuesta.
-            userData.tipoCita           = null;
-            userData.fechaPreferida     = null;
-            userData.horaPreferida      = null;
-            userData.horariosDisponibles= null;
-            userData.diasDisponibles    = null;
-            userData.isRangeRequest     = false;
-            userData.originalRangeText  = null;
-            userData.doctorPreferido    = null;
-            userData.horaSeleccionada   = null;
+            userData.tipoCita               = null;
+            userData.fechaPreferida         = null;
+            userData.horaPreferida          = null;
+            userData.horariosDisponibles    = null;
+            userData.diasDisponibles        = null;
+            userData.isRangeRequest         = false;
+            userData.originalRangeText      = null;
+            userData.doctorPreferido        = null;
+            userData.horaSeleccionada       = null;
             userData.doctorIdSeleccionado   = null;
             userData.doctorNameSeleccionado = null;
             userData.step = 'POST_CONFIRM';

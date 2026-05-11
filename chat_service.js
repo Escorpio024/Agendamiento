@@ -14,13 +14,14 @@ class ChatService {
             });
 
             if (!conversation) {
+                const nowISO = new Date().toISOString();
                 conversation = await botPrisma.conversation.create({
                     data: {
                         id: phone,
                         name: name || phone,
                         status: 'bot',
                         unreadCount: 0,
-                        lastMessageAt: new Date()
+                        lastMessageAt: nowISO   // ← ISO string explícito evita serialización incorrecta
                     }
                 });
             } else if (name && conversation.name !== name) {
@@ -38,37 +39,54 @@ class ChatService {
 
     /**
      * Save a message to the local database (SQLite)
-     * @param {string} phone - Conversation ID
-     * @param {object} messageData - Message details
      */
     async saveMessage(phone, messageData) {
         try {
             const conversation = await this.getOrCreateConversation(phone, messageData.senderName);
 
-            const message = await botPrisma.message.upsert({
-                where: { id: messageData.id },
-                update: { mediaUrl: messageData.mediaUrl },
-                create: {
-                    id: messageData.id,
-                    conversationId: phone,
-                    fromMe: messageData.fromMe,
-                    body: messageData.body,
-                    type: messageData.type || 'chat',
-                    mediaUrl: messageData.mediaUrl,
-                    timestamp: messageData.timestamp || new Date()
-                }
-            });
+            // Siempre construir un Date válido y luego convertir a ISO string
+            // ISO string evita el bug de Prisma SQLite que guarda Date como número Unix
+            const rawTs = messageData.timestamp;
+            const tsDate = rawTs instanceof Date ? rawTs : new Date(typeof rawTs === 'number' && rawTs > 1e12 ? rawTs : (rawTs || Date.now()));
+            const tsISO  = tsDate.toISOString();
 
-            if (new Date(messageData.timestamp) > new Date(conversation.lastMessageAt)) {
-                await botPrisma.conversation.update({
-                    where: { id: phone },
-                    data: {
-                        lastMessageAt: messageData.timestamp,
-                        unreadCount: messageData.fromMe ? conversation.unreadCount : conversation.unreadCount + 1
-                    }
-                });
+            // Usar $executeRaw para el INSERT/UPSERT:
+            // - Evita que Prisma LEA registros con timestamps rotos antes de escribir
+            // - Garantiza que el timestamp se guarda como string ISO en SQLite
+            await botPrisma.$executeRaw`
+                INSERT INTO "Message" (id, conversationId, fromMe, body, type, mediaUrl, timestamp)
+                VALUES (
+                    ${messageData.id},
+                    ${phone},
+                    ${messageData.fromMe ? 1 : 0},
+                    ${messageData.body || ''},
+                    ${messageData.type || 'chat'},
+                    ${messageData.mediaUrl || null},
+                    ${tsISO}
+                )
+                ON CONFLICT(id) DO UPDATE SET mediaUrl = excluded.mediaUrl
+            `;
+
+            // Actualizar lastMessageAt de la conversación si este mensaje es más reciente
+            const convTs = conversation.lastMessageAt
+                ? new Date(conversation.lastMessageAt)
+                : new Date(0);
+            const convTsValid = isNaN(convTs.getTime()) ? new Date(0) : convTs;
+
+            if (tsDate > convTsValid) {
+                const newUnread = messageData.fromMe
+                    ? (conversation.unreadCount || 0)
+                    : (conversation.unreadCount || 0) + 1;
+
+                await botPrisma.$executeRaw`
+                    UPDATE "Conversation"
+                    SET lastMessageAt = ${tsISO},
+                        unreadCount   = ${newUnread}
+                    WHERE id = ${phone}
+                `;
             }
-            return message;
+
+            return messageData;
         } catch (e) {
             console.error('[DB] SQLite error en saveMessage. Ignorando.', e.message);
             return messageData; // Fallback
@@ -106,65 +124,81 @@ class ChatService {
      * Get all conversations enriched with remote patient data
      */
     async getConversations(status) {
-        const where = status ? { status } : {};
-        const conversations = await botPrisma.conversation.findMany({
-            where,
-            orderBy: { lastMessageAt: 'desc' },
-            include: { messages: { take: 1, orderBy: { timestamp: 'desc' } } }
-        });
+        try {
+            const where = status ? { status } : {};
+            const conversations = await botPrisma.conversation.findMany({
+                where,
+                orderBy: { lastMessageAt: 'desc' },
+                include: { messages: { take: 1, orderBy: { timestamp: 'desc' } } }
+            });
 
-        // Enrich with remote patient data (SQL Server)
-        const enriched = await Promise.all(conversations.map(async (conv) => {
-            const phoneClean = conv.id.replace(/@(c\.us|lid|s\.whatsapp\.net)/gi, '').replace(/\D/g, '');
-            const phone10 = phoneClean.slice(-10);
-            const phone7 = phoneClean.slice(-7);
+            // Normalizar timestamps — SQLite a veces los guarda como string o número
+            const normalize = (val) => {
+                if (!val) return new Date();
+                if (val instanceof Date) return val;
+                const d = new Date(val);
+                return isNaN(d.getTime()) ? new Date() : d;
+            };
 
-            let patientName = conv.name;
-            let patientDocument = null;
+            // Enrich with remote patient data (SQL Server)
+            const enriched = await Promise.all(conversations.map(async (conv) => {
+                // Normalizar timestamps de la conversación y sus mensajes
+                conv.lastMessageAt = normalize(conv.lastMessageAt);
+                if (conv.messages) {
+                    conv.messages = conv.messages.map(m => ({
+                        ...m,
+                        timestamp: normalize(m.timestamp)
+                    }));
+                }
 
-            if (phone10) {
-                try {
-                    // Lookup in REMOTE SQL Server - Priorizar TMUSUARIOSFACTURACION
-                    const pFact = await medicalPrisma.tMUSUARIOSFACTURACION.findFirst({
-                        where: {
-                            OR: [
-                                { KC2_TEL_RESP: { contains: phone10 } },
-                                { KC2_TEL_RESP: { contains: phone7 } }
-                            ]
-                        }
-                    });
+                const phoneClean = conv.id.replace(/@(c\.us|lid|s\.whatsapp\.net)/gi, '').replace(/\D/g, '');
+                const phone10 = phoneClean.slice(-10);
+                const phone7  = phoneClean.slice(-7);
 
-                    if (pFact) {
-                        patientName = `${pFact.KC2_PNOMBRE || ''} ${pFact.KC2_PAPELLIDO || ''}`.trim() || pFact.KC2_NOM_RESP || conv.name;
-                        patientDocument = pFact.KC2_OACOD_NUI || pFact.KC2_COD;
-                    } else {
-                        // Fallback a Aseguramiento
-                        const pAseg = await medicalPrisma.paciente.findFirst({
+                let patientName     = conv.name;
+                let patientDocument = null;
+
+                if (phone10) {
+                    try {
+                        const pFact = await medicalPrisma.tMUSUARIOSFACTURACION.findFirst({
                             where: {
                                 OR: [
-                                    { KC0_RES_TEL: { contains: phone10 } },
-                                    { KC0_RES_TEL: { contains: phone7 } }
+                                    { KC2_TEL_RESP: { contains: phone10 } },
+                                    { KC2_TEL_RESP: { contains: phone7  } }
                                 ]
                             }
                         });
-                        if (pAseg) {
-                            patientName = pAseg.KC0_NOM || conv.name;
-                            patientDocument = pAseg.KC0_COD;
+
+                        if (pFact) {
+                            patientName     = `${pFact.KC2_PNOMBRE || ''} ${pFact.KC2_PAPELLIDO || ''}`.trim() || pFact.KC2_NOM_RESP || conv.name;
+                            patientDocument = pFact.KC2_OACOD_NUI || pFact.KC2_COD;
+                        } else {
+                            const pAseg = await medicalPrisma.paciente.findFirst({
+                                where: {
+                                    OR: [
+                                        { KC0_RES_TEL: { contains: phone10 } },
+                                        { KC0_RES_TEL: { contains: phone7  } }
+                                    ]
+                                }
+                            });
+                            if (pAseg) {
+                                patientName     = pAseg.KC0_NOM || conv.name;
+                                patientDocument = pAseg.KC0_COD;
+                            }
                         }
+                    } catch (e) {
+                        console.error('[CHAT] Error enriqueciendo paciente desde BD remota:', e.message);
                     }
-                } catch (e) {
-                    console.error("Error fetching patient for conversation from remote DB:", e.message);
                 }
-            }
 
-            return {
-                ...conv,
-                patientName,
-                patientDocument
-            };
-        }));
+                return { ...conv, patientName, patientDocument };
+            }));
 
-        return enriched;
+            return enriched;
+        } catch (e) {
+            console.error('[CHAT] Error en getConversations:', e.message);
+            return []; // Devolver array vacío en vez de lanzar 500
+        }
     }
 
     /**

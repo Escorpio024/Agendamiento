@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 import Sidebar from '../components/Sidebar';
 import MessageList from '../components/MessageList';
 import InputArea from '../components/InputArea';
+import VisorAgenda from '../components/VisorAgenda';
 import { useChat } from '../hooks/useChat';
 import {
     User, UserPlus, Bot, MessageCircle,
@@ -244,6 +245,7 @@ export default function Home() {
     } = useChat();
 
     const [showAppointments, setShowAppointments] = useState(false);
+    const [showVisor, setShowVisor] = useState(false);
 
     const activeConversation = conversations.find(c => c.id === activeConversationId);
 
@@ -267,6 +269,7 @@ export default function Home() {
                     filter={filter}
                     setFilter={setFilter}
                     onOpenHistory={() => setShowAppointments(true)}
+                    onOpenVisor={() => setShowVisor(true)}
                     appointmentsCount={appointmentsCount}
                 />
             </div>
@@ -370,6 +373,9 @@ export default function Home() {
             {/* ── Appointments Modal ────────────────── */}
             {showAppointments && (
                 <AppointmentsModal onClose={() => setShowAppointments(false)} />
+            )}
+            {showVisor && (
+                <VisorAgenda onClose={() => setShowVisor(false)} />
             )}
         </div>
     );
