@@ -54,7 +54,9 @@ if (process.env.PUPPETEER_EXECUTABLE_PATH) {
 }
 
 const client = new Client({
-    authStrategy: new LocalAuth(),
+    authStrategy: new LocalAuth({
+        clientId: process.env.CLIENT_ID || 'session'  // LOCAL: CLIENT_ID=local → session-local/
+    }),
     puppeteer: puppeteerConfig
 });
 
@@ -622,14 +624,14 @@ client.on('message', async (msg) => {
                 const nombre  = rawName.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
                 const realPhone = pacienteExiste.KC_TEL1 || session.ownerPhone;
 
-                // Guardar owner actual
+                // Guardar owner actual ANTES de clearSessionData
                 const currentOwnerName = session.ownerName;
                 const currentOwnerCedula = session.ownerCedula;
                 const currentOwnerId = session.ownerId;
                 const currentOwnerPhone = session.ownerPhone;
                 const currentOwnerZona = session.ownerZona;
 
-                // Limpiar la sesión por completo
+                // Limpiar la sesión por completo (esto resetea step a 'WELCOME')
                 clearSessionData(session);
 
                 // Restaurar owner para que la sesión sepa quién está usando el celular
@@ -639,15 +641,20 @@ client.on('message', async (msg) => {
                 session.ownerPhone = currentOwnerPhone;
                 session.ownerZona = currentOwnerZona;
 
-                // Cambiar los datos activos de la sesión al del paciente buscado
+                // Cambiar los datos activos de la sesión al del paciente buscado (familiar)
                 session.name   = nombre;
                 session.cedula = cedula;
                 session.id     = pacienteExiste.KC_COD;
                 session.phone  = realPhone;
                 session.zona   = pacienteExiste.KC_ZONA || '001';
 
+                // ⚠️ CRÍTICO: avanzar el step FUERA de 'WELCOME' para evitar que el
+                // ALWAYS-AVAILABLE GUARD (línea ~437) restaure al dueño original en el
+                // siguiente mensaje y borre los datos del familiar recién buscado.
+                session.step = 'AI_ASKING_DATE';
+
                 const resp = await aiService.generateNaturalResponse(
-                    `Se va a agendar una cita para el paciente ${nombre} (diferente al contacto de WhatsApp). Salúdalo e indícale que encontraste su registro y pregunta qué tipo de cita necesita.`,
+                    `Se va a agendar una cita para el paciente ${nombre} (diferente al contacto de WhatsApp). Salúdalo e indícale que encontraste su registro y pregunta para qué fecha quiere la cita de Medicina General.`,
                     { nombre }, text
                 );
                 await reply(resp);
