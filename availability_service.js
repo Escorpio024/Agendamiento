@@ -789,9 +789,9 @@ async function reserveSlot(fechaStr, hora, userId, tipo = 'medicina general', me
         };
 
         // MODO A: Si Xenco tiene un slot pre-generado vacío para esta hora, ACTUALIZARLO
-        // Se busca cualquier registro existente y se verifica en JS con esSlotVacio()
-        // para evitar falsos positivos de SQL con códigos que empiecen por 0.
-        const esSlotVacioFn = (cod) => {
+        // Un slot es "libre" si KC3_COD está vacío/ceros O si fue cancelado (KC3_ESTADO='CA')
+        const esSlotVacioFn = (cod, estado) => {
+            if (estado === 'CA') return true;  // ← cancelado = disponible para nueva reserva
             if (!cod) return true;
             const t = String(cod).trim();
             return t === '' || /^0+$/.test(t);
@@ -806,14 +806,17 @@ async function reserveSlot(fechaStr, hora, userId, tipo = 'medicina general', me
             }
         });
 
-        const debeActualizar = slotExistente && esSlotVacioFn(slotExistente.KC3_COD);
+        if (slotExistente?.KC3_ESTADO === 'CA') {
+            console.log(`[HABEJICO] 🔄 Slot cancelado encontrado para médico=${slotExistente.KC3_MEDICO} ${hh}:${mm} — se reutilizará`);
+        }
+
+        const debeActualizar = slotExistente && esSlotVacioFn(slotExistente.KC3_COD, slotExistente.KC3_ESTADO);
 
         let slotAActualizar = slotExistente;
         let medicoActualizar = slot.doctorId;
 
         if (!debeActualizar) {
-            // MODO FALLBACK: buscar cualquier slot vacío en esa hora (puede ser de otro médico de la misma agenda)
-            // Xenco preasigna slots al médico 'tronco' (ej: 111), aunque la cita sea de la Dra. Ordoñez
+            // MODO FALLBACK: buscar cualquier slot vacío o cancelado en esa hora
             const slotVacioAlternativo = await prisma.cita.findFirst({
                 where: {
                     KC3_FCH: dateDecimal,
@@ -822,14 +825,14 @@ async function reserveSlot(fechaStr, hora, userId, tipo = 'medicina general', me
                 }
             });
 
-            if (slotVacioAlternativo && esSlotVacioFn(slotVacioAlternativo.KC3_COD)) {
+            if (slotVacioAlternativo && esSlotVacioFn(slotVacioAlternativo.KC3_COD, slotVacioAlternativo.KC3_ESTADO)) {
                 slotAActualizar = slotVacioAlternativo;
                 medicoActualizar = slotVacioAlternativo.KC3_MEDICO;
                 console.log(`[HABEJICO] 🔄 Slot vacío alternativo encontrado para médico=${medicoActualizar} ${hh}:${mm} (el slot real de Xenco)`);
             }
         }
 
-        const debeActualizarFinal = slotAActualizar && esSlotVacioFn(slotAActualizar.KC3_COD);
+        const debeActualizarFinal = slotAActualizar && esSlotVacioFn(slotAActualizar.KC3_COD, slotAActualizar.KC3_ESTADO);
 
         if (debeActualizarFinal) {
             const whereUpdate = { 
