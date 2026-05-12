@@ -7,6 +7,7 @@
  *  3. Busca teléfono desde TKCLIENTESANEXO5 (fuente real de Xenco)
  *     → fallback a TMUSUARIOSFACTURACION → TMUSUARIOSASEGURAMIENTO
  *  4. Corre UNA vez al día a las 9 AM (no cada hora)
+ *  5. Fix: variables phone/telefono → whatsappId (evitaba crash silencioso)
  */
 const prisma = require('./db');
 const botPrisma = require('./dbBot');  // SQLite del bot (conversaciones WhatsApp reales)
@@ -111,11 +112,9 @@ class ReminderService {
         if (!rawPhone) return null;
 
         // Buscar en SQLite si este número ya habló con el bot
-        // El conversation ID puede ser: 573016404175@c.us  O  199737538044121@lid
         try {
             const phone10 = rawPhone.slice(-10);
             const phone7  = rawPhone.slice(-7);
-            // Buscar conversaciones cuyo ID contenga los últimos 10 o 7 dígitos
             const convs = await botPrisma.conversation.findMany({
                 where: {
                     OR: [
@@ -128,7 +127,7 @@ class ReminderService {
             });
             if (convs.length > 0) {
                 console.log(`[Recordatorios] 📱 WA ID del bot: ${convs[0].id} (paciente ${codigoPac})`);
-                return convs[0].id; // WhatsApp ID real y exacto (puede ser @lid)
+                return convs[0].id;
             }
         } catch (e) {
             console.warn('[Recordatorios] No se pudo consultar SQLite:', e.message);
@@ -171,7 +170,6 @@ class ReminderService {
         let sent = 0;
         try {
             // ─── TODAS las citas de mañana: bot + Xenco ───
-            // Usamos $queryRaw para máximo control y evitar filtros del modelo Prisma
             const citas = await prisma.$queryRaw`
                 SELECT KC3_MEDICO, KC3_FCH, KC3_HH, KC3_MM,
                        KC3_COD, KC3_CONSULTORIO, KC3_USUARIO
@@ -209,7 +207,7 @@ class ReminderService {
 
                 const ok = await this.sendReminderMessage(cita, nombre, waId, medico);
                 if (ok) {
-                    this.sentToday.add(clave); // Marcar como enviado
+                    this.sentToday.add(clave);
                     sent++;
                 }
 
@@ -227,7 +225,6 @@ class ReminderService {
 
     async sendReminderMessage(cita, nombre, waId, medico) {
         try {
-            // waId puede ser: '573016404175@c.us' (Xenco) o '199737538044121@lid' (bot SQLite)
             if (!waId) return false;
             // Asegurar que tiene sufijo @...
             const whatsappId = waId.includes('@') ? waId : `57${waId}@c.us`;
@@ -235,9 +232,9 @@ class ReminderService {
             // Formatear fecha
             const fchStr = String(cita.KC3_FCH);
             const fechaObj = new Date(
-                parseInt(fchStr.slice(0,4)),
-                parseInt(fchStr.slice(4,6)) - 1,
-                parseInt(fchStr.slice(6,8))
+                parseInt(fchStr.slice(0, 4)),
+                parseInt(fchStr.slice(4, 6)) - 1,
+                parseInt(fchStr.slice(6, 8))
             );
             const fechaFmt = fechaObj.toLocaleDateString('es-CO', {
                 weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
@@ -248,7 +245,7 @@ class ReminderService {
             const mm = Number(cita.KC3_MM);
             const h12 = hh % 12 || 12;
             const period = hh < 12 ? 'AM' : 'PM';
-            const horaFmt = `${h12}:${String(mm).padStart(2,'0')} ${period}`;
+            const horaFmt = `${h12}:${String(mm).padStart(2, '0')} ${period}`;
 
             const primerNombre = nombre.split(/[\s,]+/)[0] || 'Paciente';
             const nomMedico = medico?.MED_NOMBRE?.trim() || 'tu médico asignado';
@@ -269,15 +266,15 @@ class ReminderService {
             // Verificar que WhatsApp esté conectado antes de enviar
             const waState = await this.client.getState().catch(() => null);
             if (waState !== 'CONNECTED') {
-                console.warn(`[Recordatorios] ⚠️  WA no conectado (${waState}), omitiendo envío a ${phone}`);
+                console.warn(`[Recordatorios] ⚠️  WA no conectado (${waState}), omitiendo envío a ${whatsappId}`);
                 return false;
             }
 
             await this.client.sendMessage(whatsappId, mensaje);
-            console.log(`[Recordatorios] ✅ Enviado a ${primerNombre} (${phone})`);
+            console.log(`[Recordatorios] ✅ Enviado a ${primerNombre} (${whatsappId})`);
             return true;
         } catch (error) {
-            console.error(`[Recordatorios] ❌ Error enviando a ${telefono}:`, error.message);
+            console.error(`[Recordatorios] ❌ Error enviando a ${waId}:`, error.message);
             return false;
         }
     }
