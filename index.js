@@ -1828,14 +1828,15 @@ client.on('message', async (msg) => {
             try {
                 await botPrisma.appointmentLog.create({
                     data: {
-                        patientName: userData.name,
+                        patientName:     userData.name,
                         patientDocument: userData.cedula,
-                        doctorId: userData.doctorIdSeleccionado != null ? String(userData.doctorIdSeleccionado) : null,
-                        doctorName: userData.doctorNameSeleccionado,
+                        doctorId:        userData.doctorIdSeleccionado != null ? String(userData.doctorIdSeleccionado) : null,
+                        doctorName:      userData.doctorNameSeleccionado,
                         appointmentDate: userData.fechaPreferida,
                         appointmentTime: userData.horaSeleccionada,
-                        serviceType: nombreServicio,
-                        whatsappId: userId
+                        serviceType:     nombreServicio,
+                        whatsappId:      userId,
+                        patientPhone:    contacto || null   // ← teléfono confirmado por el paciente
                     }
                 });
                 console.log(`[BOT] ✅ AppointmentLog guardado correctamente.`);

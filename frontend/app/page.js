@@ -177,7 +177,11 @@ function AppointmentsModal({ onClose }) {
                                                 </div>
                                                 <div className="flex items-center gap-1.5">
                                                     <Phone size={11} className="text-[#A1E3D8]/60 flex-shrink-0" />
-                                                    <span className="text-xs text-[#F5F5F7]/55 truncate">{appt.whatsappId?.replace('@c.us', '')}</span>
+                                                    <span className="text-xs text-[#F5F5F7]/55 truncate">
+                                                        {appt.patientPhone
+                                                            ? appt.patientPhone
+                                                            : appt.whatsappId?.replace(/@(c\.us|lid)$/, '') || '—'}
+                                                    </span>
                                                 </div>
                                                 <div className="flex items-center gap-1.5">
                                                     <Calendar size={11} className="text-[#A1E3D8]/60 flex-shrink-0" />

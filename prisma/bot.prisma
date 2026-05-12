@@ -40,5 +40,6 @@ model AppointmentLog {
   appointmentTime String
   serviceType    String?
   whatsappId     String
+  patientPhone   String?
   createdAt      DateTime @default(now())
 }
