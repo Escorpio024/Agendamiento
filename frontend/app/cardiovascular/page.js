@@ -442,11 +442,11 @@ export default function CardiovascularPage() {
                             <SectionHeader icon={User} title="Datos del Paciente" />
                             {patient ? (
                                 <div className="grid grid-cols-2 gap-x-6 gap-y-3 mt-1">
-                                    <InfoField icon={User} label="Nombre" value={patient.nombre} full />
-                                    <InfoField icon={Hash} label="ID / Cédula" value={patient.documento} />
-                                    <InfoField icon={Clock} label="Edad" value={patient.edad ? `${patient.edad} años` : '—'} />
-                                    <InfoField icon={Phone} label="Teléfono" value={patient.telefono} />
-                                    <InfoField icon={Building2} label="Entidad" value={patient.entidad} full />
+                                    <InfoField icon={User}     label="Nombre"    value={patient.nombre}                          />
+                                    <InfoField icon={Hash}     label="Cédula"    value={patient.documento}                      />
+                                    <InfoField icon={Clock}    label="Edad"      value={patient.edad ? `${patient.edad} años` : '—'} />
+                                    <InfoField icon={Phone}    label="Teléfono"  value={patient.telefono}                       />
+                                    <InfoField icon={Building2} label="Entidad"  value={patient.entidad} full                  />
                                 </div>
                             ) : (
                                 <div className="flex items-center gap-3 py-4 px-3 rounded-xl"

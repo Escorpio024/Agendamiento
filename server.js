@@ -284,7 +284,7 @@ app.get('/api/cardiovascular/patient/:id', async (req, res) => {
               AND (o.QLO_EST_ANULADO IS NULL OR o.QLO_EST_ANULADO = '')
               AND NOT EXISTS (
                   SELECT 1 FROM TYORDENESLABENVIADAS y
-                  WHERE y.YKL_ARTIC = o.QLO_COD_ARTIC
+                  WHERE REPLACE(y.YKL_ARTIC, '*', '') = REPLACE(o.QLO_COD_ARTIC, '*', '')
                     AND CAST(TRY_CAST(y.YKL_NUMERO_ID AS BIGINT) AS VARCHAR) = '${cedula}'
               )
             ORDER BY o.QLO_FCH DESC
