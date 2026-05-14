@@ -203,6 +203,7 @@ app.post('/api/appointments/:id/remind', async (req, res) => {
 // Códigos CUPS de exámenes cardiovasculares (exactos tal como aparecen en Xenco)
 const CVD_CODES = [
     '902210',   // HEMOGRAMA IV
+    '*902207',  // HEMOGRAMA I
     '*903841',  // GLUCOSA EN SUERO
     '*903818',  // COLESTEROL TOTAL
     '*903815',  // COLESTEROL HDL
@@ -212,6 +213,10 @@ const CVD_CODES = [
     '*907106',  // UROANÁLISIS
     '*895100',  // ELECTROCARDIOGRAMA (ritmo)
     '*895201',  // ELECTROCARDIOGRAMA (alta resolución)
+    '*903822',  // CREATININA
+    '903895',   // CREATININA EN SUERO/ORINA (Variante)
+    '903856',   // NITROGENO UREICO (BUN)
+    '*903856',  // NITROGENO UREICO (BUN) con asterisco por si acaso
 ];
 
 const CVD_CODES_SQL = CVD_CODES.map(c => `'${c}'`).join(',');
