@@ -1581,7 +1581,9 @@ client.on('message', async (msg) => {
             } else if (!session.fechaPreferida) {
                 // Mostrar la semana de días disponibles para que el usuario escoja.
                 // Se parte desde el primer día con turnos disponibles (puede ser una fecha futura del cronograma).
-                const todayStr = new Date().toISOString().split('T')[0];
+                // Usar fecha local (no UTC) para evitar desfase de timezone en Colombia (UTC-5)
+                const nowLocal = new Date();
+                const todayStr = `${nowLocal.getFullYear()}-${String(nowLocal.getMonth()+1).padStart(2,'0')}-${String(nowLocal.getDate()).padStart(2,'0')}`;
 
                 // Buscar el primer día con disponibilidad para encontrar el punto de partida del cronograma
                 const firstAvail = await availabilityService.getNextAvailableSlots(todayStr, session.tipoCita, session.doctorPreferido);

@@ -1,8 +1,9 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-    experimental: {
-        turbopack: false,
+    turbopack: {
+        root: __dirname,
     },
 };
 
 module.exports = nextConfig;
+
