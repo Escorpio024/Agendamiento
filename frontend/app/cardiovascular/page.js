@@ -23,7 +23,11 @@ const MOCK_REALIZADOS = [];
 function formatDate(str) {
     if (!str) return '—';
     try {
-        return new Date(str).toLocaleDateString('es-CO', {
+        // El string llega como "YYYY-MM-DD" (ej. 2026-05-04).
+        // Al agregar 'T12:00:00', evitamos que la conversión a la zona horaria local 
+        // (UTC-5 en Colombia) reste horas y lo empuje al día anterior.
+        const d = new Date(str.includes('T') ? str : str + 'T12:00:00');
+        return d.toLocaleDateString('es-CO', {
             day: '2-digit', month: 'short', year: 'numeric'
         });
     } catch { return str; }
