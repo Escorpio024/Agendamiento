@@ -154,38 +154,38 @@ client.on('auth_failure', (msg) => {
 });
 
 // ── KEEPALIVE ─────────────────────────────────────────────────────────────
-// Ping cada 4 minutos para mantener WhatsApp activo.
-// Si Chrome (Puppeteer) se cae → salir con código 1 para que PM2 reinicie limpio.
-let keepaliveFailCount = 0;
-setInterval(async () => {
-    try {
-        const state = await client.getState();
-        keepaliveFailCount = 0; // resetear contador en éxito
-        console.log(`[KEEPALIVE] Estado WA: ${state}`);
-        if (state !== 'CONNECTED') {
-            console.warn('[KEEPALIVE] ⚠️ No conectado, intentando reconectar...');
-            client.initialize().catch(() => {});
+// Solo activo si WhatsApp está habilitado
+if (process.env.NO_WHATSAPP !== 'true') {
+    let keepaliveFailCount = 0;
+    setInterval(async () => {
+        try {
+            const state = await client.getState();
+            keepaliveFailCount = 0;
+            console.log(`[KEEPALIVE] Estado WA: ${state}`);
+            if (state !== 'CONNECTED') {
+                console.warn('[KEEPALIVE] ⚠️ No conectado, intentando reconectar...');
+                client.initialize().catch(() => {});
+            }
+        } catch (e) {
+            keepaliveFailCount++;
+            const isChromeCrash = e.message && (
+                e.message.includes('detached Frame') ||
+                e.message.includes('Target closed') ||
+                e.message.includes('Session closed') ||
+                e.message.includes('Protocol error')
+            );
+            if (isChromeCrash) {
+                console.error(`[KEEPALIVE] 💀 Chrome caído (${e.message.substring(0,50)}). PM2 reiniciará el proceso...`);
+                process.exit(1);
+            }
+            console.warn(`[KEEPALIVE] Error #${keepaliveFailCount} comprobando estado:`, e.message?.substring(0, 80));
+            if (keepaliveFailCount >= 3) {
+                console.error('[KEEPALIVE] 💀 3 fallos consecutivos. Reiniciando proceso...');
+                process.exit(1);
+            }
         }
-    } catch (e) {
-        keepaliveFailCount++;
-        const isChromeCrash = e.message && (
-            e.message.includes('detached Frame') ||
-            e.message.includes('Target closed') ||
-            e.message.includes('Session closed') ||
-            e.message.includes('Protocol error')
-        );
-        if (isChromeCrash) {
-            console.error(`[KEEPALIVE] 💀 Chrome caído (${e.message.substring(0,50)}). PM2 reiniciará el proceso...`);
-            process.exit(1); // PM2 reinicia con Chrome nuevo — solución definitiva
-        }
-        console.warn(`[KEEPALIVE] Error #${keepaliveFailCount} comprobando estado:`, e.message?.substring(0, 80));
-        // Si hay más de 3 fallos consecutivos no identificados, también reiniciar
-        if (keepaliveFailCount >= 3) {
-            console.error('[KEEPALIVE] 💀 3 fallos consecutivos. Reiniciando proceso...');
-            process.exit(1);
-        }
-    }
-}, 4 * 60 * 1000); // cada 4 minutos
+    }, 4 * 60 * 1000);
+}
 
 
 client.on('message_create', async (msg) => {
@@ -1927,7 +1927,16 @@ async function loadHistoricalMessages() {
     }
 }
 
-client.initialize().catch(e => {
-    console.error('[WA] ❌ Error al iniciar el cliente:', e.message);
-    process.exit(1); // PM2 reiniciará el proceso automáticamente
-});
+// ─── INICIO ───────────────────────────────────────────────────────────────────
+if (process.env.NO_WHATSAPP === 'true') {
+    // MODO LOCAL: iniciar el servidor sin WhatsApp (solo API + frontend)
+    console.log('⚠️  [MODO LOCAL] NO_WHATSAPP=true — WhatsApp deshabilitado');
+    console.log('📡  El servidor API arrancará directamente en puerto 3001...');
+    server.start(null); // null = sin cliente WA, las funciones WA retornarán 503
+} else {
+    // MODO PRODUCCIÓN: iniciar WhatsApp (necesita Puppeteer + Chrome)
+    client.initialize().catch(e => {
+        console.error('[WA] ❌ Error al iniciar el cliente:', e.message);
+        process.exit(1);
+    });
+}
