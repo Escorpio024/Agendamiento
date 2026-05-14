@@ -270,25 +270,43 @@ app.get('/api/cardiovascular/patient/:id', async (req, res) => {
         const patient = { nombre, documento: cedula, edad, telefono, entidad: p.entidad };
 
         // ── 2. PROGRAMADOS: médico ordenó el examen, paciente aún no viene ──
-        // (TQORDENESMEDICAS con QLO_EST_ESTADOLB='1' y código CVD)
         const programadosRows = await medicalPrisma.$queryRawUnsafe(`
+            WITH TodasLasOrdenes AS (
+                SELECT
+                    QLO_COD_ARTIC                   AS codigo,
+                    LTRIM(RTRIM(QLO_NOM_DESC))      AS tipoExamen,
+                    QLO_FCH                         AS fecha,
+                    CAST(QLO_NUM_MED AS VARCHAR)    AS doctor
+                FROM TQORDENESMEDICAS
+                WHERE QLO_COD = '${cedula14}'
+                  AND QLO_COD_ARTIC IN (${CVD_CODES_SQL})
+                  AND QLO_EST_ESTADOLB = '1'
+                  AND (QLO_EST_ANULADO IS NULL OR QLO_EST_ANULADO = '')
+                
+                UNION ALL
+                
+                SELECT
+                    QM3_COD_ARTIC                   AS codigo,
+                    LTRIM(RTRIM(QM3_NOM_DESC))      AS tipoExamen,
+                    QM3_FCH                         AS fecha,
+                    CAST(QM3_COD_MEDICO AS VARCHAR) AS doctor
+                FROM TQMOVIMIENTOCONDUCTASD
+                WHERE QM3_COD = '${cedula14}'
+                  AND QM3_COD_ARTIC IN (${CVD_CODES_SQL})
+            )
             SELECT
-                o.QLO_COD_ARTIC                         AS codigo,
-                MAX(LTRIM(RTRIM(o.QLO_NOM_DESC)))       AS tipoExamen,
-                MAX(o.QLO_FCH)                          AS fecha,
-                MAX(CAST(o.QLO_NUM_MED AS VARCHAR))     AS doctor
-            FROM TQORDENESMEDICAS o
-            WHERE o.QLO_COD = '${cedula14}'
-              AND o.QLO_COD_ARTIC IN (${CVD_CODES_SQL})
-              AND o.QLO_EST_ESTADOLB = '1'
-              AND (o.QLO_EST_ANULADO IS NULL OR o.QLO_EST_ANULADO = '')
-              AND NOT EXISTS (
+                codigo,
+                MAX(tipoExamen) AS tipoExamen,
+                MAX(fecha)      AS fecha,
+                MAX(doctor)     AS doctor
+            FROM TodasLasOrdenes o
+            WHERE NOT EXISTS (
                   SELECT 1 FROM TYORDENESLABENVIADAS y
-                  WHERE REPLACE(y.YKL_ARTIC, '*', '') = REPLACE(o.QLO_COD_ARTIC, '*', '')
+                  WHERE REPLACE(y.YKL_ARTIC, '*', '') = REPLACE(o.codigo, '*', '')
                     AND CAST(TRY_CAST(y.YKL_NUMERO_ID AS BIGINT) AS VARCHAR) = '${cedula}'
-              )
-            GROUP BY o.QLO_COD_ARTIC
-            ORDER BY MAX(o.QLO_FCH) DESC
+            )
+            GROUP BY codigo
+            ORDER BY MAX(fecha) DESC
         `);
 
         const programados = programadosRows.map(r => ({
