@@ -34,7 +34,7 @@ const modules = [
         badgeBg: 'rgba(177,64,64,0.18)',
         badgeBorder: 'rgba(177,64,64,0.35)',
         badgeText: '#EDAFAF',
-        tag: 'Activo',
+        tag: 'Pruebas',
         href: '/cardiovascular',
         features: ['Cardiología', 'Seguimiento', 'Especialistas', 'Reportes'],
         available: true,

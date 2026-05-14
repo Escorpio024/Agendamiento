@@ -292,7 +292,7 @@ export default function CardiovascularPage() {
     };
 
     return (
-        <div className="min-h-screen flex flex-col" style={{ background: 'var(--chat-bg)' }}>
+        <div className="h-screen flex flex-col" style={{ background: 'var(--chat-bg)' }}>
 
             {/* ── Subtle grid bg ── */}
             <div className="fixed inset-0 chat-bg pointer-events-none" />
@@ -410,6 +410,33 @@ export default function CardiovascularPage() {
                     {/* ══════════ LEFT COLUMN ══════════ */}
                     <div className="flex flex-col gap-6">
 
+                        {/* ── Datos del Paciente ── */}
+                        <div className="p-5" style={cardStyle}>
+                            <SectionHeader icon={User} title="Datos del Paciente" />
+                            {patient ? (
+                                <div className="grid grid-cols-2 gap-x-6 gap-y-3 mt-1">
+                                    <InfoField icon={User} label="Nombre" value={patient.nombre} />
+                                    <InfoField icon={Hash} label="Cédula" value={patient.documento} />
+                                    <InfoField icon={Clock} label="Edad" value={patient.edad ? `${patient.edad} años` : '—'} />
+                                    <InfoField icon={Phone} label="Teléfono" value={patient.telefono} />
+                                    <InfoField icon={Building2} label="Entidad" value={patient.entidad} full />
+                                </div>
+                            ) : (
+                                <div className="flex items-center gap-3 py-4 px-3 rounded-xl"
+                                    style={{ background: 'rgba(45,40,62,0.4)', border: '1px solid rgba(45,40,62,0.7)' }}>
+                                    <User size={28} style={{ color: 'rgba(245,245,247,0.1)', flexShrink: 0 }} />
+                                    <div>
+                                        <p className="text-sm font-medium" style={{ color: 'rgba(245,245,247,0.3)' }}>
+                                            NOMBRE COMPLETO · ID · AÑOS · TEL · ENTIDAD
+                                        </p>
+                                        <p className="text-[11px] mt-0.5" style={{ color: 'rgba(245,245,247,0.2)' }}>
+                                            Busca un paciente para ver su información
+                                        </p>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
                         {/* ── Exámenes Programados ── */}
                         <div className="p-5 flex flex-col" style={{ ...cardStyle, minHeight: '420px' }}>
                             <SectionHeader
@@ -436,33 +463,6 @@ export default function CardiovascularPage() {
 
                     {/* ══════════ RIGHT COLUMN ══════════ */}
                     <div className="flex flex-col gap-5">
-
-                        {/* ── Datos del Paciente ── */}
-                        <div className="p-5" style={cardStyle}>
-                            <SectionHeader icon={User} title="Datos del Paciente" />
-                            {patient ? (
-                                <div className="grid grid-cols-2 gap-x-6 gap-y-3 mt-1">
-                                    <InfoField icon={User}     label="Nombre"    value={patient.nombre}                          />
-                                    <InfoField icon={Hash}     label="Cédula"    value={patient.documento}                      />
-                                    <InfoField icon={Clock}    label="Edad"      value={patient.edad ? `${patient.edad} años` : '—'} />
-                                    <InfoField icon={Phone}    label="Teléfono"  value={patient.telefono}                       />
-                                    <InfoField icon={Building2} label="Entidad"  value={patient.entidad} full                  />
-                                </div>
-                            ) : (
-                                <div className="flex items-center gap-3 py-4 px-3 rounded-xl"
-                                    style={{ background: 'rgba(45,40,62,0.4)', border: '1px solid rgba(45,40,62,0.7)' }}>
-                                    <User size={28} style={{ color: 'rgba(245,245,247,0.1)', flexShrink: 0 }} />
-                                    <div>
-                                        <p className="text-sm font-medium" style={{ color: 'rgba(245,245,247,0.3)' }}>
-                                            NOMBRE COMPLETO · ID · AÑOS · TEL · ENTIDAD
-                                        </p>
-                                        <p className="text-[11px] mt-0.5" style={{ color: 'rgba(245,245,247,0.2)' }}>
-                                            Busca un paciente para ver su información
-                                        </p>
-                                    </div>
-                                </div>
-                            )}
-                        </div>
 
                         {/* ── Exámenes Pendientes ── */}
                         <div className="p-5" style={cardStyle}>
