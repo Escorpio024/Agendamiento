@@ -107,7 +107,7 @@ function ExamenProgramadoRow({ examen, onRemind, sendingId }) {
                 </div>
             </div>
             <button
-                onClick={() => onRemind(examen.id)}
+                onClick={() => onRemind(examen.id, examen.tipoExamen)}
                 disabled={isSending}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-all ml-3 flex-shrink-0"
                 style={{
@@ -254,10 +254,14 @@ export default function CardiovascularPage() {
         }
     }, [searchId]);
 
-    const handleRemind = async (id) => {
+    const handleRemind = async (id, tipoExamen) => {
         setSendingId(id);
         try {
-            const res = await fetch(`${API_BASE}/api/cardiovascular/remind/${id}`, { method: 'POST' });
+            const res = await fetch(`${API_BASE}/api/cardiovascular/remind/${id}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ cedula: patient?.documento, examen: tipoExamen })
+            });
             if (res.ok) showToast('✅ Recordatorio enviado');
             else showToast('❌ Error al enviar recordatorio', 'error');
         } catch {

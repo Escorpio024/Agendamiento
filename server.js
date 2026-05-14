@@ -198,6 +198,180 @@ app.post('/api/appointments/:id/remind', async (req, res) => {
     }
 });
 
+// ─── MÓDULO CARDIOVASCULAR ────────────────────────────────────────────────────
+
+// Códigos CUPS de exámenes cardiovasculares (exactos tal como aparecen en Xenco)
+const CVD_CODES = [
+    '902210',   // HEMOGRAMA IV
+    '*903841',  // GLUCOSA EN SUERO
+    '*903818',  // COLESTEROL TOTAL
+    '*903815',  // COLESTEROL HDL
+    '*903817',  // COLESTEROL LDL
+    '*903868',  // TRIGLICÉRIDOS
+    '*903801',  // ÁCIDO ÚRICO
+    '*907106',  // UROANÁLISIS
+    '*895100',  // ELECTROCARDIOGRAMA (ritmo)
+    '*895201',  // ELECTROCARDIOGRAMA (alta resolución)
+];
+
+const CVD_CODES_SQL = CVD_CODES.map(c => `'${c}'`).join(',');
+
+// GET /api/cardiovascular/patient/:id
+app.get('/api/cardiovascular/patient/:id', async (req, res) => {
+    try {
+        const cedula = req.params.id.replace(/\D/g, '');
+        const cedula14 = cedula.padStart(14, '0');
+
+        // ── 1. Datos del paciente ──
+        const pacRows = await medicalPrisma.$queryRawUnsafe(`
+            SELECT TOP 1
+                LTRIM(RTRIM(KC2_PNOMBRE))   AS pnombre,
+                LTRIM(RTRIM(KC2_SNOMBRE))   AS snombre,
+                LTRIM(RTRIM(KC2_PAPELLIDO)) AS papellido,
+                LTRIM(RTRIM(KC2_SAPELLIDO)) AS sapellido,
+                KC2_OACOD_NUI               AS nui,
+                KC2_COD                     AS cod,
+                KC2_TEL_RESP                AS telefono,
+                KC_FCH_NACE                 AS fch_nace,
+                LTRIM(RTRIM(ENT_NOMBRE))    AS entidad
+            FROM TMUSUARIOSFACTURACION
+            LEFT JOIN TKCLIENTES  ON KC2_ZONA = KC_ZONA AND KC2_COD = KC_COD AND KC2_SEQK = KC_SEQK
+            LEFT JOIN TMENTIDADES ON ENT_COD = KC2_COD_ENTIDAD
+            WHERE KC2_OACOD_NUI = '${cedula}'
+               OR CAST(CAST(KC2_COD AS BIGINT) AS VARCHAR) = '${cedula}'
+            ORDER BY KC2_FCH_DIG DESC
+        `);
+
+        if (!pacRows.length) return res.status(404).json({ error: 'Paciente no encontrado' });
+        const p = pacRows[0];
+
+        const nombre = [p.papellido, p.sapellido, p.pnombre, p.snombre].filter(Boolean).join(' ').trim();
+        let edad = null;
+        if (p.fch_nace && p.fch_nace > 0) {
+            const nacStr = String(p.fch_nace).padStart(8, '0');
+            const nac = new Date(
+                parseInt(nacStr.slice(0,4)),
+                parseInt(nacStr.slice(4,6)) - 1,
+                parseInt(nacStr.slice(6,8))
+            );
+            edad = Math.floor((new Date() - nac) / (365.25 * 24 * 3600 * 1000));
+        }
+
+        // Buscar celular en TKCLIENTESANEXO5 si no tiene en facturación
+        let telefono = p.telefono?.trim() || null;
+        if (!telefono || /^0+$/.test(telefono)) {
+            const kc5 = await medicalPrisma.$queryRawUnsafe(`
+                SELECT TOP 1 KC5_TEL_CEL FROM TKCLIENTESANEXO5
+                WHERE KC5_RACOD_CLI IN ('${cedula}', '${cedula14}')
+            `);
+            telefono = kc5[0]?.KC5_TEL_CEL?.trim() || null;
+        }
+
+        const patient = { nombre, documento: cedula, edad, telefono, entidad: p.entidad };
+
+        // ── 2. PROGRAMADOS: médico ordenó el examen, paciente aún no viene ──
+        // (TQORDENESMEDICAS con QLO_EST_ESTADOLB='1' y código CVD)
+        const programadosRows = await medicalPrisma.$queryRawUnsafe(`
+            SELECT DISTINCT
+                o.QLO_COD_ARTIC AS codigo,
+                LTRIM(RTRIM(o.QLO_NOM_DESC)) AS tipoExamen,
+                o.QLO_FCH AS fecha,
+                LTRIM(RTRIM(m.MED_NOMBRE)) AS doctor
+            FROM TQORDENESMEDICAS o
+            LEFT JOIN TMMEDICOS m ON CAST(m.MED_COD AS VARCHAR) = LTRIM(RTRIM(CAST(o.QLO_COD_MEDICO AS VARCHAR)))
+            WHERE o.QLO_COD = '${cedula14}'
+              AND o.QLO_COD_ARTIC IN (${CVD_CODES_SQL})
+              AND o.QLO_EST_ESTADOLB = '1'
+              AND (o.QLO_EST_ANULADO IS NULL OR o.QLO_EST_ANULADO = '')
+              AND NOT EXISTS (
+                  SELECT 1 FROM TYORDENESLABENVIADAS y
+                  WHERE y.YKL_ARTIC = o.QLO_COD_ARTIC
+                    AND CAST(CAST(y.YKL_NUMERO_ID AS BIGINT) AS VARCHAR) = '${cedula}'
+              )
+            ORDER BY o.QLO_FCH DESC
+        `);
+
+        const programados = programadosRows.map(r => ({
+            id: `prog-${r.codigo}-${r.fecha}`,
+            codigo: r.codigo,
+            tipoExamen: r.tipoExamen || r.codigo,
+            fecha: r.fecha ? String(r.fecha).replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3') : null,
+            doctor: r.doctor
+        }));
+
+        // ── 3. PENDIENTES: llegó a facturación, lab aún no lo procesa ──
+        const pendientesRows = await medicalPrisma.$queryRawUnsafe(`
+            SELECT DISTINCT
+                y.YKL_ARTIC AS codigo,
+                LTRIM(RTRIM(y.YKL_NOM_ARTIC)) AS tipoExamen,
+                y.YKL_FECHA AS fecha,
+                LTRIM(RTRIM(y.YKL_NOM_USUARIO + ' ' + y.YKL_APELLIDO_USUARIO)) AS doctor
+            FROM TYORDENESLABENVIADAS y
+            WHERE CAST(CAST(y.YKL_NUMERO_ID AS BIGINT) AS VARCHAR) = '${cedula}'
+              AND y.YKL_ARTIC IN (${CVD_CODES_SQL})
+              AND (y.YKL_PROCESADA_LAB IS NULL OR y.YKL_PROCESADA_LAB = '')
+            ORDER BY y.YKL_FECHA DESC
+        `);
+
+        const pendientes = pendientesRows.map(r => ({
+            id: `pend-${r.codigo}-${r.fecha}`,
+            codigo: r.codigo,
+            tipoExamen: r.tipoExamen || r.codigo,
+            fecha: r.fecha ? String(r.fecha).replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3') : null,
+            doctor: r.doctor?.trim() || null
+        }));
+
+        // ── 4. REALIZADOS: lab ya los procesó ──
+        const realizadosRows = await medicalPrisma.$queryRawUnsafe(`
+            SELECT DISTINCT
+                y.YKL_ARTIC AS codigo,
+                LTRIM(RTRIM(y.YKL_NOM_ARTIC)) AS tipoExamen,
+                y.YKL_FECHA AS fecha,
+                LTRIM(RTRIM(y.YKL_NOM_USUARIO + ' ' + y.YKL_APELLIDO_USUARIO)) AS doctor
+            FROM TYORDENESLABENVIADAS y
+            WHERE CAST(CAST(y.YKL_NUMERO_ID AS BIGINT) AS VARCHAR) = '${cedula}'
+              AND y.YKL_ARTIC IN (${CVD_CODES_SQL})
+              AND y.YKL_PROCESADA_LAB = 'S'
+            ORDER BY y.YKL_FECHA DESC
+        `);
+
+        const realizados = realizadosRows.map(r => ({
+            id: `real-${r.codigo}-${r.fecha}`,
+            codigo: r.codigo,
+            tipoExamen: r.tipoExamen || r.codigo,
+            fecha: r.fecha ? String(r.fecha).replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3') : null,
+            doctor: r.doctor?.trim() || null
+        }));
+
+        res.json({ patient, programados, pendientes, realizados });
+
+    } catch (error) {
+        console.error('[CARDIOVASCULAR] Error:', error.message);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// POST /api/cardiovascular/remind/:id — Recordatorio por WhatsApp
+app.post('/api/cardiovascular/remind/:id', async (req, res) => {
+    try {
+        if (!whatsappClient) return res.status(503).json({ error: 'WhatsApp no conectado' });
+        const { cedula, examen } = req.body;
+        const phone = cedula ? `57${cedula}@c.us` : null;
+        if (!phone) return res.status(400).json({ error: 'Se requiere cédula en body' });
+
+        const msg = `🔔 *RECORDATORIO — Examen Pendiente*\n\nHola, te recordamos que tienes el siguiente examen pendiente:\n\n🧪 *${examen || 'Examen cardiovascular'}*\n\nPor favor acércate a nuestra institución para realizarlo. 😊\n\n_Aurora — Aurora E.S.E._`;
+        await whatsappClient.sendMessage(phone, msg);
+        res.json({ success: true });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// POST /api/cardiovascular/schedule/:id — Placeholder agendamiento
+app.post('/api/cardiovascular/schedule/:id', async (req, res) => {
+    res.json({ success: true, message: 'Funcionalidad en desarrollo' });
+});
+
 // ─── VISOR DE AGENDA ────────────────────────────────────────────────────────
 
 // GET /api/visor/medicos — Lista de médicos con agenda activa
