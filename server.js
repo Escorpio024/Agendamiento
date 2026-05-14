@@ -276,7 +276,7 @@ app.get('/api/cardiovascular/patient/:id', async (req, res) => {
                     QLO_COD_ARTIC                   AS codigo,
                     LTRIM(RTRIM(QLO_NOM_DESC))      AS tipoExamen,
                     QLO_FCH                         AS fecha,
-                    CAST(QLO_NUM_MED AS VARCHAR)    AS doctor
+                    CAST(QLO_NUM_MED AS VARCHAR)    AS doctor_id
                 FROM TQORDENESMEDICAS
                 WHERE QLO_COD = '${cedula14}'
                   AND QLO_COD_ARTIC IN (${CVD_CODES_SQL})
@@ -289,24 +289,25 @@ app.get('/api/cardiovascular/patient/:id', async (req, res) => {
                     QM3_COD_ARTIC                   AS codigo,
                     LTRIM(RTRIM(QM3_NOM_DESC))      AS tipoExamen,
                     QM3_FCH                         AS fecha,
-                    CAST(QM3_COD_MEDICO AS VARCHAR) AS doctor
+                    CAST(QM3_COD_MEDICO AS VARCHAR) AS doctor_id
                 FROM TQMOVIMIENTOCONDUCTASD
                 WHERE QM3_COD = '${cedula14}'
                   AND QM3_COD_ARTIC IN (${CVD_CODES_SQL})
             )
             SELECT
-                codigo,
-                MAX(tipoExamen) AS tipoExamen,
-                MAX(fecha)      AS fecha,
-                MAX(doctor)     AS doctor
+                o.codigo,
+                MAX(o.tipoExamen) AS tipoExamen,
+                MAX(o.fecha)      AS fecha,
+                MAX(LTRIM(RTRIM(m.MED_NOMBRE))) AS doctor
             FROM TodasLasOrdenes o
+            LEFT JOIN TMMEDICOS m ON CAST(m.MED_COD AS VARCHAR) = o.doctor_id
             WHERE NOT EXISTS (
                   SELECT 1 FROM TYORDENESLABENVIADAS y
                   WHERE REPLACE(y.YKL_ARTIC, '*', '') = REPLACE(o.codigo, '*', '')
                     AND CAST(TRY_CAST(y.YKL_NUMERO_ID AS BIGINT) AS VARCHAR) = '${cedula}'
             )
-            GROUP BY codigo
-            ORDER BY MAX(fecha) DESC
+            GROUP BY o.codigo
+            ORDER BY MAX(o.fecha) DESC
         `);
 
         const programados = programadosRows.map(r => ({
@@ -314,16 +315,27 @@ app.get('/api/cardiovascular/patient/:id', async (req, res) => {
             codigo: r.codigo,
             tipoExamen: r.tipoExamen || r.codigo,
             fecha: r.fecha ? String(r.fecha).replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3') : null,
-            doctor: r.doctor
+            doctor: r.doctor?.trim() || null
         }));
 
         // ── 3. PENDIENTES: llegó a facturación, lab aún no lo procesa ──
         const pendientesRows = await medicalPrisma.$queryRawUnsafe(`
             SELECT
-                y.YKL_ARTIC                                                           AS codigo,
-                MAX(LTRIM(RTRIM(y.YKL_NOM_ARTIC)))                                   AS tipoExamen,
-                MAX(y.YKL_FECHA)                                                      AS fecha,
-                MAX(LTRIM(RTRIM(y.YKL_NOM_USUARIO + ' ' + y.YKL_APELLIDO_USUARIO))) AS doctor
+                y.YKL_ARTIC AS codigo,
+                MAX(LTRIM(RTRIM(y.YKL_NOM_ARTIC))) AS tipoExamen,
+                MAX(y.YKL_FECHA) AS fecha,
+                (
+                    SELECT TOP 1 LTRIM(RTRIM(med.MED_NOMBRE))
+                    FROM (
+                        SELECT QLO_NUM_MED AS doc_id, QLO_FCH AS fch FROM TQORDENESMEDICAS 
+                        WHERE QLO_COD = '${cedula14}' AND REPLACE(QLO_COD_ARTIC, '*', '') = REPLACE(y.YKL_ARTIC, '*', '')
+                        UNION ALL
+                        SELECT QM3_COD_MEDICO AS doc_id, QM3_FCH AS fch FROM TQMOVIMIENTOCONDUCTASD
+                        WHERE QM3_COD = '${cedula14}' AND REPLACE(QM3_COD_ARTIC, '*', '') = REPLACE(y.YKL_ARTIC, '*', '')
+                    ) t
+                    LEFT JOIN TMMEDICOS med ON CAST(med.MED_COD AS VARCHAR) = CAST(t.doc_id AS VARCHAR)
+                    ORDER BY t.fch DESC
+                ) AS doctor
             FROM TYORDENESLABENVIADAS y
             WHERE CAST(TRY_CAST(y.YKL_NUMERO_ID AS BIGINT) AS VARCHAR) = '${cedula}'
               AND y.YKL_ARTIC IN (${CVD_CODES_SQL})
@@ -343,10 +355,21 @@ app.get('/api/cardiovascular/patient/:id', async (req, res) => {
         // ── 4. REALIZADOS: lab ya los procesó (una fila por tipo de examen) ──
         const realizadosRows = await medicalPrisma.$queryRawUnsafe(`
             SELECT
-                y.YKL_ARTIC                                                           AS codigo,
-                MAX(LTRIM(RTRIM(y.YKL_NOM_ARTIC)))                                   AS tipoExamen,
-                MAX(y.YKL_FECHA)                                                      AS fecha,
-                MAX(LTRIM(RTRIM(y.YKL_NOM_USUARIO + ' ' + y.YKL_APELLIDO_USUARIO))) AS doctor
+                y.YKL_ARTIC AS codigo,
+                MAX(LTRIM(RTRIM(y.YKL_NOM_ARTIC))) AS tipoExamen,
+                MAX(y.YKL_FECHA) AS fecha,
+                (
+                    SELECT TOP 1 LTRIM(RTRIM(med.MED_NOMBRE))
+                    FROM (
+                        SELECT QLO_NUM_MED AS doc_id, QLO_FCH AS fch FROM TQORDENESMEDICAS 
+                        WHERE QLO_COD = '${cedula14}' AND REPLACE(QLO_COD_ARTIC, '*', '') = REPLACE(y.YKL_ARTIC, '*', '')
+                        UNION ALL
+                        SELECT QM3_COD_MEDICO AS doc_id, QM3_FCH AS fch FROM TQMOVIMIENTOCONDUCTASD
+                        WHERE QM3_COD = '${cedula14}' AND REPLACE(QM3_COD_ARTIC, '*', '') = REPLACE(y.YKL_ARTIC, '*', '')
+                    ) t
+                    LEFT JOIN TMMEDICOS med ON CAST(med.MED_COD AS VARCHAR) = CAST(t.doc_id AS VARCHAR)
+                    ORDER BY t.fch DESC
+                ) AS doctor
             FROM TYORDENESLABENVIADAS y
             WHERE CAST(TRY_CAST(y.YKL_NUMERO_ID AS BIGINT) AS VARCHAR) = '${cedula}'
               AND y.YKL_ARTIC IN (${CVD_CODES_SQL})
