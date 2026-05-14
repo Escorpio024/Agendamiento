@@ -122,16 +122,30 @@ function parseRelativeDate(dateStr) {
         };
         const month = mesesHash[mesStr];
         let year = today.getFullYear();
-        // Si el mes ya pasó en este año, asumir el próximo año
-        if (month < today.getMonth() - 1) year++;
+        // Si el mes ya pasó en este año (mes < mes actual), asumir el próximo año
+        // Comparación corregida: < hoy.getMonth() (no -1) para evitar off-by-one
+        if (month < today.getMonth()) year++;
         const d = new Date(year, month, day);
         return toLocalDateStr(d);
     }
     
     // Si la IA devolvió "Viernes" o algo que no es fecha YYYY-MM-DD, intentar parseo manual
+    // IMPORTANTE: new Date("YYYY-MM-DD") interpreta como UTC midnight → en Colombia (UTC-5) da el día anterior.
+    // Usamos parseo manual local para evitar el desfase de timezone.
+    const isoMatch = String(dateStr).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (isoMatch) {
+        // Parseo local sin conversión UTC
+        const parsed = new Date(parseInt(isoMatch[1]), parseInt(isoMatch[2]) - 1, parseInt(isoMatch[3]));
+        if (!isNaN(parsed) && parsed.getFullYear() > 2000) {
+            return toLocalDateStr(parsed);
+        }
+    }
+    // Fallback para strings no-ISO (ej. "May 6, 2026")
     const parsed = new Date(dateStr);
     if (!isNaN(parsed) && parsed.getFullYear() > 2000) {
-        return toLocalDateStr(parsed);
+        // Corregir desfase UTC: agregar offset local en horas
+        const localDate = new Date(parsed.getTime() + parsed.getTimezoneOffset() * 60000);
+        return toLocalDateStr(localDate);
     }
 
     // Retorna null explícitamente en lugar de reemplazar silenciosamente por hoy, para evitar 
