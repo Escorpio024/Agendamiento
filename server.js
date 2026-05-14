@@ -236,9 +236,9 @@ app.get('/api/cardiovascular/patient/:id', async (req, res) => {
                 LTRIM(RTRIM(ENT_NOMBRE))    AS entidad
             FROM TMUSUARIOSFACTURACION
             LEFT JOIN TKCLIENTES  ON KC2_ZONA = KC_ZONA AND KC2_COD = KC_COD AND KC2_SEQK = KC_SEQK
-            LEFT JOIN TMENTIDADES ON ENT_COD = KC2_COD_ENTIDAD
+            LEFT JOIN TMENTIDADES ON ENT_COD = KC2_EPS_POS
             WHERE KC2_OACOD_NUI = '${cedula}'
-               OR CAST(CAST(KC2_COD AS BIGINT) AS VARCHAR) = '${cedula}'
+               OR KC2_COD = '${cedula14}'
             ORDER BY KC2_FCH_DIG DESC
         `);
 
@@ -273,12 +273,11 @@ app.get('/api/cardiovascular/patient/:id', async (req, res) => {
         // (TQORDENESMEDICAS con QLO_EST_ESTADOLB='1' y código CVD)
         const programadosRows = await medicalPrisma.$queryRawUnsafe(`
             SELECT DISTINCT
-                o.QLO_COD_ARTIC AS codigo,
-                LTRIM(RTRIM(o.QLO_NOM_DESC)) AS tipoExamen,
-                o.QLO_FCH AS fecha,
-                LTRIM(RTRIM(m.MED_NOMBRE)) AS doctor
+                o.QLO_COD_ARTIC                 AS codigo,
+                LTRIM(RTRIM(o.QLO_NOM_DESC))    AS tipoExamen,
+                o.QLO_FCH                       AS fecha,
+                CAST(o.QLO_NUM_MED AS VARCHAR)  AS doctor
             FROM TQORDENESMEDICAS o
-            LEFT JOIN TMMEDICOS m ON CAST(m.MED_COD AS VARCHAR) = LTRIM(RTRIM(CAST(o.QLO_COD_MEDICO AS VARCHAR)))
             WHERE o.QLO_COD = '${cedula14}'
               AND o.QLO_COD_ARTIC IN (${CVD_CODES_SQL})
               AND o.QLO_EST_ESTADOLB = '1'
@@ -286,7 +285,7 @@ app.get('/api/cardiovascular/patient/:id', async (req, res) => {
               AND NOT EXISTS (
                   SELECT 1 FROM TYORDENESLABENVIADAS y
                   WHERE y.YKL_ARTIC = o.QLO_COD_ARTIC
-                    AND CAST(CAST(y.YKL_NUMERO_ID AS BIGINT) AS VARCHAR) = '${cedula}'
+                    AND CAST(TRY_CAST(y.YKL_NUMERO_ID AS BIGINT) AS VARCHAR) = '${cedula}'
               )
             ORDER BY o.QLO_FCH DESC
         `);
@@ -307,7 +306,7 @@ app.get('/api/cardiovascular/patient/:id', async (req, res) => {
                 y.YKL_FECHA AS fecha,
                 LTRIM(RTRIM(y.YKL_NOM_USUARIO + ' ' + y.YKL_APELLIDO_USUARIO)) AS doctor
             FROM TYORDENESLABENVIADAS y
-            WHERE CAST(CAST(y.YKL_NUMERO_ID AS BIGINT) AS VARCHAR) = '${cedula}'
+            WHERE CAST(TRY_CAST(y.YKL_NUMERO_ID AS BIGINT) AS VARCHAR) = '${cedula}'
               AND y.YKL_ARTIC IN (${CVD_CODES_SQL})
               AND (y.YKL_PROCESADA_LAB IS NULL OR y.YKL_PROCESADA_LAB = '')
             ORDER BY y.YKL_FECHA DESC
@@ -329,7 +328,7 @@ app.get('/api/cardiovascular/patient/:id', async (req, res) => {
                 y.YKL_FECHA AS fecha,
                 LTRIM(RTRIM(y.YKL_NOM_USUARIO + ' ' + y.YKL_APELLIDO_USUARIO)) AS doctor
             FROM TYORDENESLABENVIADAS y
-            WHERE CAST(CAST(y.YKL_NUMERO_ID AS BIGINT) AS VARCHAR) = '${cedula}'
+            WHERE CAST(TRY_CAST(y.YKL_NUMERO_ID AS BIGINT) AS VARCHAR) = '${cedula}'
               AND y.YKL_ARTIC IN (${CVD_CODES_SQL})
               AND y.YKL_PROCESADA_LAB = 'S'
             ORDER BY y.YKL_FECHA DESC
