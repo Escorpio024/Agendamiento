@@ -81,25 +81,25 @@ function ExamenProgramadoRow({ examen, onRemind, sendingId }) {
         >
             <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded"
+                    <span className="text-xs font-mono font-bold px-2 py-1 rounded"
                         style={{ background: 'rgba(130,99,177,0.2)', color: '#C4AFED' }}>
                         {examen.codigo}
                     </span>
-                    <span className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>
+                    <span className="text-base font-semibold truncate" style={{ color: 'var(--text-primary)' }}>
                         {examen.tipoExamen}
                     </span>
                 </div>
-                <div className="flex items-center gap-3 mt-1.5 flex-wrap">
-                    <div className="flex items-center gap-1">
-                        <Calendar size={10} style={{ color: '#A1E3D8', opacity: 0.6 }} />
-                        <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                <div className="flex items-center gap-4 mt-2 flex-wrap">
+                    <div className="flex items-center gap-1.5">
+                        <Calendar size={13} style={{ color: '#A1E3D8', opacity: 0.6 }} />
+                        <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
                             {formatDate(examen.fecha)}
                         </span>
                     </div>
                     {examen.doctor && (
-                        <div className="flex items-center gap-1">
-                            <Stethoscope size={10} style={{ color: '#A1E3D8', opacity: 0.6 }} />
-                            <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                        <div className="flex items-center gap-1.5">
+                            <Stethoscope size={13} style={{ color: '#A1E3D8', opacity: 0.6 }} />
+                            <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
                                 {examen.doctor}
                             </span>
                         </div>
@@ -109,7 +109,7 @@ function ExamenProgramadoRow({ examen, onRemind, sendingId }) {
             <button
                 onClick={() => onRemind(examen.id, examen.tipoExamen)}
                 disabled={isSending}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-all ml-3 flex-shrink-0"
+                className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold transition-all ml-3 flex-shrink-0"
                 style={{
                     background: isSending ? 'rgba(130,99,177,0.15)' : 'rgba(130,99,177,0.22)',
                     color: '#C4AFED',
@@ -117,8 +117,8 @@ function ExamenProgramadoRow({ examen, onRemind, sendingId }) {
                 }}
             >
                 {isSending
-                    ? <Loader2 size={11} className="animate-spin" />
-                    : <Bell size={11} />}
+                    ? <Loader2 size={13} className="animate-spin" />
+                    : <Bell size={13} />}
                 Recordar
             </button>
         </div>
@@ -139,23 +139,23 @@ function ExamenPendienteRow({ examen, onAgendar, agendandoId }) {
         >
             <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded"
+                    <span className="text-xs font-mono font-bold px-2 py-1 rounded"
                         style={{ background: 'rgba(177,64,64,0.2)', color: '#EDAFAF' }}>
                         {examen.codigo}
                     </span>
-                    <span className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>
+                    <span className="text-base font-semibold truncate" style={{ color: 'var(--text-primary)' }}>
                         {examen.tipoExamen}
                     </span>
                 </div>
-                <div className="flex items-center gap-1 mt-1.5">
-                    <AlertCircle size={10} style={{ color: '#EDAFAF', opacity: 0.7 }} />
-                    <span className="text-[11px]" style={{ color: 'rgba(237,175,175,0.6)' }}>Sin fecha asignada</span>
+                <div className="flex items-center gap-1.5 mt-2">
+                    <AlertCircle size={13} style={{ color: '#EDAFAF', opacity: 0.7 }} />
+                    <span className="text-xs" style={{ color: 'rgba(237,175,175,0.6)' }}>Sin fecha asignada</span>
                 </div>
             </div>
             <button
                 onClick={() => onAgendar(examen.id)}
                 disabled={isAgendando}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-all ml-3 flex-shrink-0"
+                className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold transition-all ml-3 flex-shrink-0"
                 style={{
                     background: isAgendando ? 'rgba(177,64,64,0.15)' : 'rgba(177,64,64,0.25)',
                     color: '#EDAFAF',
@@ -163,8 +163,8 @@ function ExamenPendienteRow({ examen, onAgendar, agendandoId }) {
                 }}
             >
                 {isAgendando
-                    ? <Loader2 size={11} className="animate-spin" />
-                    : <Calendar size={11} />}
+                    ? <Loader2 size={13} className="animate-spin" />
+                    : <Calendar size={13} />}
                 Agendar
             </button>
         </div>
@@ -182,28 +182,28 @@ function ExamenRealizadoRow({ examen }) {
             onMouseEnter={e => e.currentTarget.style.background = 'rgba(161,227,216,0.09)'}
             onMouseLeave={e => e.currentTarget.style.background = 'rgba(161,227,216,0.05)'}
         >
-            <CheckCircle2 size={14} style={{ color: '#A1E3D8', opacity: 0.7, flexShrink: 0, marginTop: 2 }} />
+            <CheckCircle2 size={18} style={{ color: '#A1E3D8', opacity: 0.7, flexShrink: 0, marginTop: 2 }} />
             <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded"
+                    <span className="text-xs font-mono font-bold px-2 py-1 rounded"
                         style={{ background: 'rgba(161,227,216,0.12)', color: '#A1E3D8' }}>
                         {examen.codigo}
                     </span>
-                    <span className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>
+                    <span className="text-base font-semibold truncate" style={{ color: 'var(--text-primary)' }}>
                         {examen.tipoExamen}
                     </span>
                 </div>
-                <div className="flex items-center gap-3 mt-1.5 flex-wrap">
-                    <div className="flex items-center gap-1">
-                        <Calendar size={10} style={{ color: '#A1E3D8', opacity: 0.5 }} />
-                        <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                <div className="flex items-center gap-4 mt-2 flex-wrap">
+                    <div className="flex items-center gap-1.5">
+                        <Calendar size={13} style={{ color: '#A1E3D8', opacity: 0.5 }} />
+                        <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
                             {formatDate(examen.fecha)}
                         </span>
                     </div>
                     {examen.doctor && (
-                        <div className="flex items-center gap-1">
-                            <Stethoscope size={10} style={{ color: '#A1E3D8', opacity: 0.5 }} />
-                            <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                        <div className="flex items-center gap-1.5">
+                            <Stethoscope size={13} style={{ color: '#A1E3D8', opacity: 0.5 }} />
+                            <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
                                 {examen.doctor}
                             </span>
                         </div>
@@ -418,7 +418,7 @@ export default function CardiovascularPage() {
                                 count={programados.length}
                             />
                             <div className="flex-1 overflow-y-auto pr-1"
-                                style={{ maxHeight: '360px' }}>
+                                style={{ maxHeight: '450px' }}>
                                 {programados.length === 0
                                     ? <EmptyState message={patient ? 'No hay exámenes programados' : 'Busca un paciente para ver sus exámenes'} />
                                     : programados.map(ex => (
@@ -471,7 +471,7 @@ export default function CardiovascularPage() {
                                 title="Exámenes Pendientes"
                                 count={pendientes.length}
                             />
-                            <div className="overflow-y-auto" style={{ maxHeight: '200px' }}>
+                            <div className="overflow-y-auto" style={{ maxHeight: '320px' }}>
                                 {pendientes.length === 0
                                     ? <EmptyState message={patient ? 'Sin exámenes pendientes' : 'Busca un paciente'} />
                                     : pendientes.map(ex => (
@@ -493,7 +493,7 @@ export default function CardiovascularPage() {
                                 title="Exámenes Realizados"
                                 count={realizados.length}
                             />
-                            <div className="overflow-y-auto" style={{ maxHeight: '200px' }}>
+                            <div className="overflow-y-auto" style={{ maxHeight: '320px' }}>
                                 {realizados.length === 0
                                     ? <EmptyState message={patient ? 'Sin exámenes realizados' : 'Busca un paciente'} />
                                     : realizados.map(ex => (
