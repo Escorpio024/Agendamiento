@@ -272,11 +272,11 @@ app.get('/api/cardiovascular/patient/:id', async (req, res) => {
         // ── 2. PROGRAMADOS: médico ordenó el examen, paciente aún no viene ──
         // (TQORDENESMEDICAS con QLO_EST_ESTADOLB='1' y código CVD)
         const programadosRows = await medicalPrisma.$queryRawUnsafe(`
-            SELECT DISTINCT
-                o.QLO_COD_ARTIC                 AS codigo,
-                LTRIM(RTRIM(o.QLO_NOM_DESC))    AS tipoExamen,
-                o.QLO_FCH                       AS fecha,
-                CAST(o.QLO_NUM_MED AS VARCHAR)  AS doctor
+            SELECT
+                o.QLO_COD_ARTIC                         AS codigo,
+                MAX(LTRIM(RTRIM(o.QLO_NOM_DESC)))       AS tipoExamen,
+                MAX(o.QLO_FCH)                          AS fecha,
+                MAX(CAST(o.QLO_NUM_MED AS VARCHAR))     AS doctor
             FROM TQORDENESMEDICAS o
             WHERE o.QLO_COD = '${cedula14}'
               AND o.QLO_COD_ARTIC IN (${CVD_CODES_SQL})
@@ -287,11 +287,12 @@ app.get('/api/cardiovascular/patient/:id', async (req, res) => {
                   WHERE REPLACE(y.YKL_ARTIC, '*', '') = REPLACE(o.QLO_COD_ARTIC, '*', '')
                     AND CAST(TRY_CAST(y.YKL_NUMERO_ID AS BIGINT) AS VARCHAR) = '${cedula}'
               )
-            ORDER BY o.QLO_FCH DESC
+            GROUP BY o.QLO_COD_ARTIC
+            ORDER BY MAX(o.QLO_FCH) DESC
         `);
 
         const programados = programadosRows.map(r => ({
-            id: `prog-${r.codigo}-${r.fecha}`,
+            id: `prog-${r.codigo}`,
             codigo: r.codigo,
             tipoExamen: r.tipoExamen || r.codigo,
             fecha: r.fecha ? String(r.fecha).replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3') : null,
@@ -300,42 +301,44 @@ app.get('/api/cardiovascular/patient/:id', async (req, res) => {
 
         // ── 3. PENDIENTES: llegó a facturación, lab aún no lo procesa ──
         const pendientesRows = await medicalPrisma.$queryRawUnsafe(`
-            SELECT DISTINCT
-                y.YKL_ARTIC AS codigo,
-                LTRIM(RTRIM(y.YKL_NOM_ARTIC)) AS tipoExamen,
-                y.YKL_FECHA AS fecha,
-                LTRIM(RTRIM(y.YKL_NOM_USUARIO + ' ' + y.YKL_APELLIDO_USUARIO)) AS doctor
+            SELECT
+                y.YKL_ARTIC                                                           AS codigo,
+                MAX(LTRIM(RTRIM(y.YKL_NOM_ARTIC)))                                   AS tipoExamen,
+                MAX(y.YKL_FECHA)                                                      AS fecha,
+                MAX(LTRIM(RTRIM(y.YKL_NOM_USUARIO + ' ' + y.YKL_APELLIDO_USUARIO))) AS doctor
             FROM TYORDENESLABENVIADAS y
             WHERE CAST(TRY_CAST(y.YKL_NUMERO_ID AS BIGINT) AS VARCHAR) = '${cedula}'
               AND y.YKL_ARTIC IN (${CVD_CODES_SQL})
               AND (y.YKL_PROCESADA_LAB IS NULL OR y.YKL_PROCESADA_LAB = '')
-            ORDER BY y.YKL_FECHA DESC
+            GROUP BY y.YKL_ARTIC
+            ORDER BY MAX(y.YKL_FECHA) DESC
         `);
 
         const pendientes = pendientesRows.map(r => ({
-            id: `pend-${r.codigo}-${r.fecha}`,
+            id: `pend-${r.codigo}`,
             codigo: r.codigo,
             tipoExamen: r.tipoExamen || r.codigo,
             fecha: r.fecha ? String(r.fecha).replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3') : null,
             doctor: r.doctor?.trim() || null
         }));
 
-        // ── 4. REALIZADOS: lab ya los procesó ──
+        // ── 4. REALIZADOS: lab ya los procesó (una fila por tipo de examen) ──
         const realizadosRows = await medicalPrisma.$queryRawUnsafe(`
-            SELECT DISTINCT
-                y.YKL_ARTIC AS codigo,
-                LTRIM(RTRIM(y.YKL_NOM_ARTIC)) AS tipoExamen,
-                y.YKL_FECHA AS fecha,
-                LTRIM(RTRIM(y.YKL_NOM_USUARIO + ' ' + y.YKL_APELLIDO_USUARIO)) AS doctor
+            SELECT
+                y.YKL_ARTIC                                                           AS codigo,
+                MAX(LTRIM(RTRIM(y.YKL_NOM_ARTIC)))                                   AS tipoExamen,
+                MAX(y.YKL_FECHA)                                                      AS fecha,
+                MAX(LTRIM(RTRIM(y.YKL_NOM_USUARIO + ' ' + y.YKL_APELLIDO_USUARIO))) AS doctor
             FROM TYORDENESLABENVIADAS y
             WHERE CAST(TRY_CAST(y.YKL_NUMERO_ID AS BIGINT) AS VARCHAR) = '${cedula}'
               AND y.YKL_ARTIC IN (${CVD_CODES_SQL})
               AND y.YKL_PROCESADA_LAB = 'S'
-            ORDER BY y.YKL_FECHA DESC
+            GROUP BY y.YKL_ARTIC
+            ORDER BY MAX(y.YKL_FECHA) DESC
         `);
 
         const realizados = realizadosRows.map(r => ({
-            id: `real-${r.codigo}-${r.fecha}`,
+            id: `real-${r.codigo}`,
             codigo: r.codigo,
             tipoExamen: r.tipoExamen || r.codigo,
             fecha: r.fecha ? String(r.fecha).replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3') : null,
