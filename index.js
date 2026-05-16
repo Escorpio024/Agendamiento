@@ -1010,8 +1010,39 @@ client.on('message', async (msg) => {
                             session.horaPreferida = 'AM';
                             await handleAgendarCita(userId, message, session, replyFn, {}, historyStr);
                         } else if (
+                            // Paciente rechaza explícitamente al doctor — excluirlo y re-buscar
+                            /\b(no quiero ese|no.*ese doctor|no quiero a|no.*quiero.*doctor|cambiar.*doctor|doctor diferente|diferente.*doctor|con otro doc|con otro med|otro médico|otro medico|otro doctor)\b/.test(clean) ||
+                            clean.includes('no quiero ese') || clean.includes('no con ese') ||
+                            clean.includes('con alguien mas') || clean.includes('con alguien más')
+                        ) {
+                            // Identificar el doctor que está mostrando actualmente para excluirlo
+                            const currentSlots = session.horariosDisponibles || [];
+                            const doctorActual = currentSlots.length > 0 ? currentSlots[0].doctorName : null;
+                            const todosOriginales = session.todosLosHorarios || currentSlots;
+
+                            // Filtrar para eliminar al doctor rechazado de TODA la lista
+                            const sinDoctorRechazado = doctorActual
+                                ? todosOriginales.filter(s => s.doctorName !== doctorActual)
+                                : todosOriginales;
+
+                            if (sinDoctorRechazado.length > 0) {
+                                session.todosLosHorarios    = sinDoctorRechazado;
+                                session.slotOffset          = 0;
+                                session.horariosDisponibles = sinDoctorRechazado.slice(0, 8);
+                                const slotsText = session.horariosDisponibles.map((s, i) => `${i + 1}. ${s.time} — ${s.doctorName}`).join('\n');
+                                const remaining = sinDoctorRechazado.length - 8;
+                                const moreHint  = remaining > 0 ? `\n\n_(Hay ${remaining} opciones más. Escribe "ver más" si quieres verlas)_` : '';
+                                const msg = doctorActual
+                                    ? `Entendido, no con ${doctorActual}. Aquí tienes otros horarios disponibles ese día:`
+                                    : `Aquí tienes otros horarios disponibles ese día:`;
+                                await replyFn(`${msg}\n\n${slotsText}${moreHint}\n\nEscribe el *NÚMERO* de tu preferencia:`);
+                            } else {
+                                await replyFn(`Lo siento, no hay otros médicos disponibles para ese día. 😔 ¿Quieres buscar en otra fecha?`);
+                                session.step = 'AI_ASKING_DATE';
+                            }
+                        } else if (
                             // Paciente pide ver más opciones — paginar sin re-consultar la BD
-                            /\b(otro|otra|más|mas|otras|diferente|siguiente|hay más|hay mas|ver más|ver mas|ninguno|no me gusta|más opciones|otras opciones|otro medico|otro doctor|otro horario|otra hora)\b/.test(clean) ||
+                            /\b(otro|otra|más|mas|otras|diferente|siguiente|hay más|hay mas|ver más|ver mas|ninguno|no me gusta|más opciones|otras opciones|otro horario|otra hora)\b/.test(clean) ||
                             clean.includes('otras opcion') || clean.includes('mas opcion') ||
                             clean.includes('no me convence') || clean.includes('no me parece')
                         ) {
@@ -1528,7 +1559,7 @@ client.on('message', async (msg) => {
                     session.horariosDisponibles = slots;
                     session.step = 'AI_SELECT_TIME';
 
-                    let visibleSlots = slots;
+                    let listaPaginable = todosSlots; // Base completa para paginación
                     let timeContext = '';
 
                     if (session.horaPreferida) {
@@ -1544,20 +1575,28 @@ client.on('message', async (msg) => {
                             pref.includes('MAÑA');
 
                         if (isPM) {
-                            const pmSlots = slots.filter(s => s.time.toUpperCase().includes('PM'));
-                            if (pmSlots.length > 0) { visibleSlots = pmSlots; timeContext = ' (en la tarde)'; }
+                            const pmSlots = todosSlots.filter(s => s.time.toUpperCase().includes('PM'));
+                            // Solo aplicar filtro AM/PM si existen slots en ese período
+                            if (pmSlots.length > 0) { listaPaginable = pmSlots; timeContext = ' (en la tarde)'; }
                         } else if (isAM) {
-                            const amSlots = slots.filter(s => s.time.toUpperCase().includes('AM'));
-                            if (amSlots.length > 0) { visibleSlots = amSlots; timeContext = ' (en la mañana)'; }
+                            const amSlots = todosSlots.filter(s => s.time.toUpperCase().includes('AM'));
+                            if (amSlots.length > 0) { listaPaginable = amSlots; timeContext = ' (en la mañana)'; }
                         }
                     }
 
-                    const slotsToShow = visibleSlots.slice(0, 8);
+                    // Guardar la lista paginable como base (ya filtrada por AM/PM si aplica)
+                    session.todosLosHorarios    = listaPaginable;
+                    session.slotOffset          = 0;
+                    session.horariosDisponibles = listaPaginable.slice(0, 8);
+
+                    const slotsToShow = session.horariosDisponibles;
                     const fechaBonita = formatDateNatural(session.fechaPreferida);
                     const slotsList = slotsToShow.map((s, i) => `${i + 1}. ${s.time} — ${s.doctorName}`).join('\n');
+                    const totalRestante = listaPaginable.length - 8;
+                    const moreHint = totalRestante > 0 ? `\n\n_(Hay ${totalRestante} opciones más disponibles. Escribe "ver más" si quieres verlas)_` : '';
                     
                     const introMsg = `¡He encontrado estos horarios para ti el ${fechaBonita}${timeContext}!\n\nPor favor, responde únicamente con el *NÚMERO* de la opción que prefieres:`;
-                    await replyFn(`${introMsg}\n\n${slotsList}`);
+                    await replyFn(`${introMsg}\n\n${slotsList}${moreHint}`);
                 } else {
                     const nextData = await availabilityService.getNextAvailableSlots(session.fechaPreferida, session.tipoCita, session.doctorPreferido);
 
