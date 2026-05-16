@@ -9,19 +9,28 @@ const path = require('path');
 const fs = require('fs');
 const botPrisma = require('./dbBot');
 const medicalPrisma = require('./db');
+const logger = require('./logger');
+
+// ─── CORS: Configurable desde .env ────────────────────────────────────────────
+// En desarrollo: CORS_ORIGIN=* (permisivo)
+// En producción: CORS_ORIGIN=http://192.168.1.50:3000,http://mi-server.local:3000
+const RAW_ORIGINS = process.env.CORS_ORIGIN || '*';
+const CORS_ORIGINS = RAW_ORIGINS.trim() === '*'
+    ? true  // true = permitir todos (equivale a *)
+    : RAW_ORIGINS.split(',').map(o => o.trim());
+
+const corsOptions = {
+    origin: CORS_ORIGINS,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+};
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, {
-    cors: {
-        origin: "*", // Adjust for production
-        methods: ["GET", "POST"]
-    }
-});
+const io = new Server(server, { cors: corsOptions });
 
 // Middleware
-app.use(cors());
-app.use(express.json());
+app.use(cors(corsOptions));
+app.use(express.json({ limit: '2mb' }));   // Limitar JSON body
 app.use('/media', express.static(path.join(__dirname, 'public/media')));
 
 // Upload configuration
@@ -38,7 +47,24 @@ const storage = multer.diskStorage({
         cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
     }
 });
-const upload = multer({ storage: storage });
+
+// ─── Tipos de archivo permitidos para subida ──────────────────────────────────
+const ALLOWED_EXTENSIONS = /\.(jpe?g|png|gif|webp|mp4|mp3|ogg|pdf|docx?)$/i;
+const ALLOWED_MIMETYPES  = /^(image|video|audio|application\/pdf|application\/msword|application\/vnd\.openxmlformats)/;
+
+const upload = multer({
+    storage: storage,
+    limits: { fileSize: 16 * 1024 * 1024 },  // 16 MB máximo
+    fileFilter: (req, file, cb) => {
+        const extOk  = ALLOWED_EXTENSIONS.test(path.extname(file.originalname));
+        const mimeOk = ALLOWED_MIMETYPES.test(file.mimetype);
+        if (extOk && mimeOk) {
+            cb(null, true);
+        } else {
+            cb(new Error(`Tipo de archivo no permitido: ${file.originalname}`));
+        }
+    }
+});
 
 let whatsappClient = null;
 
@@ -224,7 +250,12 @@ const CVD_CODES_SQL = CVD_CODES.map(c => `'${c}'`).join(',');
 // GET /api/cardiovascular/patient/:id
 app.get('/api/cardiovascular/patient/:id', async (req, res) => {
     try {
-        const cedula = req.params.id.replace(/\D/g, '');
+        // ── Validar cédula: solo dígitos, entre 5 y 15 caracteres ──
+        const rawId = req.params.id || '';
+        const cedula = rawId.replace(/\D/g, '');
+        if (!cedula || cedula.length < 5 || cedula.length > 15) {
+            return res.status(400).json({ error: 'Documento inválido. Debe contener entre 5 y 15 dígitos.' });
+        }
         const cedula14 = cedula.padStart(14, '0');
 
         // ── 1. Datos del paciente ──
@@ -558,7 +589,8 @@ function start(client, port = 3001) {
     whatsappClient = client;
     if (server.listening) return; // Ya está escuchando, no volver a iniciar
     server.listen(port, () => {
-        console.log(`🚀 Inbox API & Socket running on http://localhost:${port}`);
+        const originsLabel = RAW_ORIGINS === '*' ? 'TODAS (*)' : RAW_ORIGINS;
+        logger.info(`🚀 Inbox API & Socket en http://localhost:${port} | CORS: ${originsLabel}`);
     });
 }
 
