@@ -1,4 +1,5 @@
 const prisma = require('./db');
+const logger = require('./logger');
 
 // =========================================
 // CACHE EN MEMORIA (datos semi-estáticos)
@@ -23,7 +24,7 @@ async function _getTurnosCache() {
         orderBy: { TME_FCH: 'desc' }
     });
     _cache.turnosExpiry = now + TTL_TURNOS;
-    console.log(`[CACHE] Turnos: ${_cache.turnos.length} registros cargados`);
+    logger.debug(`[CACHE] Turnos: ${_cache.turnos.length} registros cargados`);
     return _cache.turnos;
 }
 
@@ -33,7 +34,7 @@ async function _getMedicosCache() {
     if (_cache.medicos && now < _cache.medicosExpiry) return _cache.medicos;
     _cache.medicos = await prisma.medico.findMany({ where: { MED_EST_ESTADO: 'A' } });
     _cache.medicosExpiry = now + TTL_MEDICOS;
-    console.log(`[CACHE] Médicos: ${_cache.medicos.length} activos cargados`);
+    logger.debug(`[CACHE] Médicos: ${_cache.medicos.length} activos cargados`);
     return _cache.medicos;
 }
 
@@ -61,7 +62,7 @@ async function _withRetry(fn, label = '') {
         try { return await fn(); }
         catch (err) {
             if (err.code === 'P1001' && i < 2) {
-                console.warn(`[DB] P1001 en ${label}, reintento ${i + 1}/2...`);
+                logger.warn(`[DB] P1001 en ${label}, reintento ${i + 1}/2...`);
                 await new Promise(r => setTimeout(r, 600));
             } else throw err;
         }
@@ -207,7 +208,7 @@ async function updateCelular(internalCod, newPhone) {
         });
         if (result.count > 0) {
             updated = true;
-            console.log(`[DB] ✅ Celular actualizado en TKCLIENTESANEXO5: cod=${internalCod} -> ${cleanNew} (${result.count} registros)`);
+            logger.info(`[DB] ✅ Celular actualizado en TKCLIENTESANEXO5: cod=${internalCod} -> ${cleanNew} (${result.count} registros)`);
         }
     } catch (e) {
         console.error('[DB] Error actualizando TKCLIENTESANEXO5:', e.message);
@@ -223,7 +224,7 @@ async function updateCelular(internalCod, newPhone) {
             data: { KC2_TEL_RESP: cleanNew }
         });
         if (resultFact.count > 0) {
-            console.log(`[DB] ✅ Celular actualizado en TMUSUARIOSFACTURACION: ${resultFact.count} registros`);
+            logger.info(`[DB] ✅ Celular actualizado en TMUSUARIOSFACTURACION: ${resultFact.count} registros`);
             updated = true;
         }
     } catch (e) {
@@ -488,9 +489,9 @@ async function getAvailableSlots(fechaStr, tipo = 'medicina general', preferredD
             const tMin = parseInt(r.TME2_HH) * 60 + parseInt(r.TME2_MM);
             slotsVaciosPorDoctor[key].add(tMin);
         }
-        console.log(`[SLOTS-TME2] ${tme2Libres.length} slots libres en ${Object.keys(slotsVaciosPorDoctor).length} doctores para fecha=${dateDecimal}`);
+        logger.debug(`[SLOTS-TME2] ${tme2Libres.length} slots libres en ${Object.keys(slotsVaciosPorDoctor).length} doctores para fecha=${dateDecimal}`);
     } catch (e) {
-        console.warn('[SLOTS-TME2] Error consultando TME2, usando fallback KC3:', e.message);
+        logger.warn('[SLOTS-TME2] Error consultando TME2, usando fallback KC3:', e.message);
         // Fallback a KC3 si TME2 falla
         for (const c of allCitas) {
             const cancelado = c.KC3_ESTADO && c.KC3_ESTADO.trim() === 'CA';
@@ -521,7 +522,7 @@ async function getAvailableSlots(fechaStr, tipo = 'medicina general', preferredD
         // Usar esos como fuente de verdad (slots vacíos = disponibles en el Visor de Agenda)
         const slotsVaciosDoctor = slotsVaciosPorDoctor[doctorKey];
         if (slotsVaciosDoctor && slotsVaciosDoctor.size > 0) {
-            console.log(`[SLOTS-KC3] Dr.${medico.MED_NOMBRE?.trim()} | ${slotsVaciosDoctor.size} slots disponibles directo de KC3 (Visor de Agenda)`);
+            logger.debug(`[SLOTS-KC3] Dr.${medico.MED_NOMBRE?.trim()} | ${slotsVaciosDoctor.size} slots disponibles directo de KC3 (Visor de Agenda)`);
             for (const tMin of [...slotsVaciosDoctor].sort((a, b) => a - b)) {
                 const currH = Math.floor(tMin / 60);
                 const currM = tMin % 60;
@@ -572,7 +573,7 @@ async function getAvailableSlots(fechaStr, tipo = 'medicina general', preferredD
             }
         }
 
-        console.log(`[SLOTS-TME] Dr.${medico.MED_NOMBRE?.trim()} | ActM=${turno.TME_ACTIVIDAD_M} ActT=${turno.TME_ACTIVIDAD_T} | Franjas=${franjas.length} | Dur=${dur}min (modo template)`);
+        logger.debug(`[SLOTS-TME] Dr.${medico.MED_NOMBRE?.trim()} | ActM=${turno.TME_ACTIVIDAD_M} ActT=${turno.TME_ACTIVIDAD_T} | Franjas=${franjas.length} | Dur=${dur}min (modo template)`);
 
         // Tiempos KC3 conocidos para este doctor (slots que realmente existen en el Visor de Agenda)
         const kc3Times = new Set(
@@ -614,7 +615,7 @@ async function getAvailableSlots(fechaStr, tipo = 'medicina general', preferredD
                 const currM = totalMin % 60;
 
                 if (esHuecoEliminado.has(totalMin)) {
-                    console.log(`[SLOT-SKIP] Dr.${medico.MED_NOMBRE?.trim()} ${timeLabel(currH, currM)} → hueco eliminado del Visor (almuerzo/pausa)`);
+                    logger.debug(`[SLOT-SKIP] Dr.${medico.MED_NOMBRE?.trim()} ${timeLabel(currH, currM)} → hueco eliminado del Visor (almuerzo/pausa)`);
                     continue;
                 }
 
@@ -723,7 +724,7 @@ async function reserveSlot(fechaStr, hora, userId, tipo = 'medicina general', me
             console.error('[HABEJICO] reserveSlot falló: no se encontró paciente para userId=', userId);
             return false;
         }
-        console.log(`[HABEJICO] reserveSlot: paciente.KC0_COD="${paciente.KC0_COD}" zona="${paciente.zona}"`);
+        logger.debug(`[HABEJICO] reserveSlot: paciente.KC0_COD="${paciente.KC0_COD}" zona="${paciente.zona}"`);
 
         // Validar slot disponible
         const slots = await getAvailableSlots(dateStr, tipo, null, true);
@@ -821,7 +822,7 @@ async function reserveSlot(fechaStr, hora, userId, tipo = 'medicina general', me
         });
 
         if (slotExistente?.KC3_ESTADO === 'CA') {
-            console.log(`[HABEJICO] 🔄 Slot cancelado encontrado para médico=${slotExistente.KC3_MEDICO} ${hh}:${mm} — se reutilizará`);
+            logger.info(`[HABEJICO] 🔄 Slot cancelado encontrado para médico=${slotExistente.KC3_MEDICO} ${hh}:${mm} — se reutilizará`);
         }
 
         const debeActualizar = slotExistente && esSlotVacioFn(slotExistente.KC3_COD, slotExistente.KC3_ESTADO);
@@ -842,7 +843,7 @@ async function reserveSlot(fechaStr, hora, userId, tipo = 'medicina general', me
             if (slotVacioAlternativo && esSlotVacioFn(slotVacioAlternativo.KC3_COD, slotVacioAlternativo.KC3_ESTADO)) {
                 slotAActualizar = slotVacioAlternativo;
                 medicoActualizar = slotVacioAlternativo.KC3_MEDICO;
-                console.log(`[HABEJICO] 🔄 Slot vacío alternativo encontrado para médico=${medicoActualizar} ${hh}:${mm} (el slot real de Xenco)`);
+                logger.info(`[HABEJICO] 🔄 Slot vacío alternativo encontrado para médico=${medicoActualizar} ${hh}:${mm} (el slot real de Xenco)`);
             }
         }
 
@@ -866,9 +867,9 @@ async function reserveSlot(fechaStr, hora, userId, tipo = 'medicina general', me
             const updateResult = await prisma.cita.updateMany({ where: whereUpdate, data: citaDataFinal });
             
             if (updateResult.count > 0) {
-                console.log(`[HABEJICO] ✅ Slot ACTUALIZADO (médico=${medicoActualizar} ${hh}:${mm}) -> paciente=${paciente.KC0_COD}`);
+                logger.info(`[HABEJICO] ✅ Slot ACTUALIZADO (médico=${medicoActualizar} ${hh}:${mm}) -> paciente=${paciente.KC0_COD}`);
             } else {
-                console.log(`[HABEJICO] ⚠️ updateMany no afectó filas. Creando nueva fila...`);
+                logger.warn(`[HABEJICO] ⚠️ updateMany no afectó filas. Creando nueva fila...`);
                 await prisma.cita.create({
                     data: {
                         KC3_MEDICO: slot.doctorId,
@@ -879,7 +880,7 @@ async function reserveSlot(fechaStr, hora, userId, tipo = 'medicina general', me
                         ...citaData
                     }
                 });
-                console.log(`[HABEJICO] ✅ Nueva cita CREADA (fallback): médico=${slot.doctorId} ${hh}:${mm}`);
+                logger.info(`[HABEJICO] ✅ Nueva cita CREADA (fallback): médico=${slot.doctorId} ${hh}:${mm}`);
             }
         } else {
             await prisma.cita.create({
@@ -892,7 +893,7 @@ async function reserveSlot(fechaStr, hora, userId, tipo = 'medicina general', me
                     ...citaData
                 }
             });
-            console.log(`[HABEJICO] ✅ Nueva cita CREADA: médico=${slot.doctorId} ${hh}:${mm}`);
+            logger.info(`[HABEJICO] ✅ Nueva cita CREADA: médico=${slot.doctorId} ${hh}:${mm}`);
         }
 
         // ════════════════════════════════════════════════════════════════
@@ -918,7 +919,7 @@ async function reserveSlot(fechaStr, hora, userId, tipo = 'medicina general', me
             `;
 
             if (tme2Updated > 0) {
-                console.log(`[TME2] ✅ TMTURNOSMEDICOSDETALLE actualizado: médico=${slot.doctorId} ${hh}:${mm} → paciente=${pacCod14}`);
+                logger.info(`[TME2] ✅ TMTURNOSMEDICOSDETALLE actualizado: médico=${slot.doctorId} ${hh}:${mm} → paciente=${pacCod14}`);
             } else {
                 // No existe fila TME2 — calcular SEQ e insertar nueva fila
                 const tme2CountResult = await prisma.$queryRaw`
@@ -945,14 +946,14 @@ async function reserveSlot(fechaStr, hora, userId, tipo = 'medicina general', me
                          ${0}, ${fchDecimalHoy}, ${'AURORA'},
                          ${horaSist}, ${espTME2}, ${0})
                 `;
-                console.log(`[TME2] ✅ TMTURNOSMEDICOSDETALLE INSERTADO (SEQ=${nextSeq}): médico=${slot.doctorId} ${hh}:${mm} → paciente=${pacCod14}`);
+                logger.info(`[TME2] ✅ TMTURNOSMEDICOSDETALLE INSERTADO (SEQ=${nextSeq}): médico=${slot.doctorId} ${hh}:${mm} → paciente=${pacCod14}`);
             }
         } catch (tme2Err) {
             // No es fatal — la cita ya fue guardada en TMCITASUSUARIOS
-            console.warn(`[TME2] ⚠️ No se pudo actualizar TMTURNOSMEDICOSDETALLE: ${tme2Err.message}`);
+            logger.warn(`[TME2] ⚠️ No se pudo actualizar TMTURNOSMEDICOSDETALLE: ${tme2Err.message}`);
         }
 
-        console.log(`✅ Cita confirmada en BD: médico=${slot.doctorId} fecha=${dateDecimal} hora=${hh}:${mm} entidad=${entidadPac} zona=${zonaUsar}`);
+        logger.info(`✅ Cita confirmada en BD: médico=${slot.doctorId} fecha=${dateDecimal} hora=${hh}:${mm} entidad=${entidadPac} zona=${zonaUsar}`);
         return true;
     } catch (err) {
         console.error('❌ Error guardando cita en BD:', err.message);
@@ -999,7 +1000,7 @@ async function getUserAppointments(userId) {
         if (!pacienteId) {
             const paciente = await findPaciente(userId);
             if (!paciente) {
-                console.warn(`[HABEJICO] getUserAppointments: no se encontró paciente para userId=${userId}`);
+                logger.warn(`[HABEJICO] getUserAppointments: no se encontró paciente para userId=${userId}`);
                 return [];
             }
             pacienteId = paciente.KC0_COD;
@@ -1013,7 +1014,7 @@ async function getUserAppointments(userId) {
         const todayDecimal = dateToDecimal(new Date());
         const pacCod14 = String(pacienteId).trim().padStart(14, '0');
 
-        console.log(`[HABEJICO] getUserAppointments: buscando citas para cod=${pacCod14}, fechaGTE=${todayDecimal}`);
+        logger.debug(`[HABEJICO] getUserAppointments: buscando citas para cod=${pacCod14}, fechaGTE=${todayDecimal}`);
 
         const rows = await prisma.$queryRaw`
             SELECT
@@ -1040,7 +1041,7 @@ async function getUserAppointments(userId) {
             ORDER BY t.TME2_FCH, t.TME2_HH, t.TME2_MM
         `;
 
-        console.log(`[HABEJICO] getUserAppointments: ${rows.length} citas encontradas (fuente TME2)`);
+        logger.debug(`[HABEJICO] getUserAppointments: ${rows.length} citas encontradas (fuente TME2)`);
 
         return rows.map(r => ({
             // ID robusto usando '|' como separador — los campos son numéricos, nunca contienen '|'
@@ -1077,7 +1078,7 @@ async function cancelAppointment(appointmentId) {
         const hh       = parseInt(parts[2]);
         const mm       = parseInt(parts[3]);
 
-        console.log(`[HABEJICO] cancelAppointment: médico=${medicoId}, fecha=${fch}, hora=${hh}:${mm}`);
+        logger.debug(`[HABEJICO] cancelAppointment: médico=${medicoId}, fecha=${fch}, hora=${hh}:${mm}`);
 
         // 1. Marcar como cancelada en TMCITASUSUARIOS (KC3_ESTADO = 'CA')
         try {
@@ -1089,9 +1090,9 @@ async function cancelAppointment(appointmentId) {
                   AND KC3_HH     = ${hh}
                   AND KC3_MM     = ${mm}
             `;
-            console.log(`[HABEJICO] ✅ KC3 marcado CA: médico=${medicoId} ${hh}:${mm} fecha=${fch}`);
+            logger.info(`[HABEJICO] ✅ KC3 marcado CA: médico=${medicoId} ${hh}:${mm} fecha=${fch}`);
         } catch (e1) {
-            console.warn(`[HABEJICO] ⚠️ No se pudo marcar CA en KC3: ${e1.message}`);
+            logger.warn(`[HABEJICO] ⚠️ No se pudo marcar CA en KC3: ${e1.message}`);
             // Continuar — puede ser una cita de Xenco sin registro en KC3
         }
 
@@ -1111,9 +1112,9 @@ async function cancelAppointment(appointmentId) {
                   AND TME2_HH   = ${hh}
                   AND TME2_MM   = ${mm}
             `;
-            console.log(`[HABEJICO] ✅ TME2 liberado: médico=${medicoId} ${hh}:${mm} (${tme2Updated} fila/s)`);
+            logger.info(`[HABEJICO] ✅ TME2 liberado: médico=${medicoId} ${hh}:${mm} (${tme2Updated} fila/s)`);
         } catch (e2) {
-            console.warn(`[HABEJICO] ⚠️ No se pudo liberar TME2: ${e2.message}`);
+            logger.warn(`[HABEJICO] ⚠️ No se pudo liberar TME2: ${e2.message}`);
         }
 
         return true;
