@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
-import { X, Calendar, User, RefreshCw, Search, Clock, Phone, Building2, UserCheck, MonitorCheck } from 'lucide-react';
+import { X, Calendar, User, RefreshCw, Search, Clock, Phone, Building2, UserCheck, MonitorCheck, FileText } from 'lucide-react';
 
 const IS_PROD = typeof window !== 'undefined' && window.location.hostname !== 'localhost';
 const SERVER_HOST = typeof window !== 'undefined' ? (IS_PROD ? window.location.hostname : 'localhost') : 'localhost';
@@ -84,6 +84,153 @@ export default function VisorAgenda({ onClose }) {
         total: slots.length,
         asignados: slots.filter(s => s.asignado).length,
         libres: slots.filter(s => !s.asignado).length,
+    };
+
+    // ── Generador de informe del día ───────────────────────────────────────────
+    const generarInforme = () => {
+        if (!medicoSel || slots.length === 0) return;
+
+        const fechaLegible = new Date(fecha + 'T12:00:00').toLocaleDateString('es-CO', {
+            weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
+        });
+        const fechaCorta = new Date(fecha + 'T12:00:00').toLocaleDateString('es-CO', {
+            day: '2-digit', month: '2-digit', year: 'numeric'
+        });
+        const ahora = new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' });
+        const ocupacion = stats.total > 0 ? Math.round((stats.asignados / stats.total) * 100) : 0;
+
+        const filas = slots.map((s, i) => `
+            <tr class="${s.asignado ? 'asignado' : 'libre'}">
+                <td>${s.lin || i + 1}</td>
+                <td class="hora">${s.hora}</td>
+                <td>
+                    ${s.asignado
+                        ? `<div class="paciente-nom">${s.pacienteNom || '—'}</div>${s.cod && s.cod !== '00000000000000' ? `<div class="cedula">CC: ${s.cod.replace(/^0+/, '')}</div>` : ''}`
+                        : '<span class="libre-tag">LIBRE</span>'
+                    }
+                </td>
+                <td>${s.asignado ? (s.entidad || '—') : '—'}</td>
+                <td>${s.edad != null ? s.edad + ' A' : '—'}</td>
+                <td>${s.telefono || '—'}</td>
+                <td>${s.consultorio || '—'}</td>
+                <td><span class="usuario ${s.usuario === 'AGENTE AURORA' ? 'aurora' : ''}">${s.usuario || '—'}</span></td>
+            </tr>
+        `).join('');
+
+        const html = `<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8" />
+    <title>Informe de Agenda — ${medicoSel.nombre} — ${fechaCorta}</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', Arial, sans-serif; background: #fff; color: #1a1a2e; font-size: 12px; }
+
+        /* ── Header ── */
+        .header { background: linear-gradient(135deg, #8263B1 0%, #A1E3D8 100%); padding: 24px 32px; color: white; }
+        .header-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; }
+        .logo { font-size: 22px; font-weight: 800; letter-spacing: -0.5px; }
+        .logo span { opacity: 0.75; font-weight: 400; font-size: 14px; display: block; margin-top: 2px; }
+        .meta { text-align: right; font-size: 11px; opacity: 0.85; line-height: 1.6; }
+        .doctor-name { font-size: 17px; font-weight: 700; border-top: 1px solid rgba(255,255,255,0.3); padding-top: 10px; }
+        .doctor-fecha { font-size: 13px; opacity: 0.85; margin-top: 2px; text-transform: capitalize; }
+
+        /* ── Stats ── */
+        .stats { display: flex; gap: 16px; padding: 20px 32px; background: #f8f9fc; border-bottom: 1px solid #e2e8f0; }
+        .stat-card { flex: 1; background: white; border-radius: 10px; padding: 14px 18px;
+                     border: 1px solid #e2e8f0; box-shadow: 0 1px 4px rgba(0,0,0,0.06); text-align: center; }
+        .stat-card .num { font-size: 28px; font-weight: 800; line-height: 1; }
+        .stat-card .lbl { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;
+                          color: #64748b; margin-top: 4px; }
+        .stat-card.total .num  { color: #1a1a2e; }
+        .stat-card.asig .num   { color: #0f766e; }
+        .stat-card.libre .num  { color: #8263B1; }
+        .stat-card.ocup .num   { color: #d97706; }
+
+        /* ── Tabla ── */
+        .table-wrap { padding: 20px 32px 32px; }
+        .section-title { font-size: 12px; font-weight: 700; text-transform: uppercase;
+                         letter-spacing: 0.8px; color: #64748b; margin-bottom: 10px;
+                         padding-bottom: 6px; border-bottom: 2px solid #e2e8f0; }
+        table { width: 100%; border-collapse: collapse; }
+        thead tr { background: #1a1a2e; color: white; }
+        thead th { padding: 8px 10px; text-align: left; font-size: 10px; font-weight: 700;
+                   text-transform: uppercase; letter-spacing: 0.6px; }
+        tbody tr { border-bottom: 1px solid #f1f5f9; }
+        tbody tr:last-child { border-bottom: none; }
+        tbody tr.asignado { background: #f0fdf9; }
+        tbody tr.libre { background: #fafafa; }
+        tbody td { padding: 7px 10px; vertical-align: middle; }
+        .hora { font-family: monospace; font-weight: 700; color: #0f766e; font-size: 12px; }
+        .paciente-nom { font-weight: 600; color: #1a1a2e; }
+        .cedula { font-size: 10px; color: #94a3b8; font-family: monospace; margin-top: 2px; }
+        .libre-tag { display: inline-block; background: #f1f5f9; color: #94a3b8;
+                     font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 4px;
+                     letter-spacing: 0.5px; }
+        .usuario { display: inline-block; padding: 2px 8px; border-radius: 4px;
+                   font-size: 10px; font-weight: 600; background: #f1f5f9; color: #64748b; }
+        .usuario.aurora { background: #ede9fe; color: #7c3aed; }
+
+        /* ── Footer ── */
+        .footer { padding: 16px 32px; background: #f8f9fc; border-top: 1px solid #e2e8f0;
+                  display: flex; justify-content: space-between; align-items: center;
+                  font-size: 10px; color: #94a3b8; }
+
+        /* ── Print ── */
+        @media print {
+            body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            .header { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            tbody tr.asignado { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="header-top">
+            <div class="logo">🏥 Aurora Bot<span>Sistema de Agendamiento Médico</span></div>
+            <div class="meta">
+                Generado: ${fechaCorta} a las ${ahora}<br/>
+                Documento confidencial — Uso interno
+            </div>
+        </div>
+        <div class="doctor-name">Dr(a). ${medicoSel.nombre}</div>
+        <div class="doctor-fecha">Agenda del ${fechaLegible}</div>
+    </div>
+
+    <div class="stats">
+        <div class="stat-card total"><div class="num">${stats.total}</div><div class="lbl">Total Turnos</div></div>
+        <div class="stat-card asig"><div class="num">${stats.asignados}</div><div class="lbl">Asignados</div></div>
+        <div class="stat-card libre"><div class="num">${stats.libres}</div><div class="lbl">Disponibles</div></div>
+        <div class="stat-card ocup"><div class="num">${ocupacion}%</div><div class="lbl">Ocupación</div></div>
+    </div>
+
+    <div class="table-wrap">
+        <div class="section-title">Detalle de turnos del día</div>
+        <table>
+            <thead>
+                <tr>
+                    <th>#</th><th>Hora</th><th>Paciente</th><th>EPS / Entidad</th>
+                    <th>Edad</th><th>Teléfono</th><th>Consultorio</th><th>Agendado por</th>
+                </tr>
+            </thead>
+            <tbody>${filas}</tbody>
+        </table>
+    </div>
+
+    <div class="footer">
+        <span>Aurora Bot — Sistema de Gestión Médica</span>
+        <span>Dr(a). ${medicoSel.nombre} · ${fechaCorta} · ${stats.asignados} de ${stats.total} turnos ocupados (${ocupacion}%)</span>
+    </div>
+
+    <script>window.onload = () => { window.print(); }<\/script>
+</body>
+</html>`;
+
+        const win = window.open('', '_blank', 'width=900,height=700');
+        if (win) {
+            win.document.write(html);
+            win.document.close();
+        }
     };
 
     return (
@@ -298,7 +445,8 @@ export default function VisorAgenda({ onClose }) {
 
                 {/* Footer */}
                 {medicoSel && slots.length > 0 && (
-                    <div className="flex-shrink-0 px-6 py-3 border-t border-[#2D283E] bg-[#12101A] flex items-center justify-between">
+                    <div className="flex-shrink-0 px-6 py-3 border-t border-[#2D283E] bg-[#12101A] flex items-center justify-between gap-4">
+                        {/* Leyenda */}
                         <div className="flex gap-4 text-xs text-gray-400">
                             <span className="flex items-center gap-1.5">
                                 <span className="w-3 h-3 rounded-sm bg-[#0D3D3A]/80 border border-[#A1E3D8]/30 inline-block" />
@@ -309,9 +457,23 @@ export default function VisorAgenda({ onClose }) {
                                 Libre ({stats.libres})
                             </span>
                         </div>
-                        <span className="text-xs text-gray-500">
-                            {medicoSel.nombre} · {new Date(fecha + 'T12:00:00').toLocaleDateString('es-CO', { weekday:'long', day:'numeric', month:'long', year:'numeric' })}
+
+                        {/* Info del doctor */}
+                        <span className="text-xs text-gray-500 hidden sm:block truncate max-w-xs">
+                            {medicoSel.nombre} · {new Date(fecha + 'T12:00:00').toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long' })}
                         </span>
+
+                        {/* Botón Generar Informe */}
+                        <button
+                            onClick={generarInforme}
+                            className="flex-shrink-0 flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all duration-200
+                                       bg-gradient-to-r from-[#8263B1] to-[#A1E3D8] hover:from-[#9473C1] hover:to-[#7dd3c8]
+                                       text-white shadow-lg shadow-[#8263B1]/30 hover:shadow-[#8263B1]/50
+                                       hover:scale-105 active:scale-95"
+                        >
+                            <FileText size={14} />
+                            Generar Informe del Día
+                        </button>
                     </div>
                 )}
             </div>
