@@ -433,18 +433,32 @@ app.get('/api/cardiovascular/patient/:id', async (req, res) => {
 // POST /api/cardiovascular/remind/:id — Recordatorio por WhatsApp
 app.post('/api/cardiovascular/remind/:id', async (req, res) => {
     try {
-        if (!whatsappClient) return res.status(503).json({ error: 'WhatsApp no conectado' });
+        const examId = decodeURIComponent(req.params.id); // decodifica prog-*902207 correctamente
         const { cedula, examen } = req.body;
-        const phone = cedula ? `57${cedula}@c.us` : null;
-        if (!phone) return res.status(400).json({ error: 'Se requiere cédula en body' });
 
-        const msg = `🔔 *RECORDATORIO — Examen Pendiente*\n\nHola, te recordamos que tienes el siguiente examen pendiente:\n\n🧪 *${examen || 'Examen cardiovascular'}*\n\nPor favor acércate a nuestra institución para realizarlo. 😊\n\n_Aurora — Aurora E.S.E._`;
+        // Validar cédula
+        if (!cedula || !/^\d{5,15}$/.test(String(cedula).replace(/\D/g, ''))) {
+            return res.status(400).json({ error: 'Se requiere cédula válida en el body' });
+        }
+
+        // En modo desarrollo sin WhatsApp activo
+        if (!whatsappClient) {
+            return res.status(503).json({
+                error: 'WhatsApp no está conectado. Activa el bot (NO_WHATSAPP=false) para enviar recordatorios.'
+            });
+        }
+
+        const phone = `57${String(cedula).replace(/\D/g, '')}@c.us`;
+        const msg = `🔔 *RECORDATORIO — Examen Pendiente*\n\nHola, te recordamos que tienes el siguiente examen pendiente:\n\n🧪 *${examen || 'Examen cardiovascular'}*\n\nPor favor acércate a nuestra institución para realizarlo. 😊\n\n_Agente Aurora — Sistema de Agendamiento_`;
         await whatsappClient.sendMessage(phone, msg);
+        logger.info(`[CARDIOVASCULAR] Recordatorio enviado a ${phone} — examen: ${examId}`);
         res.json({ success: true });
     } catch (error) {
+        logger.warn('[CARDIOVASCULAR] Error en remind:', error.message);
         res.status(500).json({ error: error.message });
     }
 });
+
 
 // POST /api/cardiovascular/schedule/:id — Placeholder agendamiento
 app.post('/api/cardiovascular/schedule/:id', async (req, res) => {
