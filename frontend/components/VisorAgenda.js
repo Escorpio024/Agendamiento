@@ -105,9 +105,9 @@ export default function VisorAgenda({ onClose }) {
                 <td class="hora">${s.hora}</td>
                 <td>
                     ${s.asignado
-                        ? `<div class="paciente-nom">${s.pacienteNom || '—'}</div>${s.cod && s.cod !== '00000000000000' ? `<div class="cedula">CC: ${s.cod.replace(/^0+/, '')}</div>` : ''}`
-                        : '<span class="libre-tag">LIBRE</span>'
-                    }
+                ? `<div class="paciente-nom">${s.pacienteNom || '—'}</div>${s.cod && s.cod !== '00000000000000' ? `<div class="cedula">CC: ${s.cod.replace(/^0+/, '')}</div>` : ''}`
+                : '<span class="libre-tag">LIBRE</span>'
+            }
                 </td>
                 <td>${s.asignado ? (s.entidad || '—') : '—'}</td>
                 <td>${s.edad != null ? s.edad + ' A' : '—'}</td>
@@ -187,7 +187,7 @@ export default function VisorAgenda({ onClose }) {
 <body>
     <div class="header">
         <div class="header-top">
-            <div class="logo">🏥 Aurora Bot<span>Sistema de Agendamiento Médico</span></div>
+            <div class="logo">🏥 Agente Aurora<span>Sistema de Agendamiento Médico</span></div>
             <div class="meta">
                 Generado: ${fechaCorta} a las ${ahora}<br/>
                 Documento confidencial — Uso interno
@@ -370,7 +370,7 @@ export default function VisorAgenda({ onClose }) {
                                         className={`border-b border-[#2D283E]/50 transition-colors hover:brightness-110 ${s.asignado
                                             ? 'bg-[#0D3D3A]/60'
                                             : idx % 2 === 0 ? 'bg-[#1A1721]' : 'bg-[#1E1B26]'
-                                        }`}>
+                                            }`}>
                                         {/* # */}
                                         <td className="px-3 py-2.5 text-xs text-gray-500 font-mono">{s.lin}</td>
                                         {/* Hora */}
