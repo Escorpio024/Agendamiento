@@ -758,14 +758,17 @@ export default function CardiovascularPage() {
     const handleRemind = async (id, tipoExamen) => {
         setSendingId(id);
         try {
-            // encodeURIComponent es clave: el id puede contener '*' (ej: prog-*902207)
-            // que rompe la URL en Express si no se codifica
+            // encodeURIComponent: el id puede contener '*' (ej: prog-*902207) que rompe la URL en Express
             const res = await fetch(`${API_BASE}/api/cardiovascular/remind/${encodeURIComponent(id)}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ cedula: patient?.documento, examen: tipoExamen })
+                body: JSON.stringify({
+                    cedula:   patient?.documento,
+                    telefono: patient?.telefono,   // ← número real de WhatsApp del paciente
+                    examen:   tipoExamen
+                })
             });
-            if (res.ok) showToast('✅ Recordatorio enviado');
+            if (res.ok) showToast('✅ Recordatorio enviado por WhatsApp');
             else {
                 const data = await res.json().catch(() => ({}));
                 showToast(`❌ ${data.error || 'Error al enviar recordatorio'}`, 'error');

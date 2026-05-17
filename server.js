@@ -433,13 +433,8 @@ app.get('/api/cardiovascular/patient/:id', async (req, res) => {
 // POST /api/cardiovascular/remind/:id — Recordatorio por WhatsApp
 app.post('/api/cardiovascular/remind/:id', async (req, res) => {
     try {
-        const examId = decodeURIComponent(req.params.id); // decodifica prog-*902207 correctamente
-        const { cedula, examen } = req.body;
-
-        // Validar cédula
-        if (!cedula || !/^\d{5,15}$/.test(String(cedula).replace(/\D/g, ''))) {
-            return res.status(400).json({ error: 'Se requiere cédula válida en el body' });
-        }
+        const examId  = decodeURIComponent(req.params.id);
+        const { cedula, telefono, examen } = req.body;
 
         // En modo desarrollo sin WhatsApp activo
         if (!whatsappClient) {
@@ -448,16 +443,48 @@ app.post('/api/cardiovascular/remind/:id', async (req, res) => {
             });
         }
 
-        const phone = `57${String(cedula).replace(/\D/g, '')}@c.us`;
+        // ── Resolver el número de teléfono real del paciente ──────────────────
+        // Prioridad: telefono enviado por el frontend → buscar en BD por cédula
+        let rawPhone = telefono ? String(telefono).replace(/\D/g, '') : null;
+
+        // Si el frontend no envió teléfono, intentar buscarlo en la BD
+        if (!rawPhone && cedula) {
+            const cedLimpia = String(cedula).replace(/\D/g, '');
+            const cedula14  = cedLimpia.padStart(14, '0');
+            try {
+                const rows = await medicalPrisma.$queryRawUnsafe(`
+                    SELECT TOP 1 KC5_TEL_CEL FROM TKCLIENTESANEXO5
+                    WHERE KC5_RACOD_CLI IN ('${cedLimpia}', '${cedula14}')
+                      AND KC5_TEL_CEL IS NOT NULL AND KC5_TEL_CEL <> ''
+                `);
+                if (rows[0]?.KC5_TEL_CEL) rawPhone = String(rows[0].KC5_TEL_CEL).replace(/\D/g, '');
+            } catch (e) {
+                logger.warn('[CARDIOVASCULAR] No se pudo buscar teléfono en BD:', e.message);
+            }
+        }
+
+        // Validar que tengamos un teléfono con longitud razonable
+        if (!rawPhone || rawPhone.length < 7) {
+            return res.status(400).json({
+                error: 'No se encontró número de WhatsApp para este paciente. Verifica que tenga teléfono registrado.'
+            });
+        }
+
+        // Construir JID de WhatsApp (formato Colombia: 57 + 10 dígitos)
+        // Si el número tiene 10 dígitos, agregar prefijo país
+        const digits = rawPhone.length === 10 ? `57${rawPhone}` : rawPhone;
+        const waId   = `${digits}@c.us`;
+
         const msg = `🔔 *RECORDATORIO — Examen Pendiente*\n\nHola, te recordamos que tienes el siguiente examen pendiente:\n\n🧪 *${examen || 'Examen cardiovascular'}*\n\nPor favor acércate a nuestra institución para realizarlo. 😊\n\n_Agente Aurora — Sistema de Agendamiento_`;
-        await whatsappClient.sendMessage(phone, msg);
-        logger.info(`[CARDIOVASCULAR] Recordatorio enviado a ${phone} — examen: ${examId}`);
+        await whatsappClient.sendMessage(waId, msg);
+        logger.info(`[CARDIOVASCULAR] ✅ Recordatorio enviado a ${waId} — examen: ${examId}`);
         res.json({ success: true });
     } catch (error) {
         logger.warn('[CARDIOVASCULAR] Error en remind:', error.message);
         res.status(500).json({ error: error.message });
     }
 });
+
 
 
 // POST /api/cardiovascular/schedule/:id — Placeholder agendamiento
