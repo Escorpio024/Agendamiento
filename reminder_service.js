@@ -9,9 +9,10 @@
  *  4. Corre UNA vez al día a las 9 AM (no cada hora)
  *  5. Fix: variables phone/telefono → whatsappId (evitaba crash silencioso)
  */
-const prisma = require('./db');
+const prisma    = require('./db');
 const botPrisma = require('./dbBot');  // SQLite del bot (conversaciones WhatsApp reales)
-const cron = require('node-cron');
+const cron      = require('node-cron');
+const logger    = require('./logger');
 
 class ReminderService {
     constructor() {
@@ -24,8 +25,15 @@ class ReminderService {
 
     init(whatsappClient) {
         this.client = whatsappClient;
+
+        // En modo NO_WHATSAPP no hay cliente real — no iniciar el scheduler
+        if (!whatsappClient) {
+            logger.warn('[Recordatorios] NO_WHATSAPP=true — scheduler de recordatorios desactivado.');
+            return;
+        }
+
         this.startScheduler();
-        console.log('✅ Servicio de recordatorios v2 iniciado (9 AM, sin duplicados)');
+        logger.info('✅ Servicio de recordatorios v2 iniciado (9 AM + 6 PM, sin duplicados)');
     }
 
     setClient(whatsappClient) {
@@ -35,16 +43,26 @@ class ReminderService {
     startScheduler() {
         if (this.isRunning) return;
 
-        // ── Enviar recordatorios UNA VEZ al día a las 9:00 AM ──
+        // Zona horaria del servidor — verificar que sea America/Bogota en la VM
+        const tzOffset = new Date().toLocaleTimeString('es-CO', { timeZoneName: 'short' });
+        logger.info(`[Recordatorios] Cron activo. Hora del servidor: ${tzOffset}`);
+
+        // ── 9:00 AM — recordatorio de mañana (primera pasada del día) ──
         cron.schedule('0 9 * * *', async () => {
-            console.log('🔔 [Recordatorios] Enviando recordatorios del día...');
+            logger.info('🔔 [Recordatorios] Envío de las 9:00 AM iniciado...');
             await this.sendReminders();
         });
 
-        // ── Limpiar deduplicación a medianoche ──
+        // ── 6:00 PM — recordatorio de mañana (segunda pasada del día) ──
+        cron.schedule('0 18 * * *', async () => {
+            logger.info('🔔 [Recordatorios] Envío de las 6:00 PM iniciado...');
+            await this.sendReminders();
+        });
+
+        // ── Medianoche — limpiar deduplicación ──
         cron.schedule('0 0 * * *', () => {
             this.sentToday.clear();
-            console.log('[Recordatorios] Set de deduplicación limpiado para el nuevo día.');
+            logger.debug('[Recordatorios] Set de deduplicación limpiado para el nuevo día.');
         });
 
         this.isRunning = true;
@@ -126,11 +144,11 @@ class ReminderService {
                 take: 1
             });
             if (convs.length > 0) {
-                console.log(`[Recordatorios] 📱 WA ID del bot: ${convs[0].id} (paciente ${codigoPac})`);
+                logger.debug(`[Recordatorios] 📱 WA ID del bot: ${convs[0].id} (paciente ${codigoPac})`);
                 return convs[0].id;
             }
         } catch (e) {
-            console.warn('[Recordatorios] No se pudo consultar SQLite:', e.message);
+            logger.warn('[Recordatorios] No se pudo consultar SQLite:', e.message);
         }
 
         // Fallback: construir @c.us desde el teléfono de Xenco
@@ -160,12 +178,12 @@ class ReminderService {
 
     async sendReminders() {
         if (!prisma || !this.client) {
-            console.log('[Recordatorios] Prisma o cliente WA no disponible.');
+            logger.warn('[Recordatorios] Prisma o cliente WA no disponible — omitiendo envío.');
             return 0;
         }
 
         const tomorrowDec = this.getTomorrowDecimal();
-        console.log(`[Recordatorios] Buscando citas para mañana (${tomorrowDec})...`);
+        logger.info(`[Recordatorios] Buscando citas para mañana (${tomorrowDec})...`);
 
         let sent = 0;
         try {
@@ -182,7 +200,7 @@ class ReminderService {
                   AND CAST(KC3_COD AS BIGINT) > 0
             `;
 
-            console.log(`📅 [Recordatorios] ${citas.length} cita(s) encontradas para mañana`);
+            logger.info(`📅 [Recordatorios] ${citas.length} cita(s) encontradas para mañana`);
 
             for (const cita of citas) {
                 const cod = String(cita.KC3_COD).trim();
@@ -190,13 +208,13 @@ class ReminderService {
 
                 // ── DEDUPLICACIÓN: saltar si ya se envió este recordatorio hoy ──
                 if (this.sentToday.has(clave)) {
-                    console.log(`[Recordatorios] ⏭️  Ya enviado hoy: ${clave}`);
+                    logger.debug(`[Recordatorios] ⏭️  Ya enviado hoy: ${clave}`);
                     continue;
                 }
 
                 const waId = await this.getWhatsAppId(cod);
                 if (!waId) {
-                    console.log(`[Recordatorios] ⚠️  Sin teléfono/WA: ${cod}`);
+                    logger.warn(`[Recordatorios] ⚠️  Sin teléfono/WA: ${cod}`);
                     continue;
                 }
 
@@ -216,10 +234,10 @@ class ReminderService {
             }
 
         } catch (error) {
-            console.error('[Recordatorios] ❌ Error:', error.message);
+            logger.error('[Recordatorios] ❌ Error:', error.message);
         }
 
-        console.log(`[Recordatorios] ✅ ${sent} recordatorio(s) enviado(s).`);
+        logger.info(`[Recordatorios] ✅ ${sent} recordatorio(s) enviado(s).`);
         return sent;
     }
 
@@ -261,20 +279,20 @@ class ReminderService {
                 (consultorio ? `🚪 *Consultorio:* ${consultorio}\n` : '') +
                 `\nPor favor, llega *15 minutos antes* de tu cita.\n\n` +
                 `Si necesitas cancelar o reprogramar, escríbeme por este chat.\n\n` +
-                `_Aurora — Asistente de citas médicas_ 🤖`;
+                `_Agente Aurora — Asistente de citas médicas_ 🤖`;
 
             // Verificar que WhatsApp esté conectado antes de enviar
             const waState = await this.client.getState().catch(() => null);
             if (waState !== 'CONNECTED') {
-                console.warn(`[Recordatorios] ⚠️  WA no conectado (${waState}), omitiendo envío a ${whatsappId}`);
+                logger.warn(`[Recordatorios] ⚠️  WA no conectado (${waState}), omitiendo envío a ${whatsappId}`);
                 return false;
             }
 
             await this.client.sendMessage(whatsappId, mensaje);
-            console.log(`[Recordatorios] ✅ Enviado a ${primerNombre} (${whatsappId})`);
+            logger.info(`[Recordatorios] ✅ Enviado a ${primerNombre} (${whatsappId})`);
             return true;
         } catch (error) {
-            console.error(`[Recordatorios] ❌ Error enviando a ${waId}:`, error.message);
+            logger.warn(`[Recordatorios] ❌ Error enviando a ${waId}: ${error.message}`);
             return false;
         }
     }
