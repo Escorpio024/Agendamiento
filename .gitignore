@@ -1,4 +1,4 @@
-﻿node_modules
+node_modules
 # Keep environment variables out of version control
 .env
 
@@ -18,3 +18,26 @@ frontend/.next
 frontend/node_modules
 .next
 *.db
+
+# Scripts de diagnóstico y pruebas locales (no forman parte del bot)
+prueba_cardio.js
+prueba_cardio_final.js
+init_botdb.js
+inspect_consecutivos.js
+investigar_cardio.js
+investigate_missing.js
+retrofix_entidad.js
+retrofix_tme2.js
+test_cardio_endpoint.js
+test_patient.js
+test_prisma.js
+cols.js
+lab_explore.js
+test_reminders.js
+diagnostico_citas.js
+find_phone.js
+phone_results.txt
+
+# Resúmenes y documentación de sesiones
+Resumen*.md
+ResumenChat*.md
