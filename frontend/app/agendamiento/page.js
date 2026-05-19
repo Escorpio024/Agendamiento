@@ -9,7 +9,7 @@ import VisorAgenda from '../../components/VisorAgenda';
 import { useChat } from '../../hooks/useChat';
 import {
     User, UserPlus, Bot, MessageCircle,
-    CalendarCheck2, X, Calendar, Clock, Stethoscope, Hash, Phone, BellRing
+    CalendarCheck2, X, Calendar, Clock, Stethoscope, Hash, Phone, BellRing, FileText
 } from 'lucide-react';
 
 // ─── Appointments Modal ───────────────────────────────────────────────
@@ -17,9 +17,10 @@ const IS_PROD = typeof window !== 'undefined' && window.location.hostname !== 'l
 const SERVER_HOST = IS_PROD ? window.location.hostname : 'localhost';
 const API_BASE = `http://${SERVER_HOST}:3001`;
 
-function AppointmentsModal({ onClose }) {
-    const [appointments, setAppointments] = useState([]);
+function AppointmentsModal({ onClose, onCountSync }) {
+    const [allAppointments, setAllAppointments] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [dateFilter, setDateFilter] = useState('mes');   // hoy | semana | mes | todas
     const [sendingId, setSendingId] = useState(null);
     const [toast, setToast] = useState(null);
 
@@ -27,13 +28,15 @@ function AppointmentsModal({ onClose }) {
         setLoading(true);
         fetch(`${API_BASE}/api/appointments`)
             .then(r => r.json())
-            .then(data => { setAppointments(data); setLoading(false); })
+            .then(data => {
+                setAllAppointments(data);
+                if (onCountSync) onCountSync(data.length);
+                setLoading(false);
+            })
             .catch(() => setLoading(false));
-    }, []);
+    }, [onCountSync]);
 
-    useEffect(() => {
-        loadAppointments();
-    }, [loadAppointments]);
+    useEffect(() => { loadAppointments(); }, [loadAppointments]);
 
     useEffect(() => {
         const host = typeof window !== 'undefined' && window.location.hostname !== 'localhost'
@@ -43,21 +46,147 @@ function AppointmentsModal({ onClose }) {
         return () => socket.disconnect();
     }, [loadAppointments]);
 
-    const fmt = (dateStr) => {
-        if (!dateStr) return '—';
-        return dateStr;
+    // ── Filtrado por fecha ──────────────────────────────────────────────
+    const filterAppointments = (list) => {
+        const now = new Date();
+        const startOfDay   = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const startOfWeek  = new Date(startOfDay); startOfWeek.setDate(startOfDay.getDate() - startOfDay.getDay());
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+
+        return list.filter(a => {
+            if (dateFilter === 'todas') return true;
+            const created = new Date(a.createdAt);
+            if (dateFilter === 'hoy')   return created >= startOfDay;
+            if (dateFilter === 'semana') return created >= startOfWeek;
+            if (dateFilter === 'mes')   return created >= startOfMonth;
+            return true;
+        });
     };
+
+    const appointments = filterAppointments(allAppointments);
+
+    // ── Estadísticas del mes ────────────────────────────────────────────
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const mesLabel = now.toLocaleDateString('es-CO', { month: 'long', year: 'numeric' });
+    const citasMes = allAppointments.filter(a => new Date(a.createdAt) >= startOfMonth);
+    const citasHoy = allAppointments.filter(a => {
+        const d = new Date(a.createdAt);
+        return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+    });
+
+    // ── Generador de informe mensual PDF ────────────────────────────────
+    const generarInformeMensual = () => {
+        const fechaInforme = now.toLocaleDateString('es-CO', { day: '2-digit', month: 'long', year: 'numeric' });
+        const doctoresMap = {};
+        citasMes.forEach(a => {
+            const doc = a.doctorName || 'Sin asignar';
+            if (!doctoresMap[doc]) doctoresMap[doc] = 0;
+            doctoresMap[doc]++;
+        });
+        const doctoresRows = Object.entries(doctoresMap)
+            .sort((a, b) => b[1] - a[1])
+            .map(([doc, count]) => `
+                <tr>
+                    <td>${doc}</td>
+                    <td style="text-align:center;font-weight:700">${count}</td>
+                    <td style="text-align:center">${((count / citasMes.length) * 100).toFixed(1)}%</td>
+                </tr>`).join('');
+
+        const citasRows = citasMes.map((a, i) => `
+            <tr>
+                <td>${i + 1}</td>
+                <td>${a.patientName || '—'}</td>
+                <td>${a.patientDocument || '—'}</td>
+                <td>${a.appointmentDate || '—'} ${a.appointmentTime || ''}</td>
+                <td>${a.doctorName || '—'}</td>
+                <td>${new Date(a.createdAt).toLocaleDateString('es-CO', { day:'2-digit', month:'short' })}</td>
+            </tr>`).join('');
+
+        const html = `<!DOCTYPE html>
+<html lang="es"><head><meta charset="UTF-8"/>
+<title>Informe Mensual de Citas — ${mesLabel}</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:'Segoe UI',Arial,sans-serif; font-size:12px; color:#1a1a2e; background:#fff; padding:32px; }
+header { display:flex; justify-content:space-between; align-items:flex-start; border-bottom:3px solid #8263B1; padding-bottom:16px; margin-bottom:24px; }
+.logo { display:flex; align-items:center; gap:12px; }
+.logo .icon { width:48px; height:48px; background:linear-gradient(135deg,#8263B1,#5a4490); border-radius:12px; display:flex; align-items:center; justify-content:center; color:#fff; font-size:22px; }
+header h1 { font-size:18px; font-weight:800; } header h1 span { color:#8263B1; }
+.meta { text-align:right; font-size:11px; color:#666; }
+.meta strong { font-size:13px; color:#1a1a2e; display:block; margin-bottom:2px; }
+.stats-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-bottom:22px; }
+.stat-card { background:#f7f5ff; border:1px solid #d4c8f0; border-radius:10px; padding:14px 18px; text-align:center; }
+.stat-card .num { font-size:28px; font-weight:800; color:#8263B1; }
+.stat-card .lbl { font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:#666; margin-top:2px; }
+section { margin-bottom:22px; }
+h3 { font-size:12px; font-weight:800; text-transform:uppercase; letter-spacing:.1em; color:#1a1a2e; border-left:4px solid #8263B1; padding-left:10px; margin-bottom:8px; }
+table { width:100%; border-collapse:collapse; font-size:11px; }
+thead { background:#f3f0ff; }
+th { padding:7px 10px; text-align:left; font-weight:700; color:#4a3b72; border-bottom:2px solid #c8b9f0; }
+td { padding:6px 10px; border-bottom:1px solid #e8e3f5; }
+tr:nth-child(even) td { background:#faf8ff; }
+footer { margin-top:28px; padding-top:12px; border-top:2px solid #e8e3f5; display:flex; justify-content:space-between; font-size:10px; color:#999; }
+@media print { body { padding:18px; } }
+</style></head><body>
+<header>
+    <div class="logo">
+        <div class="icon">🤖</div>
+        <div>
+            <div style="font-size:10px;color:#8263B1;font-weight:700;text-transform:uppercase;letter-spacing:.15em;">Informe Mensual</div>
+            <h1>Citas <span>Agendadas</span></h1>
+        </div>
+    </div>
+    <div class="meta">
+        <strong>${mesLabel}</strong>
+        <p>Generado: ${fechaInforme}</p>
+        <p>Auro Bot · Sistema de Agendamiento</p>
+    </div>
+</header>
+
+<div class="stats-grid">
+    <div class="stat-card"><div class="num">${citasMes.length}</div><div class="lbl">Total del mes</div></div>
+    <div class="stat-card"><div class="num">${citasHoy.length}</div><div class="lbl">Agendadas hoy</div></div>
+    <div class="stat-card"><div class="num">${Object.keys(doctoresMap).length}</div><div class="lbl">Médicos con citas</div></div>
+</div>
+
+<section>
+    <h3>Distribución por Médico</h3>
+    <table>
+        <thead><tr><th>Médico</th><th style="text-align:center">Citas</th><th style="text-align:center">% del mes</th></tr></thead>
+        <tbody>${doctoresRows}</tbody>
+    </table>
+</section>
+
+<section>
+    <h3>Detalle de Citas del Mes</h3>
+    <table>
+        <thead><tr><th>#</th><th>Paciente</th><th>Cédula</th><th>Fecha / Hora</th><th>Médico</th><th>Registrada</th></tr></thead>
+        <tbody>${citasRows}</tbody>
+    </table>
+</section>
+
+<footer>
+    <span>Auro Bot · Módulo de Agendamiento General</span>
+    <span>${fechaInforme} · Total: ${citasMes.length} citas</span>
+</footer>
+<script>window.onload=function(){window.print();setTimeout(()=>window.close(),800);}</script>
+</body></html>`;
+
+        const win = window.open('', '_blank', 'width=960,height=720');
+        if (win) { win.document.write(html); win.document.close(); }
+    };
+
+    const fmt = (dateStr) => dateStr || '—';
 
     const sendIndividualReminder = async (apptId) => {
         setSendingId(apptId);
         try {
             const res = await fetch(`${API_BASE}/api/appointments/${apptId}/remind`, { method: 'POST' });
-            if (res.ok) {
-                setToast({ text: '✅ Recordatorio enviado', type: 'success' });
-            } else {
-                setToast({ text: '❌ Error al enviar', type: 'error' });
-            }
-        } catch (e) {
+            setToast(res.ok
+                ? { text: '✅ Recordatorio enviado', type: 'success' }
+                : { text: '❌ Error al enviar', type: 'error' });
+        } catch {
             setToast({ text: '❌ Error de conexión', type: 'error' });
         } finally {
             setSendingId(null);
@@ -65,9 +194,17 @@ function AppointmentsModal({ onClose }) {
         }
     };
 
+    const FILTERS = [
+        { key: 'hoy',    label: 'Hoy' },
+        { key: 'semana', label: 'Semana' },
+        { key: 'mes',    label: 'Este mes' },
+        { key: 'todas',  label: 'Todas' },
+    ];
+
     return (
         <div className="modal-backdrop" onClick={onClose}>
-            <div className="modal-box" onClick={e => e.stopPropagation()}>
+            <div className="modal-box" onClick={e => e.stopPropagation()} style={{ maxWidth: '720px', width: '94vw' }}>
+
                 {/* Header */}
                 <div className="flex items-center justify-between px-6 py-4 border-b border-[#2D283E] flex-shrink-0">
                     <div className="flex items-center gap-3">
@@ -77,28 +214,19 @@ function AppointmentsModal({ onClose }) {
                         <div>
                             <h2 className="text-[#F5F5F7] font-semibold text-base">Citas Agendadas</h2>
                             <p className="text-[11px] text-[#A1E3D8]/70 mt-0.5">
-                                {loading ? 'Actualizando...' : `${appointments.length} cita${appointments.length !== 1 ? 's' : ''} registrada${appointments.length !== 1 ? 's' : ''}`}
+                                {loading ? 'Actualizando...' : `${appointments.length} de ${allAppointments.length} total`}
                             </p>
                         </div>
                     </div>
                     <div className="flex items-center gap-2">
-                        <button
-                            onClick={loadAppointments}
-                            disabled={loading}
-                            title="Recargar citas"
-                            className="w-8 h-8 rounded-full flex items-center justify-center text-[#A1E3D8]/60 hover:text-[#A1E3D8] hover:bg-[#2D283E] transition-colors disabled:opacity-40"
-                        >
+                        <button onClick={loadAppointments} disabled={loading} title="Recargar"
+                            className="w-8 h-8 rounded-full flex items-center justify-center text-[#A1E3D8]/60 hover:text-[#A1E3D8] hover:bg-[#2D283E] transition-colors disabled:opacity-40">
                             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={loading ? 'animate-spin' : ''}>
-                                <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
-                                <path d="M3 3v5h5"/>
-                                <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/>
-                                <path d="M16 21h5v-5"/>
+                                <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/>
+                                <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 21h5v-5"/>
                             </svg>
                         </button>
-                        <button
-                            onClick={onClose}
-                            className="w-8 h-8 rounded-full flex items-center justify-center text-[#F5F5F7]/60 hover:text-[#F5F5F7] hover:bg-[#2D283E] transition-colors"
-                        >
+                        <button onClick={onClose} className="w-8 h-8 rounded-full flex items-center justify-center text-[#F5F5F7]/60 hover:text-[#F5F5F7] hover:bg-[#2D283E] transition-colors">
                             <X size={18} />
                         </button>
                     </div>
@@ -106,16 +234,50 @@ function AppointmentsModal({ onClose }) {
 
                 {/* Stats bar */}
                 {!loading && (
-                    <div className="flex items-center gap-4 px-6 py-3 bg-[#8263B1]/10 border-b border-[#2D283E] flex-shrink-0">
+                    <div className="flex items-center gap-3 px-6 py-3 bg-[#8263B1]/10 border-b border-[#2D283E] flex-shrink-0 flex-wrap">
                         <div className="flex items-center gap-2 text-sm">
                             <span className="w-2 h-2 rounded-full bg-[#A1E3D8] pulse-dot" />
-                            <span className="text-[#F5F5F7]/70">Total:</span>
-                            <span className="font-bold text-[#A1E3D8] text-lg leading-none">{appointments.length}</span>
+                            <span className="text-[#F5F5F7]/70">Mes:</span>
+                            <span className="font-bold text-[#A1E3D8] text-lg leading-none">{citasMes.length}</span>
                         </div>
                         <div className="h-4 w-px bg-[#2D283E]" />
-                        <span className="text-[11px] text-[#F5F5F7]/40">Historial completo de citas confirmadas por el bot</span>
+                        <div className="flex items-center gap-2 text-sm">
+                            <span className="text-[#F5F5F7]/70">Hoy:</span>
+                            <span className="font-bold text-[#C4AFED] text-lg leading-none">{citasHoy.length}</span>
+                        </div>
+                        <div className="h-4 w-px bg-[#2D283E]" />
+                        <div className="flex items-center gap-2 text-sm">
+                            <span className="text-[#F5F5F7]/70">Total:</span>
+                            <span className="font-bold text-[#F5F5F7]/60 text-lg leading-none">{allAppointments.length}</span>
+                        </div>
+                        <div className="ml-auto">
+                            <button onClick={generarInformeMensual}
+                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all"
+                                style={{ background: 'linear-gradient(135deg,rgba(130,99,177,0.4),rgba(90,68,144,0.4))', color: '#C4AFED', border: '1px solid rgba(130,99,177,0.5)' }}
+                                onMouseEnter={e => e.currentTarget.style.background = 'linear-gradient(135deg,rgba(130,99,177,0.7),rgba(90,68,144,0.7))'}
+                                onMouseLeave={e => e.currentTarget.style.background = 'linear-gradient(135deg,rgba(130,99,177,0.4),rgba(90,68,144,0.4))'}>
+                                <FileText size={11} />
+                                Informe del mes
+                            </button>
+                        </div>
                     </div>
                 )}
+
+                {/* Filtros de fecha */}
+                <div className="flex items-center gap-1 px-6 py-2 border-b border-[#2D283E] flex-shrink-0">
+                    {FILTERS.map(f => (
+                        <button key={f.key} onClick={() => setDateFilter(f.key)}
+                            className="px-3 py-1 rounded-md text-xs font-semibold transition-all"
+                            style={{
+                                background: dateFilter === f.key ? 'rgba(130,99,177,0.3)' : 'transparent',
+                                color: dateFilter === f.key ? '#C4AFED' : 'rgba(245,245,247,0.4)',
+                                border: `1px solid ${dateFilter === f.key ? 'rgba(130,99,177,0.5)' : 'transparent'}`,
+                            }}>
+                            {f.label}
+                        </button>
+                    ))}
+                    <span className="ml-auto text-[11px] text-[#F5F5F7]/30">{appointments.length} resultado{appointments.length !== 1 ? 's' : ''}</span>
+                </div>
 
                 {/* List */}
                 <div className="flex-1 overflow-y-auto">
@@ -130,7 +292,7 @@ function AppointmentsModal({ onClose }) {
                         <div className="flex items-center justify-center py-16">
                             <div className="text-center">
                                 <CalendarCheck2 size={40} className="text-[#2D283E] mx-auto mb-3" />
-                                <p className="text-[#F5F5F7]/40 text-sm">No hay citas registradas aún</p>
+                                <p className="text-[#F5F5F7]/40 text-sm">No hay citas en este período</p>
                             </div>
                         </div>
                     ) : (
@@ -148,17 +310,11 @@ function AppointmentsModal({ onClose }) {
                                                     <span className="text-[10px] text-[#F5F5F7]/35">
                                                         {new Date(appt.createdAt).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: '2-digit' })}
                                                     </span>
-                                                    <button
-                                                        onClick={() => sendIndividualReminder(appt.id)}
-                                                        disabled={sendingId === appt.id}
-                                                        className="flex items-center gap-1.5 px-2 py-1 bg-[#8263B1]/20 hover:bg-[#8263B1]/40 text-[#C4AFED] rounded transition-colors text-[10px] font-semibold disabled:opacity-50"
-                                                        title="Enviar recordatorio por WhatsApp a este paciente"
-                                                    >
-                                                        {sendingId === appt.id ? (
-                                                            <span className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                                                        ) : (
-                                                            <BellRing size={12} />
-                                                        )}
+                                                    <button onClick={() => sendIndividualReminder(appt.id)} disabled={sendingId === appt.id}
+                                                        className="flex items-center gap-1.5 px-2 py-1 bg-[#8263B1]/20 hover:bg-[#8263B1]/40 text-[#C4AFED] rounded transition-colors text-[10px] font-semibold disabled:opacity-50">
+                                                        {sendingId === appt.id
+                                                            ? <span className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                                                            : <BellRing size={12} />}
                                                         Recordar
                                                     </button>
                                                 </div>
@@ -171,9 +327,7 @@ function AppointmentsModal({ onClose }) {
                                                 <div className="flex items-center gap-1.5">
                                                     <Phone size={11} className="text-[#A1E3D8]/60 flex-shrink-0" />
                                                     <span className="text-xs text-[#F5F5F7]/55 truncate">
-                                                        {appt.patientPhone
-                                                            ? appt.patientPhone
-                                                            : appt.whatsappId?.replace(/@(c\.us|lid)$/, '') || '—'}
+                                                        {appt.patientPhone || appt.whatsappId?.replace(/@(c\.us|lid)$/, '') || '—'}
                                                     </span>
                                                 </div>
                                                 <div className="flex items-center gap-1.5">
@@ -215,10 +369,8 @@ function AppointmentsModal({ onClose }) {
                             </span>
                         )}
                     </div>
-                    <button
-                        onClick={onClose}
-                        className="px-4 py-2 text-sm rounded-lg bg-[#2D283E] hover:bg-[#3D3754] text-[#F5F5F7]/70 hover:text-[#F5F5F7] transition-colors"
-                    >
+                    <button onClick={onClose}
+                        className="px-4 py-2 text-sm rounded-lg bg-[#2D283E] hover:bg-[#3D3754] text-[#F5F5F7]/70 hover:text-[#F5F5F7] transition-colors">
                         Cerrar
                     </button>
                 </div>
@@ -239,6 +391,7 @@ export default function AgendamientoPage() {
         setFilter,
         updateStatus,
         appointmentsCount,
+        setAppointmentsCount,
     } = useChat();
 
     const [showAppointments, setShowAppointments] = useState(false);
@@ -368,7 +521,10 @@ export default function AgendamientoPage() {
 
             {/* ── Modals ────────────────────────────── */}
             {showAppointments && (
-                <AppointmentsModal onClose={() => setShowAppointments(false)} />
+                <AppointmentsModal
+                    onClose={() => setShowAppointments(false)}
+                    onCountSync={(count) => setAppointmentsCount(count)}
+                />
             )}
             {showVisor && (
                 <VisorAgenda onClose={() => setShowVisor(false)} />

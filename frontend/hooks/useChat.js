@@ -100,7 +100,7 @@ export function useChat() {
         return () => clearInterval(interval);
     }, [filter]);
 
-    // Load Appointments Count
+    // Load Appointments Count — carga inicial + polling cada 60 s como respaldo al socket
     useEffect(() => {
         const fetchCount = async () => {
             try {
@@ -111,6 +111,8 @@ export function useChat() {
             }
         };
         fetchCount();
+        const interval = setInterval(fetchCount, 60000);
+        return () => clearInterval(interval);
     }, []);
 
     const fetchConversations = async () => {
@@ -186,5 +188,6 @@ export function useChat() {
         setFilter,
         updateStatus,
         appointmentsCount,
+        setAppointmentsCount,
     };
 }
