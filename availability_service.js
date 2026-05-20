@@ -2,6 +2,18 @@ const prisma = require('./db');
 const logger = require('./logger');
 
 // =========================================
+// MÉDICOS EXCLUIDOS DEL BOT (TEMPORAL)
+// ─────────────────────────────────────────
+// Estos médicos NO serán ofrecidos por el bot a pacientes de Ebejico.
+// Razón: están reservados para sedes externas (ej. Sevilla) hasta que
+// se implemente la solución multi-sede.
+// Para reactivarlos: eliminar su código de este array.
+// =========================================
+const MEDICOS_EXCLUIDOS_BOT = [
+    444,  // MEDICO SEVILLA — reservado para sede Sevilla (pendiente implementación)
+];
+
+// =========================================
 // CACHE EN MEMORIA (datos semi-estáticos)
 // Las CITAS nunca se cachean — siempre tiempo real
 // =========================================
@@ -428,7 +440,14 @@ async function getAvailableSlots(fechaStr, tipo = 'medicina general', preferredD
         const key = String(t.TME_CODM);
         if (!turnosPorDoctor[key]) turnosPorDoctor[key] = t;
     }
-    const turnos = Object.values(turnosPorDoctor);
+    const turnos = Object.values(turnosPorDoctor)
+        .filter(t => !MEDICOS_EXCLUIDOS_BOT.includes(Number(t.TME_CODM)));
+
+    // Log de exclusiones para trazabilidad
+    const excluidos = Object.values(turnosPorDoctor).filter(t => MEDICOS_EXCLUIDOS_BOT.includes(Number(t.TME_CODM)));
+    if (excluidos.length) {
+        logger.debug(`[DISPONIBILIDAD] ${excluidos.length} médico(s) excluido(s) del bot: ${excluidos.map(t => t.TME_CODM).join(', ')}`);
+    }
 
     if (!turnos.length) return [];
 
