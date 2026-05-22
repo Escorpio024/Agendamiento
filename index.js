@@ -388,8 +388,17 @@ client.on('message', async (msg) => {
                 await reply(welcomeMsg);
             } else {
                 // Paciente no encontrado por teléfono → pedir cédula primero
-                activeSessions.set(sender, { step: 'REGISTER_CEDULA', mode: 'STRUCTURED', history: [], lastActivity: Date.now() });
-                await reply("👋 ¡Hola! Soy *Aurora* 🤖, tu asistente de citas médicas.\n\nPara atenderte, por favor escribe tu número de *Cédula*:");
+                activeSessions.set(sender, { step: 'REGISTER_TIPO_DOC', mode: 'STRUCTURED', history: [], lastActivity: Date.now() });
+                await reply(
+                    "👋 ¡Hola! Soy *Aurora* 🤖, tu asistente de citas médicas.\n\n" +
+                    "Para buscarte en el sistema, ¿cuál es tu *tipo de documento*?\n\n" +
+                    "1️⃣ *CC* — Cédula de Ciudadanía\n" +
+                    "2️⃣ *TI* — Tarjeta de Identidad (menores)\n" +
+                    "3️⃣ *CE* — Cédula de Extranjería\n" +
+                    "4️⃣ *RC* — Registro Civil\n" +
+                    "5️⃣ *PA* — Pasaporte\n" +
+                    "6️⃣ *NUIP* — Número Único de Identificación"
+                );
             }
             return;
         }
@@ -561,7 +570,7 @@ client.on('message', async (msg) => {
                 );
                 await reply(resp);
             } else if (forOther) {
-                session.step = 'REGISTER_CEDULA_EXTRA';
+                session.step = 'REGISTER_TIPO_DOC_EXTRA';
                 // Guardar datos del contacto original por si necesitamos restaurarlos
                 if (!session.ownerCedula) {
                     session.ownerName  = session.name;
@@ -570,7 +579,15 @@ client.on('message', async (msg) => {
                     session.ownerPhone = session.phone;
                     session.ownerZona  = session.zona;
                 }
-                await reply('📋 Por favor escribe el número de *cédula* de la otra persona que deseas registrar la cita:');
+                await reply(
+                    "📋 ¿Cuál es el *tipo de documento* de la persona?\n\n" +
+                    "1️⃣ *CC* — Cédula de Ciudadanía\n" +
+                    "2️⃣ *TI* — Tarjeta de Identidad (menores)\n" +
+                    "3️⃣ *CE* — Cédula de Extranjería\n" +
+                    "4️⃣ *RC* — Registro Civil\n" +
+                    "5️⃣ *PA* — Pasaporte\n" +
+                    "6️⃣ *NUIP* — Número Único de Identificación"
+                );
             } else {
                 await reply(
                     `No entendí bien. Por favor responde:\n• *1* → La cita es para ti\n• *2* → La cita es para otra persona`
@@ -579,27 +596,91 @@ client.on('message', async (msg) => {
             return;
         }
 
+        // ─── HELPER: Parsear tipo de documento desde respuesta del usuario ───
+        function parseTipoDoc(input) {
+            const t = input.trim().toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+            if (/^1$|^CC$|^CEDULA$|^CEDULA DE CIUDADANIA$/.test(t)) return 'CC';
+            if (/^2$|^TI$|^TARJETA$|^TARJETA DE IDENTIDAD$/.test(t))  return 'TI';
+            if (/^3$|^CE$|^EXTRANJERIA$|^CEDULA DE EXTRANJERIA$/.test(t)) return 'CE';
+            if (/^4$|^RC$|^REGISTRO CIVIL$/.test(t))   return 'RC';
+            if (/^5$|^PA$|^PASAPORTE$/.test(t))          return 'PA';
+            if (/^6$|^NUIP$/.test(t))                    return 'NUIP';
+            return null;
+        }
+        function buildSearchTerms(cedula) {
+            const digits = cedula.replace(/\D/g, '');
+            const padded = cedula.padStart(14, ' ');
+            const digitsPadded = digits ? digits.padStart(14, ' ') : null;
+            return [...new Set([cedula, digits, padded, digitsPadded].filter(Boolean))];
+        }
+        function extractDocCode(rawText, tipoDoc) {
+            const esNumerico = ['CC', 'TI', 'NUIP'].includes(tipoDoc);
+            return esNumerico
+                ? rawText.replace(/\D/g, '')
+                : rawText.trim().replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+        }
+
+        // --- REGISTER_TIPO_DOC: Selección de tipo de documento (primera vez) ---
+        if (session.step === 'REGISTER_TIPO_DOC') {
+            const tipo = parseTipoDoc(text);
+            if (!tipo) {
+                await reply(
+                    "⚠️ No reconocí esa opción. Por favor elige una de las siguientes:\n\n" +
+                    "1️⃣ *CC* — Cédula de Ciudadanía\n" +
+                    "2️⃣ *TI* — Tarjeta de Identidad\n" +
+                    "3️⃣ *CE* — Cédula de Extranjería\n" +
+                    "4️⃣ *RC* — Registro Civil\n" +
+                    "5️⃣ *PA* — Pasaporte\n" +
+                    "6️⃣ *NUIP* — Número Único de Identificación"
+                );
+                return;
+            }
+            session.tipoDoc = tipo;
+            session.step = 'REGISTER_CEDULA';
+            const esNumerico = ['CC', 'TI', 'NUIP'].includes(tipo);
+            await reply(`✅ Seleccionaste *${tipo}*. Ahora escribe tu número de documento${esNumerico ? ' (solo dígitos)' : ''}:`);
+            return;
+        }
+
+        // --- REGISTER_TIPO_DOC_EXTRA: Selección de tipo de documento (tercero) ---
+        if (session.step === 'REGISTER_TIPO_DOC_EXTRA') {
+            const tipo = parseTipoDoc(text);
+            if (!tipo) {
+                await reply(
+                    "⚠️ No reconocí esa opción. Por favor elige:\n\n" +
+                    "1️⃣ CC  2️⃣ TI  3️⃣ CE  4️⃣ RC  5️⃣ PA  6️⃣ NUIP"
+                );
+                return;
+            }
+            session.tipoDocExtra = tipo;
+            session.step = 'REGISTER_CEDULA_EXTRA';
+            const esNumerico = ['CC', 'TI', 'NUIP'].includes(tipo);
+            await reply(`✅ Seleccionaste *${tipo}*. Ahora escribe el número de documento de la persona${esNumerico ? ' (solo dígitos)' : ''}:`);
+            return;
+        }
+
         // --- REGISTER_CEDULA_EXTRA: Buscar cédula de tercero ---
         if (session.step === 'REGISTER_CEDULA_EXTRA') {
-            const cedula = text.replace(/\D/g, '');
-            if (cedula.length < 5) {
-                await reply('⚠️ Por favor escribe un número de cédula válido (mínimo 5 dígitos).');
+            const tipoDocExtra = session.tipoDocExtra || 'CC';
+            const cedula = extractDocCode(text, tipoDocExtra);
+            const esNumExtr = ['CC', 'TI', 'NUIP'].includes(tipoDocExtra);
+            if (cedula.length < (esNumExtr ? 5 : 3)) {
+                await reply(`⚠️ Por favor escribe un número de *${tipoDocExtra}* válido.`);
                 return;
             }
             if (!prisma) {
                 await reply('⚠️ El sistema de consulta de pacientes no está disponible temporalmente. Por favor intenta de nuevo en unos minutos.');
                 return;
             }
-            const exactPadded = cedula.padStart(14, ' ');
+            const searchTermsExtra = buildSearchTerms(cedula);
 
             let pacienteExiste = null;
             const nuiMatch = await prisma.pacienteNUI.findFirst({
-                where: { OR: [{ KCN_COD_NUI: cedula }, { KCN_COD_NUI: exactPadded }] }
+                where: { OR: searchTermsExtra.flatMap(t => [{ KCN_COD_NUI: t }, { KCN_COD: t }]) }
             });
             if (nuiMatch) {
-                // Buscar datos adicionales en facturación para obtener el teléfono
                 const factAdd = await prisma.tMUSUARIOSFACTURACION.findFirst({
-                    where: { OR: [{ KC2_OACOD_NUI: cedula }, { KC2_OACOD_NUI: exactPadded }] }
+                    where: { OR: searchTermsExtra.flatMap(t => [{ KC2_OACOD_NUI: t }, { KC2_COD: t }]) }
                 });
                 pacienteExiste = { 
                     KC_NOM: nuiMatch.KCN_NOM, 
@@ -609,7 +690,7 @@ client.on('message', async (msg) => {
                 };
             } else {
                 const factMatch = await prisma.tMUSUARIOSFACTURACION.findFirst({
-                    where: { OR: [{ KC2_OACOD_NUI: cedula }, { KC2_OACOD_NUI: exactPadded }] }
+                    where: { OR: searchTermsExtra.flatMap(t => [{ KC2_OACOD_NUI: t }, { KC2_COD: t }]) }
                 });
                 if (factMatch) {
                     pacienteExiste = {
@@ -622,7 +703,7 @@ client.on('message', async (msg) => {
             }
             if (!pacienteExiste) {
                 const aseg = await prisma.paciente.findFirst({
-                    where: { OR: [{ KC0_COD: cedula }, { KC0_COD: exactPadded }] }
+                    where: { OR: searchTermsExtra.flatMap(t => [{ KC0_COD: t }]) }
                 });
                 if (aseg) {
                     pacienteExiste = { KC_NOM: aseg.KC0_NOM, KC_COD: aseg.KC0_COD, KC_ZONA: '001', KC_TEL1: aseg.KC0_RES_TEL };
@@ -681,9 +762,11 @@ client.on('message', async (msg) => {
         // --- FLUJO DE REGISTRO ---
         // PASO 1: Pedir cédula y verificar si ya existe
         if (session.step === 'REGISTER_CEDULA') {
-            const cedula = text.replace(/\D/g, '');
-            if (cedula.length < 5) {
-                await reply("⚠️ Por favor escribe un número de cédula válido (mínimo 5 dígitos).");
+            const tipoDoc = session.tipoDoc || 'CC';
+            const cedula = extractDocCode(text, tipoDoc);
+            const esNum = ['CC', 'TI', 'NUIP'].includes(tipoDoc);
+            if (cedula.length < (esNum ? 5 : 3)) {
+                await reply(`⚠️ Por favor escribe un número de *${tipoDoc}* válido.`);
                 return;
             }
             if (!prisma) {
@@ -691,18 +774,18 @@ client.on('message', async (msg) => {
                 return;
             }
             session.cedula = cedula;
-            // Estandarizar: Cédula para tablas nuevas, y Cédula con relleno de espacios para tabla antigua (TMUSUARIOSASEGURAMIENTO)
-            const exactPadded = cedula.padStart(14, ' ');
+            // Construir variantes de búsqueda: valor tal cual, solo dígitos, con padding de espacios
+            const searchTerms = buildSearchTerms(cedula);
 
             // Buscar en fuentes de NUI y Facturación (reemplazando TKCLIENTES)
             let pacienteExiste = null;
             const nuiMatch = await prisma.pacienteNUI.findFirst({
-                where: { OR: [{ KCN_COD_NUI: cedula }, { KCN_COD_NUI: exactPadded }] }
+                where: { OR: searchTerms.flatMap(t => [{ KCN_COD_NUI: t }, { KCN_COD: t }]) }
             });
 
             if (nuiMatch) {
                 const internalCod = nuiMatch.KCN_COD || nuiMatch.KCN_COD_NUI;
-                const searchTerm  = [cedula, exactPadded, internalCod];
+                const searchTerm  = [...new Set([...searchTerms, internalCod].filter(Boolean))];
                 // Prioridad: TKCLIENTESANEXO5 (celular real de Xenco) > TMUSUARIOSFACTURACION > null
                 let celPhone = null;
                 try {
@@ -713,7 +796,7 @@ client.on('message', async (msg) => {
                 } catch(_) {}
                 if (!celPhone) {
                     const factAdd = await prisma.tMUSUARIOSFACTURACION.findFirst({
-                        where: { OR: [{ KC2_OACOD_NUI: cedula }, { KC2_OACOD_NUI: exactPadded }] }
+                        where: { OR: searchTerms.flatMap(t => [{ KC2_OACOD_NUI: t }, { KC2_COD: t }]) }
                     });
                     const t = factAdd?.KC2_TEL_RESP;
                     if (t && !/^0+$/.test(t.trim())) celPhone = t.trim();
@@ -727,14 +810,14 @@ client.on('message', async (msg) => {
                 };
             } else {
                 const factMatch = await prisma.tMUSUARIOSFACTURACION.findFirst({
-                    where: { OR: [{ KC2_OACOD_NUI: cedula }, { KC2_OACOD_NUI: exactPadded }] }
+                    where: { OR: searchTerms.flatMap(t => [{ KC2_OACOD_NUI: t }, { KC2_COD: t }]) }
                 });
                 if (factMatch) {
                     // Buscar celular real en TKCLIENTESANEXO5
                     let celPhone = null;
                     try {
                         const kc5 = await prisma.tKCLIENTESANEXO5.findFirst({
-                            where: { KC5_RACOD_CLI: factMatch.KC2_COD }
+                            where: { KC5_RACOD_CLI: { in: searchTerms } }
                         });
                         if (kc5?.KC5_TEL_CEL && !/^0+$/.test(kc5.KC5_TEL_CEL.trim())) celPhone = kc5.KC5_TEL_CEL.trim();
                     } catch(_) {}
@@ -752,7 +835,7 @@ client.on('message', async (msg) => {
             // Buscar en TMUSUARIOSASEGURAMIENTO (Por documento o padding de espacios)
             if (!pacienteExiste) {
                 const aseg = await prisma.paciente.findFirst({
-                    where: { OR: [{ KC0_COD: cedula }, { KC0_COD: exactPadded }] }
+                    where: { OR: searchTerms.flatMap(t => [{ KC0_COD: t }]) }
                 });
                 if (aseg) {
                     pacienteExiste = { KC_NOM: aseg.KC0_NOM, KC_COD: aseg.KC0_COD, KC_ZONA: '001', KC_SEQK: '  ', KC_TEL1: aseg.KC0_RES_TEL };
