@@ -852,7 +852,8 @@ client.on('message', async (msg) => {
 
                 console.log(`[BOT] Sesión por cédula: nombre=${nombre}, cod=${pacienteExiste.KC_COD}, tel=${realPhone}, zona=${pacienteExiste.KC_ZONA}`);
                 activeSessions.set(sender, {
-                    step: 'WELCOME', mode: 'NATURAL',
+                    step: 'ASK_SEDE', mode: 'NATURAL',
+                    sede: 'Ebejico', // Sede por defecto
                     name: nombre, cedula,
                     phone: realPhone,
                     id: pacienteExiste.KC_COD,
@@ -860,15 +861,28 @@ client.on('message', async (msg) => {
                     entidad: null,
                     history: [], doctorPreferido: null, doctorIdSeleccionado: null
                 });
-                const welcomeMsg = await aiService.generateNaturalResponse(
-                    `El paciente ${nombre} regresa. Salúdalo cálidamente y pregunta en qué puedes ayudar.`,
-                    { nombre }, text
-                );
-                await reply(welcomeMsg);
+                await reply(`¡Hola ${nombre}! 👋\n\nPara continuar, por favor selecciona la sede donde deseas consultar:\n\n1️⃣ Sede Ebejico\n2️⃣ Sede Sevilla`);
             } else {
                 // No existe → Bloquear registro de nuevos usuarios
                 await reply(`❌ Lo siento, no encontré la cédula *${cedula}* en nuestra base de datos.\n\nPor políticas de la clínica, solo los pacientes ya registrados pueden agendar citas por WhatsApp. Si consideras que hay un error, por favor verifica tu número o acércate a nuestras instalaciones para registrarte en el sistema.`);
                 activeSessions.delete(sender);
+            }
+            return;
+        }
+
+        // --- FLUJO DE SELECCIÓN DE SEDE ---
+        if (session.step === 'ASK_SEDE') {
+            const txt = text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+            if (txt.includes('ebejico') || txt === '1' || txt === 'uno') {
+                session.sede = 'Ebejico';
+                session.step = 'WELCOME';
+                await reply("¡Perfecto! Has seleccionado *Sede Ebejico*.\n\n¿Te gustaría agendar, cancelar o consultar una cita médica hoy?");
+            } else if (txt.includes('sevilla') || txt === '2' || txt === 'dos') {
+                session.sede = 'Sevilla';
+                session.step = 'WELCOME';
+                await reply("¡Perfecto! Has seleccionado *Sede Sevilla*.\n\n¿Te gustaría agendar, cancelar o consultar una cita médica hoy?");
+            } else {
+                await reply("⚠️ Por favor selecciona una opción válida:\n\n1️⃣ Sede Ebejico\n2️⃣ Sede Sevilla");
             }
             return;
         }
@@ -1612,7 +1626,7 @@ client.on('message', async (msg) => {
 
                 if (isRange) {
                     const weekStart = availabilityService.getWeekStartDate(session.originalRangeText || '');
-                    const weekDays = await availabilityService.getWeekAvailability(weekStart, session.tipoCita, session.doctorPreferido);
+                    const weekDays = await availabilityService.getWeekAvailability(weekStart, session.tipoCita, session.doctorPreferido, 7, 45, session.sede);
 
                     if (weekDays.length > 0) {
                         session.diasDisponibles = weekDays;
@@ -1633,7 +1647,7 @@ client.on('message', async (msg) => {
                 }
 
                 // Obtener TODOS los slots (sin límite) y guardar en sesión para paginación
-                const todosSlots = await availabilityService.getAvailableSlots(session.fechaPreferida, session.tipoCita, session.doctorPreferido, true);
+                const todosSlots = await availabilityService.getAvailableSlots(session.fechaPreferida, session.tipoCita, session.doctorPreferido, true, session.sede);
                 const slots = todosSlots.slice(0, 8);
 
                 if (todosSlots.length > 0) {
@@ -1712,7 +1726,7 @@ client.on('message', async (msg) => {
 
                 if (firstAvail) {
                     // Con el primer día disponible como ancla, obtener la semana completa (7 días desde ahí)
-                    const weekDays = await availabilityService.getWeekAvailability(firstAvail.date, session.tipoCita, session.doctorPreferido, 7);
+                    const weekDays = await availabilityService.getWeekAvailability(firstAvail.date, session.tipoCita, session.doctorPreferido, 7, 45, session.sede);
 
                     if (weekDays.length > 0) {
                         session.diasDisponibles = weekDays;
@@ -1748,7 +1762,7 @@ client.on('message', async (msg) => {
             const tipo = 'medicina general';
             const fecha = entities.fecha || 'mañana';
 
-            let todosSlots = await availabilityService.getAvailableSlots(fecha, tipo, entities.doctor, true);
+            let todosSlots = await availabilityService.getAvailableSlots(fecha, tipo, entities.doctor, true, session.sede);
             let responseMsg = "";
 
             if (todosSlots.length === 0) {
@@ -1906,14 +1920,15 @@ client.on('message', async (msg) => {
                 userId,
                 userData.tipoCita,
                 userData.doctorIdSeleccionado,
-                pacienteDesdeSession   // ← pasar datos de sesión directamente
+                pacienteDesdeSession,   // ← pasar datos de sesión directamente
+                userData.sede           // ← sede para validación de disponibilidad
             );
 
             console.log(`[BOT] Resultado de reserveSlot: success=${success}`);
 
             if (!success) {
                 // El turno fue tomado milisegundos atrás
-                const updatedSlots = await availabilityService.getAvailableSlots(userData.fechaPreferida, userData.tipoCita, userData.doctorPreferido);
+                const updatedSlots = await availabilityService.getAvailableSlots(userData.fechaPreferida, userData.tipoCita, userData.doctorPreferido, false, userData.sede);
                 if (updatedSlots && updatedSlots.length > 0) {
                     userData.horariosDisponibles = updatedSlots;
                     userData.step = 'AI_SELECT_TIME';

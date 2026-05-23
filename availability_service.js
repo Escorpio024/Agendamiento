@@ -417,7 +417,7 @@ async function findPaciente(userId) {
 // DISPONIBILIDAD
 // =========================================
 
-async function getAvailableSlots(fechaStr, tipo = 'medicina general', preferredDoctor = null, skipLimit = false) {
+async function getAvailableSlots(fechaStr, tipo = 'medicina general', preferredDoctor = null, skipLimit = false, sede = 'Ebejico') {
     if (!prisma) return [];
     const dateStr = parseRelativeDate(fechaStr);
     const dateDecimal = dateToDecimal(new Date(dateStr + 'T12:00:00'));
@@ -440,13 +440,18 @@ async function getAvailableSlots(fechaStr, tipo = 'medicina general', preferredD
         const key = String(t.TME_CODM);
         if (!turnosPorDoctor[key]) turnosPorDoctor[key] = t;
     }
-    const turnos = Object.values(turnosPorDoctor)
-        .filter(t => !MEDICOS_EXCLUIDOS_BOT.includes(Number(t.TME_CODM)));
+    
+    let turnos = Object.values(turnosPorDoctor);
+    if (sede === 'Sevilla') {
+        turnos = turnos.filter(t => t.TME_CODM == 444);
+    } else {
+        turnos = turnos.filter(t => !MEDICOS_EXCLUIDOS_BOT.includes(Number(t.TME_CODM)));
+    }
 
     // Log de exclusiones para trazabilidad
     const excluidos = Object.values(turnosPorDoctor).filter(t => MEDICOS_EXCLUIDOS_BOT.includes(Number(t.TME_CODM)));
     if (excluidos.length) {
-        logger.debug(`[DISPONIBILIDAD] ${excluidos.length} médico(s) excluido(s) del bot: ${excluidos.map(t => t.TME_CODM).join(', ')}`);
+        logger.debug(`[DISPONIBILIDAD] ${excluidos.length} médico(s) excluido(s) del bot en sede ${sede}: ${excluidos.map(t => t.TME_CODM).join(', ')}`);
     }
 
     if (!turnos.length) return [];
@@ -713,7 +718,7 @@ function getFieldsByEspecialidad(espCod) {
     };
 }
 
-async function reserveSlot(fechaStr, hora, userId, tipo = 'medicina general', medicoId = null, pacienteData = null) {
+async function reserveSlot(fechaStr, hora, userId, tipo = 'medicina general', medicoId = null, pacienteData = null, sede = 'Ebejico') {
     if (!prisma) return false;
     try {
         const dateStr = parseRelativeDate(fechaStr);
@@ -743,10 +748,10 @@ async function reserveSlot(fechaStr, hora, userId, tipo = 'medicina general', me
             console.error('[HABEJICO] reserveSlot falló: no se encontró paciente para userId=', userId);
             return false;
         }
-        logger.debug(`[HABEJICO] reserveSlot: paciente.KC0_COD="${paciente.KC0_COD}" zona="${paciente.zona}"`);
+        logger.debug(`[HABEJICO] reserveSlot: paciente.KC0_COD="${paciente.KC0_COD}" zona="${paciente.zona}" sede="${sede}"`);
 
         // Validar slot disponible
-        const slots = await getAvailableSlots(dateStr, tipo, null, true);
+        const slots = await getAvailableSlots(dateStr, tipo, null, true, sede);
         let slot = medicoId
             ? slots.find(s => s.doctorId === Number(medicoId) && s.hh === hh && s.mm === mm)
             : slots.find(s => s.hh === hh && s.mm === mm);
@@ -1151,7 +1156,7 @@ const DAY_NAMES_ES = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Vie
 
 // Escanea hasta maxScanDays días en paralelo (lotes de 3) y devuelve
 // hasta maxResults días con disponibilidad real. Las CITAS siempre en tiempo real.
-async function getWeekAvailability(startDateStr, tipo = 'medicina general', doctor = null, maxResults = 7, maxScanDays = 45) {
+async function getWeekAvailability(startDateStr, tipo = 'medicina general', doctor = null, maxResults = 7, maxScanDays = 45, sede = 'Ebejico') {
     const results = [];
     const BATCH = 3; // 3 días en paralelo — seguro con connectionLimit=10
     try {
@@ -1166,7 +1171,7 @@ async function getWeekAvailability(startDateStr, tipo = 'medicina general', doct
             // Ejecutar lote en paralelo con retry automático
             const batchRes = await Promise.all(batch.map(async ({ dateStr, dayName }) => {
                 try {
-                    const slots = await _withRetry(() => getAvailableSlots(dateStr, tipo, doctor), `slots(${dateStr})`);
+                    const slots = await _withRetry(() => getAvailableSlots(dateStr, tipo, doctor, false, sede), `slots(${dateStr})`);
                     if (slots.length) return { date: dateStr, dayName, slotCount: slots.length, firstSlot: slots[0].time, lastSlot: slots[slots.length - 1].time };
                     return null;
                 } catch (err) {
