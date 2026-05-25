@@ -47,15 +47,11 @@ class ReminderService {
         const tzOffset = new Date().toLocaleTimeString('es-CO', { timeZoneName: 'short' });
         logger.info(`[Recordatorios] Cron activo. Hora del servidor: ${tzOffset}`);
 
-        // ── 9:00 AM — recordatorio de mañana (primera pasada del día) ──
-        cron.schedule('0 9 * * *', async () => {
-            logger.info('🔔 [Recordatorios] Envío de las 9:00 AM iniciado...');
-            await this.sendReminders();
-        });
-
-        // ── 6:00 PM — recordatorio de mañana (segunda pasada del día) ──
-        cron.schedule('0 18 * * *', async () => {
-            logger.info('🔔 [Recordatorios] Envío de las 6:00 PM iniciado...');
+        // ── Cada hora en punto — verifica citas de mañana ──
+        // Al ejecutar cada hora, capturamos a quienes agendan tarde en el día
+        // (La deduplicación con sentToday evita enviar el mismo mensaje 2 veces)
+        cron.schedule('0 * * * *', async () => {
+            logger.info('🔔 [Recordatorios] Envío horario de verificación iniciado...');
             await this.sendReminders();
         });
 
@@ -126,8 +122,31 @@ class ReminderService {
      *   2. Teléfono de Xenco formateado como @c.us
      */
     async getWhatsAppId(codigoPac) {
-        const rawPhone = await this.getPhoneForPatient(codigoPac);
-        if (!rawPhone) return null;
+        let rawPhone = await this.getPhoneForPatient(codigoPac);
+
+        // Si no está en Xenco, buscar en el historial de agendamientos del bot (SQLite)
+        // por si el paciente lo digitó manualmente
+        if (!rawPhone) {
+            try {
+                const pacCod14 = String(codigoPac).trim().padStart(14, '0');
+                const codNoZeros = String(codigoPac).trim().replace(/^0+/, '');
+                
+                const appLog = await botPrisma.appointmentLog.findFirst({
+                    where: { 
+                        patientDocument: { in: [pacCod14, codNoZeros, String(codigoPac).trim()] }
+                    },
+                    orderBy: { createdAt: 'desc' }
+                });
+                
+                if (appLog && appLog.whatsappId) {
+                    logger.debug(`[Recordatorios] 📱 Teléfono recuperado de SQLite AppointmentLog: ${appLog.whatsappId}`);
+                    return appLog.whatsappId;
+                }
+            } catch (e) {
+                logger.warn('[Recordatorios] No se pudo consultar AppointmentLog SQLite:', e.message);
+            }
+            return null; // Si definitivamente no existe, abortar.
+        }
 
         // Buscar en SQLite si este número ya habló con el bot
         try {
