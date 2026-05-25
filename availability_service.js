@@ -585,6 +585,12 @@ async function getAvailableSlots(fechaStr, tipo = 'medicina general', preferredD
             continue; // Ya procesamos este doctor, pasar al siguiente
         }
 
+        if (sede === 'Sevilla') {
+            // El usuario requiere que para Sevilla SÓLO se tomen los espacios del Visor (TME2).
+            // Si llegamos aquí, el Visor está vacío para este doctor. NO generamos matemáticamente.
+            continue;
+        }
+
         // ── MODO B: Xenco no tiene slots pre-generados — generar desde el horario (TMTURNOSMEDICOS) ──
         const franjas = [];
         // Turno mañana: solo si TME_ACTIVIDAD_M está activo (no es null ni 'N')
