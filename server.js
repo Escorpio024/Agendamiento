@@ -228,21 +228,10 @@ app.post('/api/appointments/:id/remind', async (req, res) => {
 
 // Códigos CUPS de exámenes cardiovasculares (exactos tal como aparecen en Xenco)
 const CVD_CODES = [
-    '902210',   // HEMOGRAMA IV
-    '*902207',  // HEMOGRAMA I
-    '*903841',  // GLUCOSA EN SUERO
-    '*903818',  // COLESTEROL TOTAL
-    '*903815',  // COLESTEROL HDL
-    '*903817',  // COLESTEROL LDL
-    '*903868',  // TRIGLICÉRIDOS
-    '*903801',  // ÁCIDO ÚRICO
-    '*907106',  // UROANÁLISIS
-    '*895100',  // ELECTROCARDIOGRAMA (ritmo)
-    '*895201',  // ELECTROCARDIOGRAMA (alta resolución)
-    '*903822',  // CREATININA
-    '903895',   // CREATININA EN SUERO/ORINA (Variante)
-    '903856',   // NITROGENO UREICO (BUN)
-    '*903856',  // NITROGENO UREICO (BUN) con asterisco por si acaso
+    '903895', '903876', '*903895', '*903876', // Creatinina
+    '903426', '903427', '*903426', '*903427', // Hemoglobina Glicosilada
+    '903817', '*903817', // Ldl
+    '*903026', '903026', '903028', '*903028' // Microalbuminuria
 ];
 
 const CVD_CODES_SQL = CVD_CODES.map(c => `'${c}'`).join(',');
@@ -305,6 +294,11 @@ app.get('/api/cardiovascular/patient/:id', async (req, res) => {
 
         const patient = { nombre, documento: cedula, edad, telefono, entidad: p.entidad };
 
+        // ── 1.1 Filtrar 3 meses atrás para pendientes/programados ──
+        const d = new Date();
+        d.setMonth(d.getMonth() - 3);
+        const dateStr = parseInt(`${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`);
+
         // ── 2. PROGRAMADOS: médico ordenó el examen, paciente aún no viene ──
         const programadosRows = await medicalPrisma.$queryRawUnsafe(`
             WITH TodasLasOrdenes AS (
@@ -318,6 +312,7 @@ app.get('/api/cardiovascular/patient/:id', async (req, res) => {
                   AND QLO_COD_ARTIC IN (${CVD_CODES_SQL})
                   AND QLO_EST_ESTADOLB = '1'
                   AND (QLO_EST_ANULADO IS NULL OR QLO_EST_ANULADO = '')
+                  AND QLO_FCH >= ${dateStr}
                 
                 UNION ALL
                 
@@ -329,6 +324,7 @@ app.get('/api/cardiovascular/patient/:id', async (req, res) => {
                 FROM TQMOVIMIENTOCONDUCTASD
                 WHERE QM3_COD = '${cedula14}'
                   AND QM3_COD_ARTIC IN (${CVD_CODES_SQL})
+                  AND QM3_FCH >= ${dateStr}
             )
             SELECT
                 o.codigo,
@@ -376,6 +372,7 @@ app.get('/api/cardiovascular/patient/:id', async (req, res) => {
             WHERE CAST(TRY_CAST(y.YKL_NUMERO_ID AS BIGINT) AS VARCHAR) = '${cedula}'
               AND y.YKL_ARTIC IN (${CVD_CODES_SQL})
               AND (y.YKL_PROCESADA_LAB IS NULL OR y.YKL_PROCESADA_LAB = '')
+              AND y.YKL_FECHA >= ${dateStr}
             GROUP BY y.YKL_ARTIC
             ORDER BY MAX(y.YKL_FECHA) DESC
         `);
@@ -475,7 +472,11 @@ app.post('/api/cardiovascular/remind/:id', async (req, res) => {
         const digits = rawPhone.length === 10 ? `57${rawPhone}` : rawPhone;
         const waId   = `${digits}@c.us`;
 
-        const msg = `🔔 *RECORDATORIO — Examen Pendiente*\n\nHola, te recordamos que tienes el siguiente examen pendiente:\n\n🧪 *${examen || 'Examen cardiovascular'}*\n\nPor favor acércate a nuestra institución para realizarlo. 😊\n\n_Agente Aurora — Sistema de Agendamiento_`;
+        const ochoDias = new Date();
+        ochoDias.setDate(ochoDias.getDate() + 8);
+        const fechaDeseada = ochoDias.toLocaleDateString('es-CO', { day: '2-digit', month: 'long', year: 'numeric' });
+
+        const msg = `🔔 *RECORDATORIO — Exámenes de Riesgo Cardiovascular*\n\nHola, te recordamos que tienes exámenes pendientes por realizar:\n\n🧪 *${examen || 'Exámenes cardiovasculares'}*\n\n⚠️ *IMPORTANTE:* Recuerda que *TODOS* los exámenes te los debes realizar el *mismo día*.\n\n📅 Te sugerimos acercarte a nuestra institución para realizarlos en aproximadamente 8 días, es decir, alrededor del *${fechaDeseada}*. 😊\n\n_Agente Aurora — Sistema de Agendamiento_`;
         await whatsappClient.sendMessage(waId, msg);
         logger.info(`[CARDIOVASCULAR] ✅ Recordatorio enviado a ${waId} — examen: ${examId}`);
         res.json({ success: true });

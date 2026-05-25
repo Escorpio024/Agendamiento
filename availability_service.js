@@ -428,11 +428,15 @@ async function getAvailableSlots(fechaStr, tipo = 'medicina general', preferredD
 
     // 2. Turnos activos — cacheados 3 min, filtrados en JS por fecha
     const allTurnosCache = await _getTurnosCache();
-    const turnosRaw = allTurnosCache.filter(t =>
-        t.TME_FCH <= dateDecimal &&
-        (!t.TME_FCH_FIN || t.TME_FCH_FIN >= dateDecimal) &&
-        (!especialidad || t.TME_ESPECIALIDAD == especialidad.ESP_COD)
-    );
+    const turnosRaw = allTurnosCache.filter(t => {
+        if (t.TME_FCH > dateDecimal) return false;
+        if (t.TME_FCH_FIN && t.TME_FCH_FIN < dateDecimal) return false;
+        
+        // Si es sede Sevilla, forzar al médico 444 e ignorar la especialidad
+        if (sede === 'Sevilla') return t.TME_CODM == 444;
+        
+        return !especialidad || t.TME_ESPECIALIDAD == especialidad.ESP_COD;
+    });
 
     // Deduplicar: por cada doctor, quedarse solo con el turno MÁS RECIENTE
     const turnosPorDoctor = {};
@@ -444,6 +448,12 @@ async function getAvailableSlots(fechaStr, tipo = 'medicina general', preferredD
     let turnos = Object.values(turnosPorDoctor);
     if (sede === 'Sevilla') {
         turnos = turnos.filter(t => t.TME_CODM == 444);
+        
+        // Fallback vital: Si el médico de Sevilla no tiene cabecera activa en TMTURNOSMEDICOS,
+        // lo agregamos manualmente para que pueda leer los slots libres directos del Visor (TME2).
+        if (turnos.length === 0) {
+            turnos.push({ TME_CODM: 444, TME_DUR_CITA: 20, TME_ESPECIALIDAD: especialidad?.ESP_COD || '999' });
+        }
     } else {
         turnos = turnos.filter(t => !MEDICOS_EXCLUIDOS_BOT.includes(Number(t.TME_CODM)));
     }
