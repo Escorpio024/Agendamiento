@@ -1205,7 +1205,7 @@ async function getWeekAvailability(startDateStr, tipo = 'medicina general', doct
 }
 
 // Busca el primer día con disponibilidad, en lotes de 3 en paralelo.
-async function getNextAvailableSlots(startDateStr, tipo, doctor) {
+async function getNextAvailableSlots(startDateStr, tipo, doctor, sede = 'Ebejico') {
     const BATCH = 3;
     const MAX = 60;
     try {
@@ -1218,7 +1218,7 @@ async function getNextAvailableSlots(startDateStr, tipo, doctor) {
             }
             const results = await Promise.all(batch.map(async dateStr => {
                 try {
-                    const slots = await _withRetry(() => getAvailableSlots(dateStr, tipo, doctor), `next(${dateStr})`);
+                    const slots = await _withRetry(() => getAvailableSlots(dateStr, tipo, doctor, false, sede), `next(${dateStr})`);
                     return slots.length ? { date: dateStr, slots } : null;
                 } catch (err) {
                     if (err.code === 'P1001') return 'ABORT';

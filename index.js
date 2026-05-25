@@ -1695,7 +1695,7 @@ client.on('message', async (msg) => {
                     const introMsg = `¡He encontrado estos horarios para ti el ${fechaBonita}${timeContext}!\n\nPor favor, responde únicamente con el *NÚMERO* de la opción que prefieres:`;
                     await replyFn(`${introMsg}\n\n${slotsList}${moreHint}`);
                 } else {
-                    const nextData = await availabilityService.getNextAvailableSlots(session.fechaPreferida, session.tipoCita, session.doctorPreferido);
+                    const nextData = await availabilityService.getNextAvailableSlots(session.fechaPreferida, session.tipoCita, session.doctorPreferido, session.sede);
 
                     if (nextData) {
                         session.horariosDisponibles = nextData.slots;
@@ -1722,7 +1722,7 @@ client.on('message', async (msg) => {
                 const todayStr = `${nowLocal.getFullYear()}-${String(nowLocal.getMonth()+1).padStart(2,'0')}-${String(nowLocal.getDate()).padStart(2,'0')}`;
 
                 // Buscar el primer día con disponibilidad para encontrar el punto de partida del cronograma
-                const firstAvail = await availabilityService.getNextAvailableSlots(todayStr, session.tipoCita, session.doctorPreferido);
+                const firstAvail = await availabilityService.getNextAvailableSlots(todayStr, session.tipoCita, session.doctorPreferido, session.sede);
 
                 if (firstAvail) {
                     // Con el primer día disponible como ancla, obtener la semana completa (7 días desde ahí)
@@ -1767,7 +1767,7 @@ client.on('message', async (msg) => {
 
             if (todosSlots.length === 0) {
                 // If there are none, get the next available ones
-                const nextData = await availabilityService.getNextAvailableSlots(fecha, tipo, entities.doctor);
+                const nextData = await availabilityService.getNextAvailableSlots(fecha, tipo, entities.doctor, session.sede);
                 if (nextData) {
                     todosSlots = nextData.slots; // This also gets all slots internally
                     session.fechaPreferida = nextData.date;
