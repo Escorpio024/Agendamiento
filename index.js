@@ -893,6 +893,23 @@ client.on('message', async (msg) => {
         // TODOS los mensajes de pacientes registrados van a IA.
         // No hay "modo silencioso" — si alguien escribe, Aurora responde.
         session.mode = 'NATURAL';
+
+        // ── FAST-PATH: Detección directa de intención de cita sin pasar por la IA ──
+        // Si el step es WELCOME y el usuario dice algo que claramente significa
+        // "quiero agendar una cita", saltamos la clasificación de la IA (que puede
+        // demorarse o fallar silenciosamente) y vamos directo a handleAgendarCita.
+        // Esto elimina el paso muerto de "escríbeme 'quiero una cita'" y el silencio.
+        if (session.step === 'WELCOME') {
+            const _t = text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+            const _wantsAppt = /\b(si|sí|quiero|cita|agendar|agendarme|turno|consulta|medico|medica|doctor|doctora|necesito|agenda)\b/.test(_t);
+            if (_wantsAppt) {
+                session.tipoCita = 'medicina general';
+                session.step = null;
+                await processWithAI(sender, text, session, reply);
+                return;
+            }
+        }
+
         await processWithAI(sender, text, session, reply);
 
         // --- FUNCIONES AUXILIARES ---
