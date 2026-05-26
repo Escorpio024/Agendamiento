@@ -1029,6 +1029,13 @@ client.on('message', async (msg) => {
                     // STEP: AI_SELECT_DAY — user is picking from a list of days
                     // ═══════════════════════════════════════════════════════════
                     if (session.step === 'AI_SELECT_DAY') {
+                        const isCancel = /^(no|cancelar|salir|ninguno|otro|ya no)$/i.test(clean) || clean.includes('no quiero') || clean.includes('cancela');
+                        if (isCancel) {
+                            clearSessionData(session, userId);
+                            await replyFn('¡Entendido! Hemos cancelado la búsqueda. ¿Hay algo más en lo que te pueda ayudar? 😊');
+                            return;
+                        }
+                        
                         let selectedDay = null;
 
                         // 1. Numeric selection
@@ -1087,6 +1094,13 @@ client.on('message', async (msg) => {
                     // STEP: AI_SELECT_TIME — user is picking a time slot
                     // ═══════════════════════════════════════════════════════════
                     if (session.step === 'AI_SELECT_TIME') {
+                        const isCancel = /^(no|cancelar|salir|ninguno|otro|ya no)$/i.test(clean) || clean.includes('no quiero') || clean.includes('cancela');
+                        if (isCancel) {
+                            clearSessionData(session, userId);
+                            await replyFn('¡Entendido! Hemos cancelado el agendamiento. ¿Hay algo más en lo que te pueda ayudar? 😊');
+                            return;
+                        }
+
                         const selectedSlot = await selectTimeSlot(message, session.horariosDisponibles);
                         if (selectedSlot) {
                             session.horaSeleccionada = selectedSlot.time;
@@ -1389,6 +1403,7 @@ client.on('message', async (msg) => {
                 }
 
                 // ── FREE-FORM MESSAGE (no active context) ────────────────────
+                chat.sendStateTyping();
                 const extracted = await aiService.extractAll(message, historyStr);
                 const intent = extracted.intent;
                 const entities = extracted.entities || {};
@@ -1625,6 +1640,7 @@ client.on('message', async (msg) => {
                 const isRange = session.isRangeRequest && session.step !== 'AI_SELECT_DAY';
 
                 if (isRange) {
+                    await replyFn('¡Claro! Dame un segundito mientras reviso la agenda para esa semana... 🔍');
                     const weekStart = availabilityService.getWeekStartDate(session.originalRangeText || '');
                     const weekDays = await availabilityService.getWeekAvailability(weekStart, session.tipoCita, session.doctorPreferido, 7, 45, session.sede);
 
@@ -1715,6 +1731,8 @@ client.on('message', async (msg) => {
                 }
 
             } else if (!session.fechaPreferida) {
+                await replyFn('¡Claro! Dame un segundito mientras busco los próximos días disponibles... 🔍');
+                
                 // Mostrar la semana de días disponibles para que el usuario escoja.
                 // Se parte desde el primer día con turnos disponibles (puede ser una fecha futura del cronograma).
                 // Usar fecha local (no UTC) para evitar desfase de timezone en Colombia (UTC-5)
