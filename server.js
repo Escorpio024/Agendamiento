@@ -228,10 +228,26 @@ app.post('/api/appointments/:id/remind', async (req, res) => {
 
 // Códigos CUPS de exámenes cardiovasculares (exactos tal como aparecen en Xenco)
 const CVD_CODES = [
-    '903895', '903876', '*903895', '*903876', // Creatinina
-    '903426', '903427', '*903426', '*903427', // Hemoglobina Glicosilada
-    '903817', '*903817', // Ldl
-    '*903026', '903026', '903028', '*903028' // Microalbuminuria
+    // Creatinina en suero / orina
+    '903895', '*903895', '903876', '*903876',
+    // Hemoglobina Glicosilada (HbA1c)
+    '903426', '*903426', '903427', '*903427',
+    // LDL Colesterol
+    '903817', '*903817',
+    // Microalbuminuria
+    '903026', '*903026', '903028', '*903028',
+    // Colesterol de Alta Densidad (HDL)
+    '903815', '*903815',
+    // Colesterol Total
+    '903818', '*903818',
+    // Triglicéridos
+    '903868', '*903868',
+    // Uroanálisis con sedimento y densidad urinaria
+    '907106', '*907106',
+    // Glucosa en suero / LCR / otro fluido
+    '903841', '*903841',
+    // Hemograma IV (Hemoglobina, Hematocrito, Recuento de Plaquetas)
+    '902210', '*902210',
 ];
 
 const CVD_CODES_SQL = CVD_CODES.map(c => `'${c}'`).join(',');
@@ -294,12 +310,14 @@ app.get('/api/cardiovascular/patient/:id', async (req, res) => {
 
         const patient = { nombre, documento: cedula, edad, telefono, entidad: p.entidad };
 
-        // ── 1.1 Filtrar 3 meses atrás para pendientes/programados ──
+        // ── 1.1 Filtrar 6 meses atrás para programados/pendientes ──
         const d = new Date();
-        d.setMonth(d.getMonth() - 3);
+        d.setMonth(d.getMonth() - 6);
         const dateStr = parseInt(`${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`);
 
-        // ── 2. PROGRAMADOS: médico ordenó el examen, paciente aún no viene ──
+        // ── 2. PROGRAMADOS: médico ordenó el examen (con fecha de conducta/orden médica)
+        //       Se muestran AUNQUE ya hayan pasado por facturación/TYORDENESLABENVIADAS,
+        //       porque la fecha de la orden médica ES la fecha programada del examen.
         const programadosRows = await medicalPrisma.$queryRawUnsafe(`
             WITH TodasLasOrdenes AS (
                 SELECT
@@ -310,12 +328,11 @@ app.get('/api/cardiovascular/patient/:id', async (req, res) => {
                 FROM TQORDENESMEDICAS
                 WHERE QLO_COD = '${cedula14}'
                   AND QLO_COD_ARTIC IN (${CVD_CODES_SQL})
-                  AND QLO_EST_ESTADOLB = '1'
                   AND (QLO_EST_ANULADO IS NULL OR QLO_EST_ANULADO = '')
                   AND QLO_FCH >= ${dateStr}
-                
+
                 UNION ALL
-                
+
                 SELECT
                     QM3_COD_ARTIC                   AS codigo,
                     LTRIM(RTRIM(QM3_NOM_DESC))      AS tipoExamen,
@@ -325,6 +342,21 @@ app.get('/api/cardiovascular/patient/:id', async (req, res) => {
                 WHERE QM3_COD = '${cedula14}'
                   AND QM3_COD_ARTIC IN (${CVD_CODES_SQL})
                   AND QM3_FCH >= ${dateStr}
+
+                UNION ALL
+
+                SELECT 
+                    d.QJY_ARTIC                     AS codigo,
+                    LTRIM(RTRIM(d.QJY_NOM_DESC))    AS tipoExamen,
+                    e.QJ0_FCH                       AS fecha,
+                    CAST(e.QJ0_NUM_MED AS VARCHAR)  AS doctor_id
+                FROM TQFORMATOS3047D d
+                INNER JOIN TQFORMATOS3047 e 
+                    ON d.QJY_TIPO = e.QJ0_TIPO 
+                    AND d.QJY_NUM = e.QJ0_NUM
+                WHERE (e.QJ0_NUM_NDOC = '${cedula}' OR e.QJ0_COD = '${cedula14}')
+                  AND d.QJY_ARTIC IN (${CVD_CODES_SQL})
+                  AND e.QJ0_FCH >= ${dateStr}
             )
             SELECT
                 o.codigo,
@@ -333,10 +365,13 @@ app.get('/api/cardiovascular/patient/:id', async (req, res) => {
                 MAX(LTRIM(RTRIM(m.MED_NOMBRE))) AS doctor
             FROM TodasLasOrdenes o
             LEFT JOIN TMMEDICOS m ON CAST(m.MED_COD AS VARCHAR) = o.doctor_id
+            -- Excluir solo los que ya fueron procesados por el laboratorio (realizados) después de la fecha de la orden
             WHERE NOT EXISTS (
-                  SELECT 1 FROM TYORDENESLABENVIADAS y
-                  WHERE REPLACE(y.YKL_ARTIC, '*', '') = REPLACE(o.codigo, '*', '')
-                    AND CAST(TRY_CAST(y.YKL_NUMERO_ID AS BIGINT) AS VARCHAR) = '${cedula}'
+                SELECT 1 FROM TYORDENESLABENVIADAS y
+                WHERE REPLACE(y.YKL_ARTIC, '*', '') = REPLACE(o.codigo, '*', '')
+                  AND CAST(TRY_CAST(y.YKL_NUMERO_ID AS BIGINT) AS VARCHAR) = '${cedula}'
+                  AND y.YKL_PROCESADA_LAB = 'S'
+                  AND y.YKL_FECHA >= o.fecha
             )
             GROUP BY o.codigo
             ORDER BY MAX(o.fecha) DESC
@@ -350,7 +385,8 @@ app.get('/api/cardiovascular/patient/:id', async (req, res) => {
             doctor: r.doctor?.trim() || null
         }));
 
-        // ── 3. PENDIENTES: llegó a facturación, lab aún no lo procesa ──
+        // ── 3. PENDIENTES: en TYORDENESLABENVIADAS sin procesar, Y que NO tienen
+        //       origen en una conducta/orden médica reciente (esos ya van en Programados).
         const pendientesRows = await medicalPrisma.$queryRawUnsafe(`
             SELECT
                 y.YKL_ARTIC AS codigo,
@@ -359,11 +395,17 @@ app.get('/api/cardiovascular/patient/:id', async (req, res) => {
                 (
                     SELECT TOP 1 LTRIM(RTRIM(med.MED_NOMBRE))
                     FROM (
-                        SELECT QLO_NUM_MED AS doc_id, QLO_FCH AS fch FROM TQORDENESMEDICAS 
+                        SELECT QLO_NUM_MED AS doc_id, QLO_FCH AS fch FROM TQORDENESMEDICAS
                         WHERE QLO_COD = '${cedula14}' AND REPLACE(QLO_COD_ARTIC, '*', '') = REPLACE(y.YKL_ARTIC, '*', '')
                         UNION ALL
                         SELECT QM3_COD_MEDICO AS doc_id, QM3_FCH AS fch FROM TQMOVIMIENTOCONDUCTASD
                         WHERE QM3_COD = '${cedula14}' AND REPLACE(QM3_COD_ARTIC, '*', '') = REPLACE(y.YKL_ARTIC, '*', '')
+                        UNION ALL
+                        SELECT e.QJ0_NUM_MED AS doc_id, e.QJ0_FCH AS fch 
+                        FROM TQFORMATOS3047D d
+                        INNER JOIN TQFORMATOS3047 e ON d.QJY_TIPO = e.QJ0_TIPO AND d.QJY_NUM = e.QJ0_NUM
+                        WHERE (e.QJ0_NUM_NDOC = '${cedula}' OR e.QJ0_COD = '${cedula14}') 
+                          AND REPLACE(d.QJY_ARTIC, '*', '') = REPLACE(y.YKL_ARTIC, '*', '')
                     ) t
                     LEFT JOIN TMMEDICOS med ON CAST(med.MED_COD AS VARCHAR) = CAST(t.doc_id AS VARCHAR)
                     ORDER BY t.fch DESC
@@ -372,6 +414,27 @@ app.get('/api/cardiovascular/patient/:id', async (req, res) => {
             WHERE CAST(TRY_CAST(y.YKL_NUMERO_ID AS BIGINT) AS VARCHAR) = '${cedula}'
               AND y.YKL_ARTIC IN (${CVD_CODES_SQL})
               AND (y.YKL_PROCESADA_LAB IS NULL OR y.YKL_PROCESADA_LAB = '')
+              -- Solo mostrar como pendiente si NO tiene orden médica reciente (esos van en Programados)
+              AND NOT EXISTS (
+                  SELECT 1 FROM TQMOVIMIENTOCONDUCTASD qm
+                  WHERE qm.QM3_COD = '${cedula14}'
+                    AND REPLACE(qm.QM3_COD_ARTIC, '*', '') = REPLACE(y.YKL_ARTIC, '*', '')
+                    AND qm.QM3_FCH >= ${dateStr}
+              )
+              AND NOT EXISTS (
+                  SELECT 1 FROM TQORDENESMEDICAS ql
+                  WHERE ql.QLO_COD = '${cedula14}'
+                    AND REPLACE(ql.QLO_COD_ARTIC, '*', '') = REPLACE(y.YKL_ARTIC, '*', '')
+                    AND ql.QLO_FCH >= ${dateStr}
+                    AND (ql.QLO_EST_ANULADO IS NULL OR ql.QLO_EST_ANULADO = '')
+              )
+              AND NOT EXISTS (
+                  SELECT 1 FROM TQFORMATOS3047D d
+                  INNER JOIN TQFORMATOS3047 e ON d.QJY_TIPO = e.QJ0_TIPO AND d.QJY_NUM = e.QJ0_NUM
+                  WHERE (e.QJ0_NUM_NDOC = '${cedula}' OR e.QJ0_COD = '${cedula14}')
+                    AND REPLACE(d.QJY_ARTIC, '*', '') = REPLACE(y.YKL_ARTIC, '*', '')
+                    AND e.QJ0_FCH >= ${dateStr}
+              )
               AND y.YKL_FECHA >= ${dateStr}
             GROUP BY y.YKL_ARTIC
             ORDER BY MAX(y.YKL_FECHA) DESC
