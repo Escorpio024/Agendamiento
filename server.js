@@ -556,6 +556,165 @@ app.post('/api/cardiovascular/schedule/:id', async (req, res) => {
     res.json({ success: true, message: 'Funcionalidad en desarrollo' });
 });
 
+// ─── PUT /api/cardiovascular/patient/:cedula — Actualizar datos del paciente ──
+app.put('/api/cardiovascular/patient/:cedula', async (req, res) => {
+    try {
+        const rawId   = req.params.cedula || '';
+        const cedula  = rawId.replace(/\D/g, '');
+        if (!cedula || cedula.length < 5 || cedula.length > 15) {
+            return res.status(400).json({ error: 'Documento inválido.' });
+        }
+        const cedula14 = cedula.padStart(14, '0');
+        const { telefono } = req.body;
+
+        if (!telefono) {
+            return res.status(400).json({ error: 'No se enviaron campos para actualizar.' });
+        }
+
+        const telLimpio = String(telefono).replace(/\D/g, '');
+        if (telLimpio.length < 7 || telLimpio.length > 15) {
+            return res.status(400).json({ error: 'Número de teléfono inválido.' });
+        }
+
+        // Actualizar en TKCLIENTESANEXO5 si existe el registro, sino insertar
+        const existeAnexo = await medicalPrisma.$queryRawUnsafe(`
+            SELECT TOP 1 KC5_RACOD_CLI FROM TKCLIENTESANEXO5
+            WHERE KC5_RACOD_CLI IN ('${cedula}', '${cedula14}')
+        `);
+
+        if (existeAnexo.length > 0) {
+            await medicalPrisma.$executeRawUnsafe(`
+                UPDATE TKCLIENTESANEXO5
+                SET KC5_TEL_CEL = '${telLimpio}'
+                WHERE KC5_RACOD_CLI IN ('${cedula}', '${cedula14}')
+            `);
+        } else {
+            // Intentar actualizar KC2_TEL_RESP como fallback
+            await medicalPrisma.$executeRawUnsafe(`
+                UPDATE TMUSUARIOSFACTURACION
+                SET KC2_TEL_RESP = '${telLimpio}'
+                WHERE KC2_OACOD_NUI = '${cedula}' OR KC2_COD = '${cedula14}'
+            `);
+        }
+
+        logger.info(`[CARDIOVASCULAR] Teléfono actualizado para cédula ${cedula}: ${telLimpio}`);
+        res.json({ success: true, telefono: telLimpio });
+    } catch (error) {
+        logger.warn('[CARDIOVASCULAR] Error al actualizar paciente:', error.message);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// ─── POST /api/cardiovascular/programado/remove — Registrar eliminación ───────
+app.post('/api/cardiovascular/programado/remove', async (req, res) => {
+    try {
+        const { cedula, examCodigo, tipoExamen, fecha, doctor, motivo } = req.body;
+        if (!cedula || !examCodigo || !tipoExamen) {
+            return res.status(400).json({ error: 'Faltan campos requeridos.' });
+        }
+        const registro = await botPrisma.cvdProgramadoHistorial.create({
+            data: {
+                cedula:     String(cedula).replace(/\D/g, ''),
+                examCodigo: String(examCodigo),
+                tipoExamen: String(tipoExamen),
+                fecha:      fecha  || null,
+                doctor:     doctor || null,
+                accion:     'ELIMINADO',
+                motivo:     motivo || null,
+            }
+        });
+        logger.info(`[CARDIOVASCULAR] Eliminación registrada: ${examCodigo} — cédula ${cedula}`);
+        res.json({ success: true, id: registro.id });
+    } catch (error) {
+        logger.warn('[CARDIOVASCULAR] Error al registrar eliminación:', error.message);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// ─── GET /api/cardiovascular/historial/:cedula — Historial de movimientos ─────
+app.get('/api/cardiovascular/historial/:cedula', async (req, res) => {
+    try {
+        const cedula = String(req.params.cedula || '').replace(/\D/g, '');
+        if (!cedula || cedula.length < 5) {
+            return res.status(400).json({ error: 'Cédula inválida.' });
+        }
+        const registros = await botPrisma.cvdProgramadoHistorial.findMany({
+            where: { cedula },
+            orderBy: { creadoEn: 'desc' },
+            take: 100,
+        });
+        res.json(registros);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// ─── GET /api/cardiovascular/medicos-cvd — Lista médicos activos ──────────────
+app.get('/api/cardiovascular/medicos-cvd', async (req, res) => {
+    try {
+        const hoy    = new Date();
+        const hace30 = new Date(); hace30.setDate(hoy.getDate() - 30);
+        const toDecimal = d => parseInt(`${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`);
+        const desde  = toDecimal(hace30);
+        const hasta  = toDecimal(new Date(hoy.getFullYear(), hoy.getMonth() + 3, 0));
+
+        const medicos = await medicalPrisma.$queryRaw`
+            SELECT DISTINCT
+                CAST(m.MED_COD AS BIGINT)       AS cod,
+                LTRIM(RTRIM(m.MED_NOMBRE))      AS nombre
+            FROM TMMEDICOS m
+            INNER JOIN TMTURNOSMEDICOSDETALLE t ON t.TME2_CODM = m.MED_COD
+            WHERE t.TME2_FCH BETWEEN ${desde} AND ${hasta}
+              AND m.MED_NOMBRE IS NOT NULL
+              AND m.MED_EST_ESTADO = 'A'
+            ORDER BY nombre
+        `;
+        res.json(medicos.map(m => ({ cod: Number(m.cod), nombre: m.nombre })));
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// ─── POST /api/cardiovascular/cita — Guardar cita programada localmente ───────
+app.post('/api/cardiovascular/cita', async (req, res) => {
+    try {
+        const { cedula, paciente, doctorId, doctorNombre, examCodigo, tipoExamen, fecha, hora, notas } = req.body;
+        if (!cedula || !examCodigo || !tipoExamen) {
+            return res.status(400).json({ error: 'Faltan campos requeridos.' });
+        }
+        const cita = await botPrisma.cvdCitaProgramada.create({
+            data: {
+                cedula:      String(cedula).replace(/\D/g, ''),
+                paciente:    String(paciente  || ''),
+                doctorId:    doctorId    ? String(doctorId)    : null,
+                doctorNombre:doctorNombre ? String(doctorNombre): null,
+                examCodigo:  String(examCodigo),
+                tipoExamen:  String(tipoExamen),
+                fecha:       fecha  || null,
+                hora:        hora   || null,
+                notas:       notas  || null,
+            }
+        });
+        // También registrar en historial como "PROGRAMADO"
+        await botPrisma.cvdProgramadoHistorial.create({
+            data: {
+                cedula:     String(cedula).replace(/\D/g, ''),
+                examCodigo: String(examCodigo),
+                tipoExamen: String(tipoExamen),
+                fecha:      fecha  || null,
+                doctor:     doctorNombre || null,
+                accion:     'PROGRAMADO',
+                motivo:     `Cita programada para el ${fecha || 'sin fecha'} con ${doctorNombre || 'médico no asignado'}`,
+            }
+        });
+        logger.info(`[CARDIOVASCULAR] Cita programada: ${tipoExamen} — cédula ${cedula}`);
+        res.json({ success: true, id: cita.id });
+    } catch (error) {
+        logger.warn('[CARDIOVASCULAR] Error al programar cita:', error.message);
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // ─── VISOR DE AGENDA ────────────────────────────────────────────────────────
 
 // GET /api/visor/medicos — Lista de médicos con agenda activa

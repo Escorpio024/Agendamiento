@@ -43,3 +43,29 @@ model AppointmentLog {
   patientPhone   String?
   createdAt      DateTime @default(now())
 }
+
+model CvdProgramadoHistorial {
+  id         String   @id @default(cuid())
+  cedula     String
+  examCodigo String
+  tipoExamen String
+  fecha      String?
+  doctor     String?
+  accion     String   // "ELIMINADO" | "PROGRAMADO"
+  motivo     String?
+  creadoEn   DateTime @default(now())
+}
+
+model CvdCitaProgramada {
+  id          String   @id @default(cuid())
+  cedula      String
+  paciente    String
+  doctorId    String?
+  doctorNombre String?
+  examCodigo  String
+  tipoExamen  String
+  fecha       String?
+  hora        String?
+  notas       String?
+  creadoEn    DateTime @default(now())
+}

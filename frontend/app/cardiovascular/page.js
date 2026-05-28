@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import {
     Search, Filter, Bell, Calendar, CheckCircle2,
     Clock, User, Phone, Building2, Hash, Stethoscope,
     FileText, ChevronRight, AlertCircle, Activity,
-    HeartPulse, Loader2, ClipboardList, X, XCircle, AlertTriangle, RefreshCw, ShieldAlert, Download
+    HeartPulse, Loader2, ClipboardList, X, XCircle, AlertTriangle, RefreshCw, ShieldAlert, Download,
+    Edit3, Save, Trash2, History, CalendarPlus, ChevronDown, Check, RotateCcw
 } from 'lucide-react';
 
 // ─── Config ──────────────────────────────────────────────────────────────────
@@ -13,7 +14,21 @@ const IS_PROD = typeof window !== 'undefined' && window.location.hostname !== 'l
 const SERVER_HOST = IS_PROD ? window.location.hostname : 'localhost';
 const API_BASE = `http://${SERVER_HOST}:3001`;
 
-// ─── Datos de ejemplo (se reemplazarán por fetch real) ───────────────────────
+// ─── Catálogo de procedimientos CVD ──────────────────────────────────────────
+const CVD_PROCEDIMIENTOS = [
+    { codigo: '903895', nombre: 'Creatinina en suero' },
+    { codigo: '903876', nombre: 'Creatinina en orina' },
+    { codigo: '903426', nombre: 'Hemoglobina Glicosilada HbA1c' },
+    { codigo: '903817', nombre: 'LDL Colesterol' },
+    { codigo: '903026', nombre: 'Microalbuminuria' },
+    { codigo: '903815', nombre: 'Colesterol de Alta Densidad (HDL)' },
+    { codigo: '903818', nombre: 'Colesterol Total' },
+    { codigo: '903868', nombre: 'Triglicéridos' },
+    { codigo: '907106', nombre: 'Uroanálisis con sedimento' },
+    { codigo: '903841', nombre: 'Glucosa en suero' },
+    { codigo: '902210', nombre: 'Hemograma IV' },
+];
+
 const MOCK_PATIENT = null;
 const MOCK_PROGRAMADOS = [];
 const MOCK_PENDIENTES = [];
@@ -23,19 +38,30 @@ const MOCK_REALIZADOS = [];
 function formatDate(str) {
     if (!str) return '—';
     try {
-        // El string llega como "YYYY-MM-DD" (ej. 2026-05-04).
-        // Al agregar 'T12:00:00', evitamos que la conversión a la zona horaria local 
-        // (UTC-5 en Colombia) reste horas y lo empuje al día anterior.
         const d = new Date(str.includes('T') ? str : str + 'T12:00:00');
-        return d.toLocaleDateString('es-CO', {
-            day: '2-digit', month: 'short', year: 'numeric'
-        });
+        return d.toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' });
     } catch { return str; }
+}
+
+function formatDateTime(iso) {
+    if (!iso) return '—';
+    try {
+        const d = new Date(iso);
+        return d.toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    } catch { return iso; }
+}
+
+function diffMonths(fechaStr) {
+    if (!fechaStr) return null;
+    const d = new Date(fechaStr.includes('T') ? fechaStr : fechaStr + 'T12:00:00');
+    const now = new Date();
+    return (now.getFullYear() - d.getFullYear()) * 12 + (now.getMonth() - d.getMonth())
+        + (now.getDate() < d.getDate() ? -1 : 0);
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-function SectionHeader({ icon: Icon, title, count }) {
+function SectionHeader({ icon: Icon, title, count, action }) {
     return (
         <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
@@ -48,16 +74,19 @@ function SectionHeader({ icon: Icon, title, count }) {
                     {title}
                 </span>
             </div>
-            {count !== undefined && (
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full"
-                    style={{
-                        background: 'rgba(130,99,177,0.18)',
-                        color: '#C4AFED',
-                        border: '1px solid rgba(130,99,177,0.35)'
-                    }}>
-                    {count}
-                </span>
-            )}
+            <div className="flex items-center gap-2">
+                {count !== undefined && (
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full"
+                        style={{
+                            background: 'rgba(130,99,177,0.18)',
+                            color: '#C4AFED',
+                            border: '1px solid rgba(130,99,177,0.35)'
+                        }}>
+                        {count}
+                    </span>
+                )}
+                {action}
+            </div>
         </div>
     );
 }
@@ -71,8 +100,10 @@ function EmptyState({ message }) {
     );
 }
 
-function ExamenProgramadoRow({ examen, onRemind, sendingId }) {
-    const isSending = sendingId === examen.id;
+// ─── ExamenProgramadoRow — con botón Eliminar ─────────────────────────────────
+function ExamenProgramadoRow({ examen, onRemind, onEliminar, sendingId, eliminandoId }) {
+    const isSending    = sendingId   === examen.id;
+    const isEliminando = eliminandoId === examen.id;
     return (
         <div className="flex items-center justify-between px-4 py-3 rounded-xl transition-all group"
             style={{
@@ -110,21 +141,39 @@ function ExamenProgramadoRow({ examen, onRemind, sendingId }) {
                     )}
                 </div>
             </div>
-            <button
-                onClick={() => onRemind(examen.id, examen.tipoExamen)}
-                disabled={isSending}
-                className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold transition-all ml-3 flex-shrink-0"
-                style={{
-                    background: isSending ? 'rgba(130,99,177,0.15)' : 'rgba(130,99,177,0.22)',
-                    color: '#C4AFED',
-                    border: '1px solid rgba(130,99,177,0.4)',
-                }}
-            >
-                {isSending
-                    ? <Loader2 size={13} className="animate-spin" />
-                    : <Bell size={13} />}
-                Recordar
-            </button>
+            <div className="flex items-center gap-2 ml-3 flex-shrink-0">
+                {/* Recordar */}
+                <button
+                    onClick={() => onRemind(examen.id, examen.tipoExamen)}
+                    disabled={isSending}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all"
+                    style={{
+                        background: isSending ? 'rgba(130,99,177,0.15)' : 'rgba(130,99,177,0.22)',
+                        color: '#C4AFED',
+                        border: '1px solid rgba(130,99,177,0.4)',
+                    }}
+                >
+                    {isSending ? <Loader2 size={13} className="animate-spin" /> : <Bell size={13} />}
+                    Recordar
+                </button>
+                {/* Eliminar programación */}
+                <button
+                    onClick={() => onEliminar(examen)}
+                    disabled={isEliminando}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all"
+                    style={{
+                        background: isEliminando ? 'rgba(177,64,64,0.1)' : 'rgba(177,64,64,0.18)',
+                        color: '#F9A8A8',
+                        border: '1px solid rgba(177,64,64,0.35)',
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.background = 'rgba(177,64,64,0.32)'}
+                    onMouseLeave={e => e.currentTarget.style.background = 'rgba(177,64,64,0.18)'}
+                    title="Eliminar programación"
+                >
+                    {isEliminando ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+                    Eliminar
+                </button>
+            </div>
         </div>
     );
 }
@@ -166,9 +215,7 @@ function ExamenPendienteRow({ examen, onAgendar, agendandoId }) {
                     border: '1px solid rgba(177,64,64,0.4)',
                 }}
             >
-                {isAgendando
-                    ? <Loader2 size={13} className="animate-spin" />
-                    : <Calendar size={13} />}
+                {isAgendando ? <Loader2 size={13} className="animate-spin" /> : <Calendar size={13} />}
                 Agendar
             </button>
         </div>
@@ -218,13 +265,437 @@ function ExamenRealizadoRow({ examen }) {
     );
 }
 
-// ─── Helpers de análisis ─────────────────────────────────────────────────────
-function diffMonths(fechaStr) {
-    if (!fechaStr) return null;
-    const d = new Date(fechaStr.includes('T') ? fechaStr : fechaStr + 'T12:00:00');
-    const now = new Date();
-    return (now.getFullYear() - d.getFullYear()) * 12 + (now.getMonth() - d.getMonth())
-        + (now.getDate() < d.getDate() ? -1 : 0);
+// ─── Modal: Eliminar Programación (confirm + motivo) ──────────────────────────
+function EliminarModal({ examen, onConfirm, onCancel, loading }) {
+    const [motivo, setMotivo] = useState('');
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            style={{ background: 'rgba(8,7,12,0.88)', backdropFilter: 'blur(8px)' }}>
+            <div className="w-full max-w-md rounded-2xl shadow-2xl p-6"
+                style={{ background: 'rgba(20,18,28,0.99)', border: '1px solid rgba(177,64,64,0.3)' }}>
+                <div className="flex items-center gap-3 mb-5">
+                    <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+                        style={{ background: 'rgba(177,64,64,0.2)' }}>
+                        <Trash2 size={17} color="#F9A8A8" />
+                    </div>
+                    <div>
+                        <p className="text-[10px] uppercase tracking-widest font-semibold"
+                            style={{ color: 'rgba(249,168,168,0.6)' }}>Eliminar Programación</p>
+                        <h3 className="text-sm font-bold" style={{ color: '#F5F5F7' }}>
+                            {examen.tipoExamen}
+                        </h3>
+                    </div>
+                </div>
+                <p className="text-xs mb-4" style={{ color: 'rgba(245,245,247,0.5)' }}>
+                    Esta programación quedará registrada en el <strong style={{ color: 'rgba(245,245,247,0.7)' }}>Historial</strong> y se ocultará del listado activo. No se modifica ningún dato en el HIS.
+                </p>
+                <div className="mb-5">
+                    <label className="block text-[10px] uppercase tracking-widest font-semibold mb-1.5"
+                        style={{ color: 'rgba(161,227,216,0.55)' }}>
+                        Motivo (opcional)
+                    </label>
+                    <input
+                        type="text"
+                        placeholder="Ej: Paciente canceló, reprogramar..."
+                        value={motivo}
+                        onChange={e => setMotivo(e.target.value)}
+                        className="w-full px-3 py-2.5 rounded-xl text-sm outline-none"
+                        style={{
+                            background: 'rgba(15,14,19,0.8)',
+                            border: '1px solid rgba(177,64,64,0.3)',
+                            color: 'var(--text-primary)',
+                        }}
+                    />
+                </div>
+                <div className="flex items-center gap-3 justify-end">
+                    <button onClick={onCancel}
+                        className="px-4 py-2 rounded-lg text-xs font-semibold transition-all"
+                        style={{ background: 'rgba(245,245,247,0.07)', color: 'rgba(245,245,247,0.5)', border: '1px solid rgba(245,245,247,0.1)' }}
+                        onMouseEnter={e => e.currentTarget.style.background = 'rgba(245,245,247,0.12)'}
+                        onMouseLeave={e => e.currentTarget.style.background = 'rgba(245,245,247,0.07)'}>
+                        Cancelar
+                    </button>
+                    <button
+                        onClick={() => onConfirm(motivo)}
+                        disabled={loading}
+                        className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all"
+                        style={{ background: 'rgba(177,64,64,0.35)', color: '#F9A8A8', border: '1px solid rgba(177,64,64,0.5)' }}
+                        onMouseEnter={e => e.currentTarget.style.background = 'rgba(177,64,64,0.55)'}
+                        onMouseLeave={e => e.currentTarget.style.background = 'rgba(177,64,64,0.35)'}>
+                        {loading ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
+                        Confirmar eliminación
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+// ─── Modal: Historial de movimientos ─────────────────────────────────────────
+function HistorialModal({ cedula, pacienteNombre, onClose }) {
+    const [registros, setRegistros] = useState([]);
+    const [loading, setLoading]     = useState(true);
+    const [error, setError]         = useState(null);
+
+    useEffect(() => {
+        fetch(`${API_BASE}/api/cardiovascular/historial/${cedula}`)
+            .then(r => r.json())
+            .then(data => { setRegistros(data); setLoading(false); })
+            .catch(e  => { setError(e.message); setLoading(false); });
+    }, [cedula]);
+
+    const accionStyle = (accion) => accion === 'ELIMINADO'
+        ? { bg: 'rgba(177,64,64,0.2)', color: '#F9A8A8', border: 'rgba(177,64,64,0.35)' }
+        : { bg: 'rgba(130,99,177,0.2)', color: '#C4AFED', border: 'rgba(130,99,177,0.35)' };
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            style={{ background: 'rgba(8,7,12,0.85)', backdropFilter: 'blur(8px)' }}
+            onClick={e => e.target === e.currentTarget && onClose()}>
+            <div className="relative w-full max-w-2xl max-h-[85vh] flex flex-col rounded-2xl shadow-2xl"
+                style={{ background: 'rgba(20,18,28,0.98)', border: '1px solid rgba(130,99,177,0.3)' }}>
+
+                {/* Header */}
+                <div className="flex items-center justify-between px-6 py-4 border-b flex-shrink-0"
+                    style={{ borderColor: 'rgba(130,99,177,0.2)' }}>
+                    <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-xl flex items-center justify-center"
+                            style={{ background: 'rgba(130,99,177,0.2)' }}>
+                            <History size={17} color="#C4AFED" />
+                        </div>
+                        <div>
+                            <p className="text-[10px] tracking-widest uppercase font-semibold"
+                                style={{ color: 'rgba(196,175,237,0.6)' }}>Historial de Movimientos</p>
+                            <h2 className="text-sm font-bold" style={{ color: '#F5F5F7' }}>
+                                {pacienteNombre}
+                            </h2>
+                        </div>
+                    </div>
+                    <button onClick={onClose}
+                        className="w-8 h-8 rounded-lg flex items-center justify-center transition-all"
+                        style={{ background: 'rgba(245,245,247,0.06)', color: 'rgba(245,245,247,0.5)' }}
+                        onMouseEnter={e => e.currentTarget.style.background = 'rgba(177,64,64,0.2)'}
+                        onMouseLeave={e => e.currentTarget.style.background = 'rgba(245,245,247,0.06)'}>
+                        <X size={15} />
+                    </button>
+                </div>
+
+                {/* Body */}
+                <div className="flex-1 overflow-y-auto p-6">
+                    {loading && (
+                        <div className="flex items-center justify-center py-12 gap-3">
+                            <Loader2 size={22} className="animate-spin" style={{ color: '#C4AFED' }} />
+                            <span className="text-sm" style={{ color: 'rgba(245,245,247,0.4)' }}>Cargando historial...</span>
+                        </div>
+                    )}
+                    {error && (
+                        <div className="text-center py-10">
+                            <p className="text-xs" style={{ color: '#F9A8A8' }}>❌ {error}</p>
+                        </div>
+                    )}
+                    {!loading && !error && registros.length === 0 && (
+                        <EmptyState message="No hay movimientos registrados para este paciente" />
+                    )}
+                    {!loading && !error && registros.map(reg => {
+                        const st = accionStyle(reg.accion);
+                        return (
+                            <div key={reg.id} className="flex items-start gap-3 px-4 py-3 rounded-xl mb-2"
+                                style={{ background: 'rgba(45,40,62,0.35)', border: '1px solid rgba(45,40,62,0.7)' }}>
+                                <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2 flex-wrap mb-1">
+                                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full"
+                                            style={{ background: st.bg, color: st.color, border: `1px solid ${st.border}` }}>
+                                            {reg.accion}
+                                        </span>
+                                        <span className="text-xs font-mono px-1.5 py-0.5 rounded"
+                                            style={{ background: 'rgba(245,245,247,0.07)', color: 'rgba(245,245,247,0.4)' }}>
+                                            {reg.examCodigo}
+                                        </span>
+                                        <span className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>
+                                            {reg.tipoExamen}
+                                        </span>
+                                    </div>
+                                    <div className="flex items-center gap-4 flex-wrap">
+                                        {reg.fecha && (
+                                            <span className="text-[11px]" style={{ color: 'rgba(245,245,247,0.35)' }}>
+                                                📅 {formatDate(reg.fecha)}
+                                            </span>
+                                        )}
+                                        {reg.doctor && (
+                                            <span className="text-[11px]" style={{ color: 'rgba(245,245,247,0.35)' }}>
+                                                👨‍⚕️ {reg.doctor}
+                                            </span>
+                                        )}
+                                        {reg.motivo && (
+                                            <span className="text-[11px] italic" style={{ color: 'rgba(245,245,247,0.3)' }}>
+                                                "{reg.motivo}"
+                                            </span>
+                                        )}
+                                    </div>
+                                </div>
+                                <span className="text-[10px] flex-shrink-0 mt-0.5" style={{ color: 'rgba(245,245,247,0.25)' }}>
+                                    {formatDateTime(reg.creadoEn)}
+                                </span>
+                            </div>
+                        );
+                    })}
+                </div>
+
+                {/* Footer */}
+                <div className="px-6 py-3 border-t flex justify-between items-center flex-shrink-0"
+                    style={{ borderColor: 'rgba(130,99,177,0.15)' }}>
+                    <span className="text-[10px]" style={{ color: 'rgba(245,245,247,0.2)' }}>
+                        {registros.length} registro(s) · Cédula: {cedula}
+                    </span>
+                    <button onClick={onClose}
+                        className="text-xs font-semibold px-4 py-2 rounded-lg transition-all"
+                        style={{ background: 'rgba(245,245,247,0.07)', color: 'rgba(245,245,247,0.45)', border: '1px solid rgba(245,245,247,0.1)' }}
+                        onMouseEnter={e => e.currentTarget.style.background = 'rgba(245,245,247,0.12)'}
+                        onMouseLeave={e => e.currentTarget.style.background = 'rgba(245,245,247,0.07)'}>
+                        Cerrar
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+// ─── Modal: Programar Cita CVD ────────────────────────────────────────────────
+function ProgramarCitaModal({ patient, onClose, onSuccess }) {
+    const [medicos, setMedicos]         = useState([]);
+    const [loadMedicos, setLoadMedicos] = useState(true);
+    const [form, setForm] = useState({
+        doctorId:     '',
+        doctorNombre: '',
+        examCodigo:   '',
+        tipoExamen:   '',
+        fecha:        '',
+        hora:         '',
+        notas:        '',
+    });
+    const [saving, setSaving]   = useState(false);
+    const [errMsg, setErrMsg]   = useState('');
+
+    useEffect(() => {
+        fetch(`${API_BASE}/api/cardiovascular/medicos-cvd`)
+            .then(r => r.json())
+            .then(data => { setMedicos(Array.isArray(data) ? data : []); setLoadMedicos(false); })
+            .catch(() => setLoadMedicos(false));
+    }, []);
+
+    const setField = (key, value) => setForm(f => ({ ...f, [key]: value }));
+
+    const handleDoctorChange = (e) => {
+        const opt = medicos.find(m => String(m.cod) === e.target.value);
+        setField('doctorId',     opt ? String(opt.cod) : '');
+        setField('doctorNombre', opt ? opt.nombre       : '');
+    };
+
+    const handleProcChange = (e) => {
+        const proc = CVD_PROCEDIMIENTOS.find(p => p.codigo === e.target.value);
+        setField('examCodigo', proc ? proc.codigo : '');
+        setField('tipoExamen', proc ? proc.nombre : '');
+    };
+
+    const handleSave = async () => {
+        if (!form.examCodigo) { setErrMsg('Selecciona un procedimiento.'); return; }
+        setSaving(true); setErrMsg('');
+        try {
+            const res = await fetch(`${API_BASE}/api/cardiovascular/cita`, {
+                method:  'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    cedula:       patient.documento,
+                    paciente:     patient.nombre,
+                    doctorId:     form.doctorId     || null,
+                    doctorNombre: form.doctorNombre || null,
+                    examCodigo:   form.examCodigo,
+                    tipoExamen:   form.tipoExamen,
+                    fecha:        form.fecha  || null,
+                    hora:         form.hora   || null,
+                    notas:        form.notas  || null,
+                }),
+            });
+            if (!res.ok) {
+                const d = await res.json().catch(() => ({}));
+                setErrMsg(d.error || 'Error al guardar');
+            } else {
+                onSuccess();
+            }
+        } catch {
+            setErrMsg('Error de conexión con el servidor.');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const labelStyle = { color: 'rgba(161,227,216,0.55)' };
+    const inputStyle = {
+        background: 'rgba(15,14,19,0.8)',
+        border: '1px solid rgba(130,99,177,0.3)',
+        color: 'var(--text-primary)',
+        borderRadius: '10px',
+        padding: '10px 12px',
+        fontSize: '13px',
+        width: '100%',
+        outline: 'none',
+    };
+    const selectStyle = { ...inputStyle, cursor: 'pointer' };
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            style={{ background: 'rgba(8,7,12,0.85)', backdropFilter: 'blur(8px)' }}
+            onClick={e => e.target === e.currentTarget && onClose()}>
+            <div className="relative w-full max-w-lg rounded-2xl shadow-2xl"
+                style={{ background: 'rgba(20,18,28,0.99)', border: '1px solid rgba(130,99,177,0.35)' }}>
+
+                {/* Header */}
+                <div className="flex items-center justify-between px-6 py-4 border-b"
+                    style={{ borderColor: 'rgba(130,99,177,0.2)' }}>
+                    <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-xl flex items-center justify-center"
+                            style={{ background: 'linear-gradient(135deg, #B14040 0%, #8263B1 100%)' }}>
+                            <CalendarPlus size={17} color="#F5F5F7" />
+                        </div>
+                        <div>
+                            <p className="text-[10px] tracking-widest uppercase font-semibold"
+                                style={{ color: 'rgba(196,175,237,0.6)' }}>Riesgo Cardiovascular</p>
+                            <h2 className="text-sm font-bold" style={{ color: '#F5F5F7' }}>Programar Cita</h2>
+                        </div>
+                    </div>
+                    <button onClick={onClose}
+                        className="w-8 h-8 rounded-lg flex items-center justify-center transition-all"
+                        style={{ background: 'rgba(245,245,247,0.06)', color: 'rgba(245,245,247,0.5)' }}
+                        onMouseEnter={e => e.currentTarget.style.background = 'rgba(177,64,64,0.2)'}
+                        onMouseLeave={e => e.currentTarget.style.background = 'rgba(245,245,247,0.06)'}>
+                        <X size={15} />
+                    </button>
+                </div>
+
+                {/* Paciente info */}
+                <div className="mx-6 mt-4 px-4 py-3 rounded-xl flex items-center gap-3"
+                    style={{ background: 'rgba(130,99,177,0.1)', border: '1px solid rgba(130,99,177,0.2)' }}>
+                    <User size={16} style={{ color: '#C4AFED', flexShrink: 0 }} />
+                    <div>
+                        <p className="text-xs font-bold" style={{ color: '#F5F5F7' }}>{patient.nombre}</p>
+                        <p className="text-[11px]" style={{ color: 'rgba(196,175,237,0.6)' }}>
+                            Cédula: {patient.documento} · {patient.edad ? `${patient.edad} años` : ''} · {patient.entidad || ''}
+                        </p>
+                    </div>
+                </div>
+
+                {/* Form */}
+                <div className="px-6 py-5 flex flex-col gap-4">
+
+                    {/* Doctor */}
+                    <div>
+                        <label className="block text-[10px] uppercase tracking-widest font-semibold mb-1.5"
+                            style={labelStyle}>Doctor / Especialista</label>
+                        {loadMedicos ? (
+                            <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl" style={inputStyle}>
+                                <Loader2 size={13} className="animate-spin" style={{ color: '#C4AFED' }} />
+                                <span className="text-xs" style={{ color: 'rgba(245,245,247,0.4)' }}>Cargando médicos...</span>
+                            </div>
+                        ) : (
+                            <select
+                                value={form.doctorId}
+                                onChange={handleDoctorChange}
+                                style={selectStyle}>
+                                <option value="">— Sin asignar / Cualquier médico —</option>
+                                {medicos.map(m => (
+                                    <option key={m.cod} value={String(m.cod)}>
+                                        {m.nombre}
+                                    </option>
+                                ))}
+                            </select>
+                        )}
+                    </div>
+
+                    {/* Procedimiento */}
+                    <div>
+                        <label className="block text-[10px] uppercase tracking-widest font-semibold mb-1.5"
+                            style={labelStyle}>Procedimiento Cardiovascular <span style={{ color: '#F9A8A8' }}>*</span></label>
+                        <select
+                            value={form.examCodigo}
+                            onChange={handleProcChange}
+                            style={selectStyle}>
+                            <option value="">— Selecciona un procedimiento —</option>
+                            {CVD_PROCEDIMIENTOS.map(p => (
+                                <option key={p.codigo} value={p.codigo}>
+                                    [{p.codigo}] {p.nombre}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+
+                    {/* Fecha y Hora */}
+                    <div className="grid grid-cols-2 gap-3">
+                        <div>
+                            <label className="block text-[10px] uppercase tracking-widest font-semibold mb-1.5"
+                                style={labelStyle}>Fecha</label>
+                            <input type="date" value={form.fecha}
+                                onChange={e => setField('fecha', e.target.value)}
+                                style={inputStyle} />
+                        </div>
+                        <div>
+                            <label className="block text-[10px] uppercase tracking-widest font-semibold mb-1.5"
+                                style={labelStyle}>Hora</label>
+                            <input type="time" value={form.hora}
+                                onChange={e => setField('hora', e.target.value)}
+                                style={inputStyle} />
+                        </div>
+                    </div>
+
+                    {/* Notas */}
+                    <div>
+                        <label className="block text-[10px] uppercase tracking-widest font-semibold mb-1.5"
+                            style={labelStyle}>Notas adicionales</label>
+                        <textarea
+                            rows={2}
+                            placeholder="Observaciones, indicaciones especiales..."
+                            value={form.notas}
+                            onChange={e => setField('notas', e.target.value)}
+                            style={{ ...inputStyle, resize: 'none' }}
+                        />
+                    </div>
+
+                    {errMsg && (
+                        <p className="text-xs px-3 py-2 rounded-lg"
+                            style={{ background: 'rgba(177,64,64,0.15)', color: '#F9A8A8', border: '1px solid rgba(177,64,64,0.3)' }}>
+                            ❌ {errMsg}
+                        </p>
+                    )}
+
+                    {/* Botones */}
+                    <div className="flex items-center gap-3 justify-end pt-1">
+                        <button onClick={onClose}
+                            className="px-4 py-2 rounded-lg text-xs font-semibold transition-all"
+                            style={{ background: 'rgba(245,245,247,0.07)', color: 'rgba(245,245,247,0.5)', border: '1px solid rgba(245,245,247,0.1)' }}
+                            onMouseEnter={e => e.currentTarget.style.background = 'rgba(245,245,247,0.12)'}
+                            onMouseLeave={e => e.currentTarget.style.background = 'rgba(245,245,247,0.07)'}>
+                            Cancelar
+                        </button>
+                        <button
+                            onClick={handleSave}
+                            disabled={saving || !form.examCodigo}
+                            className="flex items-center gap-2 px-5 py-2 rounded-lg text-xs font-bold transition-all"
+                            style={{
+                                background: (!form.examCodigo || saving)
+                                    ? 'rgba(130,99,177,0.2)'
+                                    : 'linear-gradient(135deg, rgba(177,64,64,0.6) 0%, rgba(130,99,177,0.6) 100%)',
+                                color: (!form.examCodigo || saving) ? 'rgba(245,245,247,0.3)' : '#F5F5F7',
+                                border: '1px solid rgba(130,99,177,0.4)',
+                                cursor: (!form.examCodigo || saving) ? 'not-allowed' : 'pointer',
+                                boxShadow: (!form.examCodigo || saving) ? 'none' : '0 0 18px rgba(130,99,177,0.25)',
+                            }}>
+                            {saving ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+                            Confirmar Cita
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
 }
 
 // ─── ReportModal ──────────────────────────────────────────────────────────────
@@ -232,7 +703,6 @@ function ReportModal({ patient, programados, pendientes, realizados, onClose }) 
     const now = new Date();
     const fechaInforme = now.toLocaleDateString('es-CO', { day: '2-digit', month: 'long', year: 'numeric' });
 
-    // Análisis de exámenes programados
     const citasPerdidas = programados.filter(ex => {
         if (!ex.fecha) return false;
         const d = new Date(ex.fecha.includes('T') ? ex.fecha : ex.fecha + 'T12:00:00');
@@ -243,34 +713,18 @@ function ReportModal({ patient, programados, pendientes, realizados, onClose }) 
         const d = new Date(ex.fecha.includes('T') ? ex.fecha : ex.fecha + 'T12:00:00');
         return d >= now;
     });
+    const exCorroborar = realizados.filter(ex => { const m = diffMonths(ex.fecha); return m !== null && m >= 1 && m < 3; });
+    const exRenovar    = realizados.filter(ex => { const m = diffMonths(ex.fecha); return m !== null && m >= 3; });
+    const exVigentes   = realizados.filter(ex => { const m = diffMonths(ex.fecha); return m !== null && m < 1; });
 
-    // Análisis de exámenes realizados
-    const exCorroborar = realizados.filter(ex => {
-        const m = diffMonths(ex.fecha);
-        return m !== null && m >= 1 && m < 3;
-    });
-    const exRenovar = realizados.filter(ex => {
-        const m = diffMonths(ex.fecha);
-        return m !== null && m >= 3;
-    });
-    const exVigentes = realizados.filter(ex => {
-        const m = diffMonths(ex.fecha);
-        return m !== null && m < 1;
-    });
-
-    // Nivel de alerta global
     const tieneProblemas = citasPerdidas.length > 0 || exRenovar.length > 0 || pendientes.length > 0;
-    const tieneAlertas  = exCorroborar.length > 0;
-    const nivelAlerta = tieneProblemas ? 'crítico' : tieneAlertas ? 'atención' : 'normal';
+    const tieneAlertas   = exCorroborar.length > 0;
+    const nivelAlerta    = tieneProblemas ? 'crítico' : tieneAlertas ? 'atención' : 'normal';
 
-    const colorAlerta = nivelAlerta === 'crítico' ? '#F9A8A8'
-        : nivelAlerta === 'atención' ? '#FCD34D' : '#A1E3D8';
-    const bgAlerta = nivelAlerta === 'crítico' ? 'rgba(177,64,64,0.12)'
-        : nivelAlerta === 'atención' ? 'rgba(251,191,36,0.1)' : 'rgba(161,227,216,0.08)';
-    const borderAlerta = nivelAlerta === 'crítico' ? 'rgba(177,64,64,0.35)'
-        : nivelAlerta === 'atención' ? 'rgba(251,191,36,0.3)' : 'rgba(161,227,216,0.2)';
+    const colorAlerta  = nivelAlerta === 'crítico' ? '#F9A8A8' : nivelAlerta === 'atención' ? '#FCD34D' : '#A1E3D8';
+    const bgAlerta     = nivelAlerta === 'crítico' ? 'rgba(177,64,64,0.12)' : nivelAlerta === 'atención' ? 'rgba(251,191,36,0.1)' : 'rgba(161,227,216,0.08)';
+    const borderAlerta = nivelAlerta === 'crítico' ? 'rgba(177,64,64,0.35)' : nivelAlerta === 'atención' ? 'rgba(251,191,36,0.3)' : 'rgba(161,227,216,0.2)';
 
-    // ── Generador de PDF (print en ventana nueva) ──────────────────────────────
     const downloadPDF = () => {
         const alertaLabel = nivelAlerta === 'crítico' ? '⚠️ Estado Crítico — Se requieren acciones inmediatas'
             : nivelAlerta === 'atención' ? '🔶 Requiere Atención — Hay exámenes que deben verificarse'
@@ -350,7 +804,6 @@ function ReportModal({ patient, programados, pendientes, realizados, onClose }) 
             <p style="margin-top:6px;">Generado por Auro Bot</p>
         </div>
     </header>
-
     <div class="paciente-grid">
         <div class="field"><label>Nombre</label><span>${patient?.nombre || '—'}</span></div>
         <div class="field"><label>Cédula</label><span>${patient?.documento || '—'}</span></div>
@@ -358,53 +811,32 @@ function ReportModal({ patient, programados, pendientes, realizados, onClose }) 
         <div class="field"><label>Teléfono</label><span>${patient?.telefono || '—'}</span></div>
         <div class="field" style="grid-column:span 2"><label>Entidad</label><span>${patient?.entidad || '—'}</span></div>
     </div>
-
     <div class="alerta-banner alerta-${nivelAlerta === 'crítico' ? 'critico' : nivelAlerta === 'atención' ? 'atencion' : 'normal'}">
         ${alertaLabel}
     </div>
-
-    ${tableSection('Citas Programadas Perdidas', citasPerdidas, 'CITA PERDIDA',
-        'Los siguientes exámenes tenían fecha asignada pero no fueron atendidos. Han pasado más de 30 días desde la fecha programada.')}
-    ${tableSection('Exámenes que Requieren Renovación', exRenovar, 'RENOVAR',
-        'Superan los 3 meses de antigüedad. Se requiere su renovación antes de continuar el proceso cardiovascular.')}
-    ${tableSection('Exámenes para Corroborar', exCorroborar, 'CORROBORAR',
-        'Superan 1 mes de antigüedad. Se recomienda corroborar su vigencia con el médico tratante.')}
-    ${pendientes.length > 0 ? `
-    <section>
-        <h3>Exámenes Pendientes — Proceso Incompleto</h3>
-        <p class="nota">El paciente tiene <strong>${pendientes.length} examen(es) sin fecha asignada</strong>. Se requiere re-agendar el proceso de cita hasta cumplir con todos los exámenes dentro de los tiempos estipulados.</p>
-        <table>
-            <thead><tr><th>Código</th><th>Examen</th><th>Estado</th></tr></thead>
-            <tbody>${pendientes.map(ex => `<tr><td>${ex.codigo||'—'}</td><td>${ex.tipoExamen}</td><td><span class="badge badge-pendiente">PENDIENTE</span></td></tr>`).join('')}</tbody>
-        </table>
-    </section>` : ''}
+    ${tableSection('Citas Programadas Perdidas', citasPerdidas, 'CITA PERDIDA', 'Los siguientes exámenes tenían fecha asignada pero no fueron atendidos.')}
+    ${tableSection('Exámenes que Requieren Renovación', exRenovar, 'RENOVAR', 'Superan los 3 meses de antigüedad.')}
+    ${tableSection('Exámenes para Corroborar', exCorroborar, 'CORROBORAR', 'Superan 1 mes de antigüedad.')}
+    ${pendientes.length > 0 ? `<section><h3>Exámenes Pendientes</h3><table><thead><tr><th>Código</th><th>Examen</th><th>Estado</th></tr></thead><tbody>${pendientes.map(ex => `<tr><td>${ex.codigo||'—'}</td><td>${ex.tipoExamen}</td><td><span class="badge badge-pendiente">PENDIENTE</span></td></tr>`).join('')}</tbody></table></section>` : ''}
     ${tableSection('Exámenes Realizados Vigentes', exVigentes, 'VIGENTE', '')}
     ${tableSection('Citas Próximas Programadas', citasFuturas, 'PROGRAMADA', '')}
-
     <footer>
         <span>Auro Bot · Módulo Cardiovascular</span>
         <span>${fechaInforme} · Cédula: ${patient?.documento}</span>
     </footer>
-
     <script>window.onload = function(){ window.print(); setTimeout(()=>window.close(), 800); }</script>
 </body></html>`;
 
         const win = window.open('', '_blank', 'width=900,height=700');
-        if (win) {
-            win.document.write(html);
-            win.document.close();
-        }
+        if (win) { win.document.write(html); win.document.close(); }
     };
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
             style={{ background: 'rgba(8,7,12,0.85)', backdropFilter: 'blur(8px)' }}
             onClick={e => e.target === e.currentTarget && onClose()}>
-
             <div className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl shadow-2xl"
                 style={{ background: 'rgba(20,18,28,0.98)', border: '1px solid rgba(130,99,177,0.3)' }}>
-
-                {/* Header del modal */}
                 <div className="sticky top-0 z-10 flex items-center justify-between px-6 py-4 border-b"
                     style={{ background: 'rgba(20,18,28,0.98)', borderColor: 'rgba(130,99,177,0.2)' }}>
                     <div className="flex items-center gap-3">
@@ -428,24 +860,17 @@ function ReportModal({ patient, programados, pendientes, realizados, onClose }) 
                         <X size={15} />
                     </button>
                 </div>
-
                 <div className="p-6 flex flex-col gap-5">
-
-                    {/* Fecha y datos del paciente */}
                     <div className="flex items-center justify-between">
                         <div className="flex flex-col gap-0.5">
-                            <span className="text-[10px] uppercase tracking-widest font-semibold"
-                                style={{ color: 'rgba(161,227,216,0.5)' }}>Fecha del informe</span>
+                            <span className="text-[10px] uppercase tracking-widest font-semibold" style={{ color: 'rgba(161,227,216,0.5)' }}>Fecha del informe</span>
                             <span className="text-xs font-medium" style={{ color: 'rgba(245,245,247,0.7)' }}>{fechaInforme}</span>
                         </div>
                         <div className="flex flex-col gap-0.5 text-right">
-                            <span className="text-[10px] uppercase tracking-widest font-semibold"
-                                style={{ color: 'rgba(161,227,216,0.5)' }}>Cédula</span>
+                            <span className="text-[10px] uppercase tracking-widest font-semibold" style={{ color: 'rgba(161,227,216,0.5)' }}>Cédula</span>
                             <span className="text-xs font-mono font-bold" style={{ color: '#C4AFED' }}>{patient?.documento}</span>
                         </div>
                     </div>
-
-                    {/* Banner nivel de alerta global */}
                     <div className="flex items-center gap-3 px-4 py-3 rounded-xl"
                         style={{ background: bgAlerta, border: `1px solid ${borderAlerta}` }}>
                         <ShieldAlert size={18} style={{ color: colorAlerta, flexShrink: 0 }} />
@@ -460,183 +885,49 @@ function ReportModal({ patient, programados, pendientes, realizados, onClose }) 
                             </p>
                         </div>
                     </div>
-
-                    {/* ── Sección: Citas perdidas ── */}
                     {citasPerdidas.length > 0 && (
-                        <ReportSection
-                            icon={<XCircle size={14} color="#F9A8A8" />}
-                            title="Citas Programadas Perdidas"
-                            color="rgba(177,64,64,0.15)"
-                            border="rgba(177,64,64,0.3)"
-                            titleColor="#F9A8A8"
-                        >
-                            <p className="text-xs mb-3" style={{ color: 'rgba(237,175,175,0.7)' }}>
-                                Los siguientes exámenes tenían fecha asignada pero <strong>no fueron atendidos</strong>.
-                                Se considera cita perdida cuando han pasado más de 30 días desde la fecha programada.
-                            </p>
-                            {citasPerdidas.map(ex => (
-                                <ReportItem
-                                    key={ex.id}
-                                    codigo={ex.codigo}
-                                    nombre={ex.tipoExamen}
-                                    fecha={ex.fecha}
-                                    badge="CITA PERDIDA"
-                                    badgeColor="rgba(177,64,64,0.3)"
-                                    badgeText="#F9A8A8"
-                                    nota={`Han transcurrido ${diffMonths(ex.fecha)} mes(es) desde la fecha programada.`}
-                                />
-                            ))}
+                        <ReportSection icon={<XCircle size={14} color="#F9A8A8" />} title="Citas Programadas Perdidas" color="rgba(177,64,64,0.15)" border="rgba(177,64,64,0.3)" titleColor="#F9A8A8">
+                            <p className="text-xs mb-3" style={{ color: 'rgba(237,175,175,0.7)' }}>Han pasado más de 30 días desde la fecha programada.</p>
+                            {citasPerdidas.map(ex => <ReportItem key={ex.id} codigo={ex.codigo} nombre={ex.tipoExamen} fecha={ex.fecha} badge="CITA PERDIDA" badgeColor="rgba(177,64,64,0.3)" badgeText="#F9A8A8" nota={`Han transcurrido ${diffMonths(ex.fecha)} mes(es).`} />)}
                         </ReportSection>
                     )}
-
-                    {/* ── Sección: Exámenes a renovar ── */}
                     {exRenovar.length > 0 && (
-                        <ReportSection
-                            icon={<RefreshCw size={14} color="#F9A8A8" />}
-                            title="Exámenes que Requieren Renovación"
-                            color="rgba(177,64,64,0.1)"
-                            border="rgba(177,64,64,0.25)"
-                            titleColor="#F9A8A8"
-                        >
-                            <p className="text-xs mb-3" style={{ color: 'rgba(237,175,175,0.7)' }}>
-                                Los siguientes exámenes realizados <strong>superan los 3 meses</strong> de antigüedad.
-                                Se requiere su <strong>renovación</strong> antes de continuar con el proceso cardiovascular.
-                            </p>
-                            {exRenovar.map(ex => (
-                                <ReportItem
-                                    key={ex.id}
-                                    codigo={ex.codigo}
-                                    nombre={ex.tipoExamen}
-                                    fecha={ex.fecha}
-                                    badge="RENOVAR"
-                                    badgeColor="rgba(177,64,64,0.25)"
-                                    badgeText="#F9A8A8"
-                                    nota={`Realizado hace ${diffMonths(ex.fecha)} meses — Vigencia vencida.`}
-                                />
-                            ))}
+                        <ReportSection icon={<RefreshCw size={14} color="#F9A8A8" />} title="Requieren Renovación" color="rgba(177,64,64,0.1)" border="rgba(177,64,64,0.25)" titleColor="#F9A8A8">
+                            <p className="text-xs mb-3" style={{ color: 'rgba(237,175,175,0.7)' }}>Superan los 3 meses de antigüedad.</p>
+                            {exRenovar.map(ex => <ReportItem key={ex.id} codigo={ex.codigo} nombre={ex.tipoExamen} fecha={ex.fecha} badge="RENOVAR" badgeColor="rgba(177,64,64,0.25)" badgeText="#F9A8A8" nota={`Realizado hace ${diffMonths(ex.fecha)} meses.`} />)}
                         </ReportSection>
                     )}
-
-                    {/* ── Sección: Exámenes a corroborar ── */}
                     {exCorroborar.length > 0 && (
-                        <ReportSection
-                            icon={<AlertTriangle size={14} color="#FCD34D" />}
-                            title="Exámenes para Corroborar"
-                            color="rgba(251,191,36,0.08)"
-                            border="rgba(251,191,36,0.25)"
-                            titleColor="#FCD34D"
-                        >
-                            <p className="text-xs mb-3" style={{ color: 'rgba(252,211,77,0.7)' }}>
-                                Los siguientes exámenes <strong>superan 1 mes</strong> de antigüedad.
-                                Se recomienda <strong>corroborar su vigencia</strong> con el médico tratante antes de continuar la cita.
-                            </p>
-                            {exCorroborar.map(ex => (
-                                <ReportItem
-                                    key={ex.id}
-                                    codigo={ex.codigo}
-                                    nombre={ex.tipoExamen}
-                                    fecha={ex.fecha}
-                                    badge="CORROBORAR"
-                                    badgeColor="rgba(251,191,36,0.18)"
-                                    badgeText="#FCD34D"
-                                    nota={`Realizado hace ${diffMonths(ex.fecha)} mes(es) — Verificar vigencia.`}
-                                />
-                            ))}
+                        <ReportSection icon={<AlertTriangle size={14} color="#FCD34D" />} title="Para Corroborar" color="rgba(251,191,36,0.08)" border="rgba(251,191,36,0.25)" titleColor="#FCD34D">
+                            <p className="text-xs mb-3" style={{ color: 'rgba(252,211,77,0.7)' }}>Superan 1 mes de antigüedad.</p>
+                            {exCorroborar.map(ex => <ReportItem key={ex.id} codigo={ex.codigo} nombre={ex.tipoExamen} fecha={ex.fecha} badge="CORROBORAR" badgeColor="rgba(251,191,36,0.18)" badgeText="#FCD34D" nota={`Realizado hace ${diffMonths(ex.fecha)} mes(es).`} />)}
                         </ReportSection>
                     )}
-
-                    {/* ── Sección: Exámenes pendientes ── */}
                     {pendientes.length > 0 && (
-                        <ReportSection
-                            icon={<AlertCircle size={14} color="#F9A8A8" />}
-                            title="Exámenes Pendientes — Proceso Incompleto"
-                            color="rgba(177,64,64,0.1)"
-                            border="rgba(177,64,64,0.25)"
-                            titleColor="#F9A8A8"
-                        >
-                            <p className="text-xs mb-3" style={{ color: 'rgba(237,175,175,0.7)' }}>
-                                El paciente tiene <strong>{pendientes.length} examen(es) sin fecha asignada</strong>.
-                                Se requiere <strong>re-agendar el proceso de cita</strong> desde el inicio hasta
-                                cumplir con todos los exámenes dentro de los tiempos estipulados.
-                            </p>
-                            {pendientes.map(ex => (
-                                <ReportItem
-                                    key={ex.id}
-                                    codigo={ex.codigo}
-                                    nombre={ex.tipoExamen}
-                                    badge="PENDIENTE"
-                                    badgeColor="rgba(177,64,64,0.2)"
-                                    badgeText="#EDAFAF"
-                                    nota="Sin fecha asignada — Re-agendar."
-                                />
-                            ))}
+                        <ReportSection icon={<AlertCircle size={14} color="#F9A8A8" />} title="Exámenes Pendientes" color="rgba(177,64,64,0.1)" border="rgba(177,64,64,0.25)" titleColor="#F9A8A8">
+                            <p className="text-xs mb-3" style={{ color: 'rgba(237,175,175,0.7)' }}>{pendientes.length} examen(es) sin fecha asignada.</p>
+                            {pendientes.map(ex => <ReportItem key={ex.id} codigo={ex.codigo} nombre={ex.tipoExamen} badge="PENDIENTE" badgeColor="rgba(177,64,64,0.2)" badgeText="#EDAFAF" nota="Sin fecha asignada." />)}
                         </ReportSection>
                     )}
-
-                    {/* ── Sección: Exámenes vigentes ── */}
                     {exVigentes.length > 0 && (
-                        <ReportSection
-                            icon={<CheckCircle2 size={14} color="#A1E3D8" />}
-                            title="Exámenes Realizados Vigentes"
-                            color="rgba(161,227,216,0.05)"
-                            border="rgba(161,227,216,0.15)"
-                            titleColor="#A1E3D8"
-                        >
-                            {exVigentes.map(ex => (
-                                <ReportItem
-                                    key={ex.id}
-                                    codigo={ex.codigo}
-                                    nombre={ex.tipoExamen}
-                                    fecha={ex.fecha}
-                                    badge="VIGENTE"
-                                    badgeColor="rgba(161,227,216,0.15)"
-                                    badgeText="#A1E3D8"
-                                    nota="Dentro del período de vigencia."
-                                />
-                            ))}
+                        <ReportSection icon={<CheckCircle2 size={14} color="#A1E3D8" />} title="Vigentes" color="rgba(161,227,216,0.05)" border="rgba(161,227,216,0.15)" titleColor="#A1E3D8">
+                            {exVigentes.map(ex => <ReportItem key={ex.id} codigo={ex.codigo} nombre={ex.tipoExamen} fecha={ex.fecha} badge="VIGENTE" badgeColor="rgba(161,227,216,0.15)" badgeText="#A1E3D8" nota="Dentro del período de vigencia." />)}
                         </ReportSection>
                     )}
-
-                    {/* ── Citas futuras ── */}
                     {citasFuturas.length > 0 && (
-                        <ReportSection
-                            icon={<Calendar size={14} color="#C4AFED" />}
-                            title="Citas Próximas Programadas"
-                            color="rgba(130,99,177,0.08)"
-                            border="rgba(130,99,177,0.2)"
-                            titleColor="#C4AFED"
-                        >
-                            {citasFuturas.map(ex => (
-                                <ReportItem
-                                    key={ex.id}
-                                    codigo={ex.codigo}
-                                    nombre={ex.tipoExamen}
-                                    fecha={ex.fecha}
-                                    badge="PROGRAMADA"
-                                    badgeColor="rgba(130,99,177,0.2)"
-                                    badgeText="#C4AFED"
-                                    nota="Cita futura activa."
-                                />
-                            ))}
+                        <ReportSection icon={<Calendar size={14} color="#C4AFED" />} title="Citas Próximas" color="rgba(130,99,177,0.08)" border="rgba(130,99,177,0.2)" titleColor="#C4AFED">
+                            {citasFuturas.map(ex => <ReportItem key={ex.id} codigo={ex.codigo} nombre={ex.tipoExamen} fecha={ex.fecha} badge="PROGRAMADA" badgeColor="rgba(130,99,177,0.2)" badgeText="#C4AFED" nota="Cita futura activa." />)}
                         </ReportSection>
                     )}
-
-                    {/* Footer */}
-                    <div className="flex items-center justify-between pt-2 border-t"
-                        style={{ borderColor: 'rgba(130,99,177,0.15)' }}>
-                        <span className="text-[10px]" style={{ color: 'rgba(245,245,247,0.2)' }}>
-                            Auro Bot · Módulo Cardiovascular · {fechaInforme}
-                        </span>
+                    <div className="flex items-center justify-between pt-2 border-t" style={{ borderColor: 'rgba(130,99,177,0.15)' }}>
+                        <span className="text-[10px]" style={{ color: 'rgba(245,245,247,0.2)' }}>Auro Bot · Módulo Cardiovascular · {fechaInforme}</span>
                         <div className="flex items-center gap-2">
-                            {/* Botón Descargar PDF */}
-                            <button id="btn-download-pdf"
-                                onClick={downloadPDF}
+                            <button id="btn-download-pdf" onClick={downloadPDF}
                                 className="flex items-center gap-2 text-xs font-bold px-4 py-2 rounded-lg transition-all"
                                 style={{ background: 'linear-gradient(135deg,rgba(130,99,177,0.4),rgba(177,64,64,0.4))', color: '#E2D4FF', border: '1px solid rgba(130,99,177,0.5)' }}
-                                onMouseEnter={e => { e.currentTarget.style.background = 'linear-gradient(135deg,rgba(130,99,177,0.7),rgba(177,64,64,0.7))'; e.currentTarget.style.boxShadow = '0 0 20px rgba(130,99,177,0.4)'; }}
-                                onMouseLeave={e => { e.currentTarget.style.background = 'linear-gradient(135deg,rgba(130,99,177,0.4),rgba(177,64,64,0.4))'; e.currentTarget.style.boxShadow = 'none'; }}>
-                                <Download size={12} />
-                                Descargar PDF
+                                onMouseEnter={e => { e.currentTarget.style.background = 'linear-gradient(135deg,rgba(130,99,177,0.7),rgba(177,64,64,0.7))'; }}
+                                onMouseLeave={e => { e.currentTarget.style.background = 'linear-gradient(135deg,rgba(130,99,177,0.4),rgba(177,64,64,0.4))'; }}>
+                                <Download size={12} /> Descargar PDF
                             </button>
                             <button id="btn-close-report-footer" onClick={onClose}
                                 className="text-xs font-semibold px-4 py-2 rounded-lg transition-all"
@@ -647,7 +938,6 @@ function ReportModal({ patient, programados, pendientes, realizados, onClose }) 
                             </button>
                         </div>
                     </div>
-
                 </div>
             </div>
         </div>
@@ -680,14 +970,8 @@ function ReportItem({ codigo, nombre, fecha, badge, badgeColor, badgeText, nota 
                     )}
                     <span className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>{nombre}</span>
                 </div>
-                {fecha && (
-                    <p className="text-[11px] mt-0.5" style={{ color: 'rgba(245,245,247,0.35)' }}>
-                        {formatDate(fecha)}
-                    </p>
-                )}
-                {nota && (
-                    <p className="text-[11px] mt-0.5 italic" style={{ color: 'rgba(245,245,247,0.4)' }}>{nota}</p>
-                )}
+                {fecha && <p className="text-[11px] mt-0.5" style={{ color: 'rgba(245,245,247,0.35)' }}>{formatDate(fecha)}</p>}
+                {nota  && <p className="text-[11px] mt-0.5 italic" style={{ color: 'rgba(245,245,247,0.4)' }}>{nota}</p>}
             </div>
             <span className="text-[10px] font-bold px-2 py-1 rounded-md flex-shrink-0 mt-0.5"
                 style={{ background: badgeColor, color: badgeText }}>
@@ -697,20 +981,83 @@ function ReportItem({ codigo, nombre, fecha, badge, badgeColor, badgeText, nota 
     );
 }
 
+// ─── InfoField editable ───────────────────────────────────────────────────────
+function InfoFieldEditable({ icon: Icon, label, value, editValue, editing, onChange, full }) {
+    return (
+        <div className={full ? 'col-span-2' : ''}>
+            <p className="text-[10px] font-semibold uppercase tracking-wider mb-0.5"
+                style={{ color: 'rgba(161,227,216,0.5)' }}>
+                {label}
+            </p>
+            {editing ? (
+                <input
+                    type="text"
+                    value={editValue}
+                    onChange={e => onChange(e.target.value)}
+                    className="w-full px-2 py-1.5 rounded-lg text-sm outline-none transition-all"
+                    style={{
+                        background: 'rgba(15,14,19,0.8)',
+                        border: '1px solid rgba(130,99,177,0.4)',
+                        color: 'var(--text-primary)',
+                    }}
+                />
+            ) : (
+                <div className="flex items-center gap-1.5">
+                    <Icon size={11} style={{ color: '#A1E3D8', opacity: 0.6, flexShrink: 0 }} />
+                    <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+                        {value || '—'}
+                    </span>
+                </div>
+            )}
+        </div>
+    );
+}
+
+function InfoField({ icon: Icon, label, value, full }) {
+    return (
+        <div className={full ? 'col-span-2' : ''}>
+            <p className="text-[10px] font-semibold uppercase tracking-wider mb-0.5"
+                style={{ color: 'rgba(161,227,216,0.5)' }}>
+                {label}
+            </p>
+            <div className="flex items-center gap-1.5">
+                <Icon size={11} style={{ color: '#A1E3D8', opacity: 0.6, flexShrink: 0 }} />
+                <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+                    {value || '—'}
+                </span>
+            </div>
+        </div>
+    );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function CardiovascularPage() {
-    const [searchId, setSearchId] = useState('');
-    // 'all' | 'year' | 'month'
-    const [dateFilter, setDateFilter] = useState('all');
-    const [showReport, setShowReport] = useState(false);
-    const [loading, setLoading] = useState(false);
-    const [patient, setPatient] = useState(MOCK_PATIENT);
+    const [searchId, setSearchId]       = useState('');
+    const [dateFilter, setDateFilter]   = useState('all');
+    const [showReport, setShowReport]   = useState(false);
+    const [loading, setLoading]         = useState(false);
+    const [patient, setPatient]         = useState(MOCK_PATIENT);
     const [programados, setProgramados] = useState(MOCK_PROGRAMADOS);
-    const [pendientes, setPendientes] = useState(MOCK_PENDIENTES);
-    const [realizados, setRealizados] = useState(MOCK_REALIZADOS);
-    const [sendingId, setSendingId] = useState(null);
+    const [pendientes, setPendientes]   = useState(MOCK_PENDIENTES);
+    const [realizados, setRealizados]   = useState(MOCK_REALIZADOS);
+    const [sendingId, setSendingId]     = useState(null);
     const [agendandoId, setAgendandoId] = useState(null);
-    const [toast, setToast] = useState(null);
+    const [toast, setToast]             = useState(null);
+
+    // ── Edición de paciente ───────────────────────────────────────────────────
+    const [editingPatient, setEditingPatient] = useState(false);
+    const [editPhone, setEditPhone]           = useState('');
+    const [savingPatient, setSavingPatient]   = useState(false);
+
+    // ── Eliminación de programado ─────────────────────────────────────────────
+    const [eliminandoExamen, setEliminandoExamen] = useState(null); // examen en proceso
+    const [eliminandoId, setEliminandoId]         = useState(null);
+
+    // ── Historial ─────────────────────────────────────────────────────────────
+    const [showHistorial, setShowHistorial] = useState(false);
+
+    // ── Programar cita ────────────────────────────────────────────────────────
+    const [showProgramarCita, setShowProgramarCita] = useState(false);
 
     // ── Filtro por fecha ──────────────────────────────────────────────────────
     const applyDateFilter = (list) => {
@@ -730,7 +1077,7 @@ export default function CardiovascularPage() {
 
     const showToast = (text, type = 'success') => {
         setToast({ text, type });
-        setTimeout(() => setToast(null), 3000);
+        setTimeout(() => setToast(null), 3500);
     };
 
     const handleSearch = useCallback(async () => {
@@ -740,6 +1087,7 @@ export default function CardiovascularPage() {
         setProgramados([]);
         setPendientes([]);
         setRealizados([]);
+        setEditingPatient(false);
         try {
             const res = await fetch(`${API_BASE}/api/cardiovascular/patient/${searchId.trim()}`);
             if (!res.ok) throw new Error('Paciente no encontrado');
@@ -755,18 +1103,43 @@ export default function CardiovascularPage() {
         }
     }, [searchId]);
 
+    // ── Guardar edición del paciente ──────────────────────────────────────────
+    const handleSavePatient = async () => {
+        if (!patient) return;
+        setSavingPatient(true);
+        try {
+            const res = await fetch(`${API_BASE}/api/cardiovascular/patient/${patient.documento}`, {
+                method:  'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body:    JSON.stringify({ telefono: editPhone }),
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                showToast(`❌ ${data.error || 'Error al guardar'}`, 'error');
+            } else {
+                setPatient(p => ({ ...p, telefono: data.telefono }));
+                setEditingPatient(false);
+                showToast('✅ Teléfono actualizado correctamente');
+            }
+        } catch {
+            showToast('❌ Error de conexión', 'error');
+        } finally {
+            setSavingPatient(false);
+        }
+    };
+
+    // ── Recordatorio WhatsApp ─────────────────────────────────────────────────
     const handleRemind = async (id, tipoExamen) => {
         setSendingId(id);
         try {
-            // encodeURIComponent: el id puede contener '*' (ej: prog-*902207) que rompe la URL en Express
             const res = await fetch(`${API_BASE}/api/cardiovascular/remind/${encodeURIComponent(id)}`, {
-                method: 'POST',
+                method:  'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     cedula:   patient?.documento,
-                    telefono: patient?.telefono,   // ← número real de WhatsApp del paciente
-                    examen:   tipoExamen
-                })
+                    telefono: patient?.telefono,
+                    examen:   tipoExamen,
+                }),
             });
             if (res.ok) showToast('✅ Recordatorio enviado por WhatsApp');
             else {
@@ -777,6 +1150,40 @@ export default function CardiovascularPage() {
             showToast('❌ Error de conexión', 'error');
         } finally {
             setSendingId(null);
+        }
+    };
+
+    // ── Eliminar programación ─────────────────────────────────────────────────
+    const handleEliminar = (examen) => setEliminandoExamen(examen);
+
+    const confirmarEliminacion = async (motivo) => {
+        if (!eliminandoExamen || !patient) return;
+        setEliminandoId(eliminandoExamen.id);
+        try {
+            const res = await fetch(`${API_BASE}/api/cardiovascular/programado/remove`, {
+                method:  'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    cedula:     patient.documento,
+                    examCodigo: eliminandoExamen.codigo,
+                    tipoExamen: eliminandoExamen.tipoExamen,
+                    fecha:      eliminandoExamen.fecha,
+                    doctor:     eliminandoExamen.doctor,
+                    motivo:     motivo || null,
+                }),
+            });
+            if (res.ok) {
+                setProgramados(prev => prev.filter(e => e.id !== eliminandoExamen.id));
+                setEliminandoExamen(null);
+                showToast('✅ Programación eliminada y registrada en historial');
+            } else {
+                const d = await res.json().catch(() => ({}));
+                showToast(`❌ ${d.error || 'Error al eliminar'}`, 'error');
+            }
+        } catch {
+            showToast('❌ Error de conexión', 'error');
+        } finally {
+            setEliminandoId(null);
         }
     };
 
@@ -794,16 +1201,16 @@ export default function CardiovascularPage() {
     };
 
     const cardStyle = {
-        background: 'rgba(26,23,33,0.85)',
-        border: '1px solid var(--border)',
-        borderRadius: '16px',
-        backdropFilter: 'blur(12px)',
+        background:    'rgba(26,23,33,0.85)',
+        border:        '1px solid var(--border)',
+        borderRadius:  '16px',
+        backdropFilter:'blur(12px)',
     };
 
     return (
         <div className="h-screen flex flex-col" style={{ background: 'var(--chat-bg)' }}>
 
-            {/* ── Modal de Informe ── */}
+            {/* ── Modales ── */}
             {showReport && patient && (
                 <ReportModal
                     patient={patient}
@@ -814,10 +1221,36 @@ export default function CardiovascularPage() {
                 />
             )}
 
-            {/* ── Subtle grid bg ── */}
-            <div className="fixed inset-0 chat-bg pointer-events-none" />
+            {eliminandoExamen && (
+                <EliminarModal
+                    examen={eliminandoExamen}
+                    loading={!!eliminandoId}
+                    onConfirm={confirmarEliminacion}
+                    onCancel={() => setEliminandoExamen(null)}
+                />
+            )}
 
-            {/* ── Glow blobs ── */}
+            {showHistorial && patient && (
+                <HistorialModal
+                    cedula={patient.documento}
+                    pacienteNombre={patient.nombre}
+                    onClose={() => setShowHistorial(false)}
+                />
+            )}
+
+            {showProgramarCita && patient && (
+                <ProgramarCitaModal
+                    patient={patient}
+                    onClose={() => setShowProgramarCita(false)}
+                    onSuccess={() => {
+                        setShowProgramarCita(false);
+                        showToast('✅ Cita programada y registrada en el historial');
+                    }}
+                />
+            )}
+
+            {/* ── Decorativos ── */}
+            <div className="fixed inset-0 chat-bg pointer-events-none" />
             <div className="fixed top-[-160px] left-[-160px] w-[600px] h-[600px] rounded-full pointer-events-none"
                 style={{ background: 'radial-gradient(circle, rgba(177,64,64,0.07) 0%, transparent 70%)', filter: 'blur(50px)' }} />
             <div className="fixed bottom-[-160px] right-[-160px] w-[600px] h-[600px] rounded-full pointer-events-none"
@@ -856,7 +1289,6 @@ export default function CardiovascularPage() {
                             Auro Bot · Cardiovascular
                         </span>
                     </div>
-                    {/* Botón Generar Informe */}
                     <button
                         id="btn-generar-informe"
                         onClick={() => setShowReport(true)}
@@ -864,7 +1296,7 @@ export default function CardiovascularPage() {
                         className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all"
                         style={{
                             background: patient ? 'linear-gradient(135deg, rgba(130,99,177,0.35) 0%, rgba(177,64,64,0.35) 100%)' : 'rgba(45,40,62,0.3)',
-                            color: patient ? '#E2D4FF' : 'rgba(245,245,247,0.2)',
+                            color:  patient ? '#E2D4FF' : 'rgba(245,245,247,0.2)',
                             border: patient ? '1px solid rgba(130,99,177,0.5)' : '1px solid rgba(45,40,62,0.5)',
                             cursor: patient ? 'pointer' : 'not-allowed',
                             boxShadow: patient ? '0 0 18px rgba(130,99,177,0.2)' : 'none',
@@ -884,11 +1316,7 @@ export default function CardiovascularPage() {
                 <div className="flex items-center gap-3 mb-6 flex-wrap">
                     {/* Search input */}
                     <div className="flex items-center gap-2 flex-1 min-w-[260px] px-4 py-2.5 rounded-xl"
-                        style={{
-                            background: 'rgba(15,14,19,0.8)',
-                            border: '1px solid var(--border)',
-                            maxWidth: '420px'
-                        }}>
+                        style={{ background: 'rgba(15,14,19,0.8)', border: '1px solid var(--border)', maxWidth: '420px' }}>
                         <Search size={15} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
                         <input
                             id="search-patient-id"
@@ -912,11 +1340,8 @@ export default function CardiovascularPage() {
                             background: loading ? 'rgba(177,64,64,0.5)' : '#B14040',
                             color: '#F5F5F7',
                             opacity: !searchId.trim() ? 0.5 : 1,
-                        }}
-                    >
-                        {loading
-                            ? <Loader2 size={14} className="animate-spin" />
-                            : <Search size={14} />}
+                        }}>
+                        {loading ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
                         Buscar
                     </button>
 
@@ -924,7 +1349,7 @@ export default function CardiovascularPage() {
                     <div className="flex items-center gap-1 rounded-xl p-1"
                         style={{ background: 'rgba(15,14,19,0.8)', border: '1px solid var(--border)' }}>
                         {[
-                            { key: 'all',   label: 'Mostrar todos' },
+                            { key: 'all',   label: 'Todos' },
                             { key: 'year',  label: 'Este año' },
                             { key: 'month', label: 'Este mes' },
                         ].map(({ key, label }) => {
@@ -937,16 +1362,36 @@ export default function CardiovascularPage() {
                                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
                                     style={{
                                         background: active ? 'rgba(177,64,64,0.3)' : 'transparent',
-                                        color: active ? '#F9A8A8' : 'var(--text-muted)',
+                                        color:  active ? '#F9A8A8' : 'var(--text-muted)',
                                         border: active ? '1px solid rgba(177,64,64,0.5)' : '1px solid transparent',
-                                    }}
-                                >
+                                    }}>
                                     <Calendar size={11} />
                                     {label}
                                 </button>
                             );
                         })}
                     </div>
+
+                    {/* ── Programar Cita ── */}
+                    <button
+                        id="btn-programar-cita"
+                        onClick={() => setShowProgramarCita(true)}
+                        disabled={!patient}
+                        className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all"
+                        style={{
+                            background: patient
+                                ? 'linear-gradient(135deg, rgba(130,99,177,0.4) 0%, rgba(177,64,64,0.4) 100%)'
+                                : 'rgba(45,40,62,0.3)',
+                            color:  patient ? '#E2D4FF' : 'rgba(245,245,247,0.2)',
+                            border: patient ? '1px solid rgba(130,99,177,0.45)' : '1px solid rgba(45,40,62,0.5)',
+                            cursor: patient ? 'pointer' : 'not-allowed',
+                            boxShadow: patient ? '0 0 14px rgba(130,99,177,0.18)' : 'none',
+                        }}
+                        onMouseEnter={e => patient && (e.currentTarget.style.boxShadow = '0 0 24px rgba(130,99,177,0.35)')}
+                        onMouseLeave={e => patient && (e.currentTarget.style.boxShadow = '0 0 14px rgba(130,99,177,0.18)')}>
+                        <CalendarPlus size={14} />
+                        Programar Cita
+                    </button>
                 </div>
 
                 {/* ── Two-column grid ── */}
@@ -957,13 +1402,64 @@ export default function CardiovascularPage() {
 
                         {/* ── Datos del Paciente ── */}
                         <div className="p-5" style={cardStyle}>
-                            <SectionHeader icon={User} title="Datos del Paciente" />
+                            <SectionHeader
+                                icon={User}
+                                title="Datos del Paciente"
+                                action={patient && (
+                                    <div className="flex items-center gap-2">
+                                        {editingPatient ? (
+                                            <>
+                                                <button
+                                                    onClick={handleSavePatient}
+                                                    disabled={savingPatient}
+                                                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all"
+                                                    style={{ background: 'rgba(161,227,216,0.18)', color: '#A1E3D8', border: '1px solid rgba(161,227,216,0.35)' }}
+                                                    onMouseEnter={e => e.currentTarget.style.background = 'rgba(161,227,216,0.3)'}
+                                                    onMouseLeave={e => e.currentTarget.style.background = 'rgba(161,227,216,0.18)'}>
+                                                    {savingPatient
+                                                        ? <Loader2 size={11} className="animate-spin" />
+                                                        : <Save size={11} />}
+                                                    Guardar
+                                                </button>
+                                                <button
+                                                    onClick={() => setEditingPatient(false)}
+                                                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+                                                    style={{ background: 'rgba(245,245,247,0.07)', color: 'rgba(245,245,247,0.4)', border: '1px solid rgba(245,245,247,0.1)' }}
+                                                    onMouseEnter={e => e.currentTarget.style.background = 'rgba(245,245,247,0.14)'}
+                                                    onMouseLeave={e => e.currentTarget.style.background = 'rgba(245,245,247,0.07)'}>
+                                                    <X size={11} /> Cancelar
+                                                </button>
+                                            </>
+                                        ) : (
+                                            <button
+                                                onClick={() => { setEditPhone(patient.telefono || ''); setEditingPatient(true); }}
+                                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+                                                style={{ background: 'rgba(130,99,177,0.15)', color: '#C4AFED', border: '1px solid rgba(130,99,177,0.3)' }}
+                                                onMouseEnter={e => e.currentTarget.style.background = 'rgba(130,99,177,0.28)'}
+                                                onMouseLeave={e => e.currentTarget.style.background = 'rgba(130,99,177,0.15)'}>
+                                                <Edit3 size={11} /> Editar
+                                            </button>
+                                        )}
+                                    </div>
+                                )}
+                            />
                             {patient ? (
                                 <div className="grid grid-cols-2 gap-x-6 gap-y-3 mt-1">
-                                    <InfoField icon={User} label="Nombre" value={patient.nombre} />
-                                    <InfoField icon={Hash} label="Cédula" value={patient.documento} />
-                                    <InfoField icon={Clock} label="Edad" value={patient.edad ? `${patient.edad} años` : '—'} />
-                                    <InfoField icon={Phone} label="Teléfono" value={patient.telefono} />
+                                    <InfoField icon={User}     label="Nombre"   value={patient.nombre} />
+                                    <InfoField icon={Hash}     label="Cédula"   value={patient.documento} />
+                                    <InfoField icon={Clock}    label="Edad"     value={patient.edad ? `${patient.edad} años` : '—'} />
+                                    {editingPatient ? (
+                                        <InfoFieldEditable
+                                            icon={Phone}
+                                            label="Teléfono"
+                                            value={patient.telefono}
+                                            editValue={editPhone}
+                                            editing={true}
+                                            onChange={setEditPhone}
+                                        />
+                                    ) : (
+                                        <InfoField icon={Phone} label="Teléfono" value={patient.telefono} />
+                                    )}
                                     <InfoField icon={Building2} label="Entidad" value={patient.entidad} full />
                                 </div>
                             ) : (
@@ -988,9 +1484,18 @@ export default function CardiovascularPage() {
                                 icon={Clock}
                                 title="Exámenes Programados"
                                 count={programadosFiltrados.length}
+                                action={patient && (
+                                    <button
+                                        onClick={() => setShowHistorial(true)}
+                                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+                                        style={{ background: 'rgba(130,99,177,0.15)', color: '#C4AFED', border: '1px solid rgba(130,99,177,0.3)' }}
+                                        onMouseEnter={e => e.currentTarget.style.background = 'rgba(130,99,177,0.28)'}
+                                        onMouseLeave={e => e.currentTarget.style.background = 'rgba(130,99,177,0.15)'}>
+                                        <History size={11} /> Historial
+                                    </button>
+                                )}
                             />
-                            <div className="flex-1 overflow-y-auto pr-1"
-                                style={{ maxHeight: '450px' }}>
+                            <div className="flex-1 overflow-y-auto pr-1" style={{ maxHeight: '450px' }}>
                                 {programadosFiltrados.length === 0
                                     ? <EmptyState message={patient ? 'No hay exámenes programados en este período' : 'Busca un paciente para ver sus exámenes'} />
                                     : programadosFiltrados.map(ex => (
@@ -998,7 +1503,9 @@ export default function CardiovascularPage() {
                                             key={ex.id}
                                             examen={ex}
                                             onRemind={handleRemind}
+                                            onEliminar={handleEliminar}
                                             sendingId={sendingId}
+                                            eliminandoId={eliminandoId}
                                         />
                                     ))
                                 }
@@ -1050,24 +1557,6 @@ export default function CardiovascularPage() {
                     </div>
                 </div>
             </main>
-        </div>
-    );
-}
-
-// ─── InfoField helper ─────────────────────────────────────────────────────────
-function InfoField({ icon: Icon, label, value, full }) {
-    return (
-        <div className={full ? 'col-span-2' : ''}>
-            <p className="text-[10px] font-semibold uppercase tracking-wider mb-0.5"
-                style={{ color: 'rgba(161,227,216,0.5)' }}>
-                {label}
-            </p>
-            <div className="flex items-center gap-1.5">
-                <Icon size={11} style={{ color: '#A1E3D8', opacity: 0.6, flexShrink: 0 }} />
-                <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
-                    {value || '—'}
-                </span>
-            </div>
         </div>
     );
 }
