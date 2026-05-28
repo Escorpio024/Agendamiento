@@ -340,8 +340,16 @@ function HistorialModal({ cedula, pacienteNombre, onClose }) {
     useEffect(() => {
         fetch(`${API_BASE}/api/cardiovascular/historial/${cedula}`)
             .then(r => r.json())
-            .then(data => { setRegistros(data); setLoading(false); })
-            .catch(e  => { setError(e.message); setLoading(false); });
+            .then(data => {
+                // Guard: the API might return an error object instead of an array
+                if (Array.isArray(data)) {
+                    setRegistros(data);
+                } else {
+                    setError(data?.error || 'Respuesta inesperada del servidor');
+                }
+                setLoading(false);
+            })
+            .catch(e => { setError(e.message); setLoading(false); });
     }, [cedula]);
 
     const accionStyle = (accion) => accion === 'ELIMINADO'
@@ -393,10 +401,10 @@ function HistorialModal({ cedula, pacienteNombre, onClose }) {
                             <p className="text-xs" style={{ color: '#F9A8A8' }}>❌ {error}</p>
                         </div>
                     )}
-                    {!loading && !error && registros.length === 0 && (
+                    {!loading && !error && Array.isArray(registros) && registros.length === 0 && (
                         <EmptyState message="No hay movimientos registrados para este paciente" />
                     )}
-                    {!loading && !error && registros.map(reg => {
+                    {!loading && !error && Array.isArray(registros) && registros.map(reg => {
                         const st = accionStyle(reg.accion);
                         return (
                             <div key={reg.id} className="flex items-start gap-3 px-4 py-3 rounded-xl mb-2"
@@ -445,7 +453,7 @@ function HistorialModal({ cedula, pacienteNombre, onClose }) {
                 <div className="px-6 py-3 border-t flex justify-between items-center flex-shrink-0"
                     style={{ borderColor: 'rgba(130,99,177,0.15)' }}>
                     <span className="text-[10px]" style={{ color: 'rgba(245,245,247,0.2)' }}>
-                        {registros.length} registro(s) · Cédula: {cedula}
+                        {Array.isArray(registros) ? registros.length : 0} registro(s) · Cédula: {cedula}
                     </span>
                     <button onClick={onClose}
                         className="text-xs font-semibold px-4 py-2 rounded-lg transition-all"
@@ -1047,6 +1055,7 @@ export default function CardiovascularPage() {
     // ── Edición de paciente ───────────────────────────────────────────────────
     const [editingPatient, setEditingPatient] = useState(false);
     const [editPhone, setEditPhone]           = useState('');
+    const [editPhoneErr, setEditPhoneErr]     = useState('');
     const [savingPatient, setSavingPatient]   = useState(false);
 
     // ── Eliminación de programado ─────────────────────────────────────────────
@@ -1106,23 +1115,31 @@ export default function CardiovascularPage() {
     // ── Guardar edición del paciente ──────────────────────────────────────────
     const handleSavePatient = async () => {
         if (!patient) return;
+        // ── Validar formato teléfono antes de enviar ──
+        const digitsOnly = editPhone.replace(/\D/g, '');
+        if (digitsOnly.length < 7 || digitsOnly.length > 15) {
+            setEditPhoneErr('Ingresa un número válido (7 a 15 dígitos, sin espacios ni guiones).');
+            return;
+        }
+        setEditPhoneErr('');
         setSavingPatient(true);
         try {
             const res = await fetch(`${API_BASE}/api/cardiovascular/patient/${patient.documento}`, {
                 method:  'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body:    JSON.stringify({ telefono: editPhone }),
+                body:    JSON.stringify({ telefono: digitsOnly }),
             });
             const data = await res.json();
             if (!res.ok) {
-                showToast(`❌ ${data.error || 'Error al guardar'}`, 'error');
+                setEditPhoneErr(data.error || 'Error al guardar');
             } else {
                 setPatient(p => ({ ...p, telefono: data.telefono }));
                 setEditingPatient(false);
+                setEditPhoneErr('');
                 showToast('✅ Teléfono actualizado correctamente');
             }
         } catch {
-            showToast('❌ Error de conexión', 'error');
+            setEditPhoneErr('Error de conexión con el servidor.');
         } finally {
             setSavingPatient(false);
         }
@@ -1449,16 +1466,30 @@ export default function CardiovascularPage() {
                                     <InfoField icon={Hash}     label="Cédula"   value={patient.documento} />
                                     <InfoField icon={Clock}    label="Edad"     value={patient.edad ? `${patient.edad} años` : '—'} />
                                     {editingPatient ? (
-                                        <InfoFieldEditable
-                                            icon={Phone}
-                                            label="Teléfono"
-                                            value={patient.telefono}
-                                            editValue={editPhone}
-                                            editing={true}
-                                            onChange={setEditPhone}
-                                        />
+                                        <div>
+                                            <p className="text-[10px] font-semibold uppercase tracking-wider mb-0.5"
+                                                style={{ color: 'rgba(161,227,216,0.5)' }}>Teléfono / Celular</p>
+                                            <div className="flex items-center gap-2">
+                                                <Phone size={11} style={{ color: '#A1E3D8', opacity: 0.6, flexShrink: 0 }} />
+                                                <input
+                                                    type="tel"
+                                                    value={editPhone}
+                                                    onChange={e => { setEditPhone(e.target.value); setEditPhoneErr(''); }}
+                                                    placeholder="Ej: 3001234567"
+                                                    className="flex-1 px-2 py-1.5 rounded-lg text-sm outline-none transition-all"
+                                                    style={{
+                                                        background: 'rgba(15,14,19,0.8)',
+                                                        border: editPhoneErr ? '1px solid rgba(177,64,64,0.7)' : '1px solid rgba(130,99,177,0.4)',
+                                                        color: 'var(--text-primary)',
+                                                    }}
+                                                />
+                                            </div>
+                                            {editPhoneErr && (
+                                                <p className="text-[10px] mt-1" style={{ color: '#F9A8A8' }}>⚠️ {editPhoneErr}</p>
+                                            )}
+                                        </div>
                                     ) : (
-                                        <InfoField icon={Phone} label="Teléfono" value={patient.telefono} />
+                                        <InfoField icon={Phone} label="Teléfono / Celular" value={patient.telefono} />
                                     )}
                                     <InfoField icon={Building2} label="Entidad" value={patient.entidad} full />
                                 </div>
