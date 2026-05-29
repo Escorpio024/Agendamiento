@@ -4,9 +4,25 @@ const BACKEND_URL = 'http://localhost:3001';
 
 export default function MessageList({ messages, currentBuffer }) {
     const endRef = useRef(null);
+    const containerRef = useRef(null);
+    const isFirstLoad = useRef(true);
 
     useEffect(() => {
-        endRef.current?.scrollIntoView({ behavior: 'smooth' });
+        if (!containerRef.current) return;
+        
+        if (isFirstLoad.current) {
+            endRef.current?.scrollIntoView({ behavior: 'auto' });
+            if (messages && messages.length > 0) {
+                isFirstLoad.current = false;
+            }
+            return;
+        }
+
+        const { scrollTop, scrollHeight, clientHeight } = containerRef.current;
+        // Si el usuario está cerca del final (a menos de 150px), hacemos auto-scroll para el nuevo mensaje
+        if (scrollHeight - scrollTop - clientHeight < 150) {
+            endRef.current?.scrollIntoView({ behavior: 'smooth' });
+        }
     }, [messages]);
 
     const renderMedia = (msg) => {
@@ -51,7 +67,7 @@ export default function MessageList({ messages, currentBuffer }) {
     }
 
     return (
-        <div className="flex-1 overflow-y-auto p-6 bg-[#0F0E13]" style={{
+        <div ref={containerRef} className="flex-1 overflow-y-auto p-6 bg-[#0F0E13]" style={{
             backgroundImage: 'linear-gradient(to bottom, rgba(255,255,255,0.02) 1px, transparent 1px), linear-gradient(to right, rgba(255,255,255,0.02) 1px, transparent 1px)',
             backgroundSize: '20px 20px'
         }}>

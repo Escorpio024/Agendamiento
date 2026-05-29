@@ -1013,7 +1013,7 @@ client.on('message', async (msg) => {
                     // Skip topic-switch for time-preference words, explicit time selection phrases, or dates
                     const isTimePref = /\b(tarde|noche|ma[nñ]ana|manana|morning|afternoon)\b/i.test(message) || 
                                        /(?:a\s+las?|las?)\s+\d{1,2}/i.test(message) || 
-                                       /\d{1,2}[:\.]\d{2}/i.test(message) ||
+                                       /\d{1,2}\s*[:\.]\s*\d{2}/i.test(message) ||
                                        /opci[oó]n|la\s+\d/i.test(message) ||
                                        /primera|segunda|tercera/i.test(message) ||
                                        /\b(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\b/i.test(message) ||
