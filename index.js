@@ -1857,10 +1857,13 @@ client.on('message', async (msg) => {
                 );
 
                 if (firstAvail === null) {
-                    // Timeout o sin disponibilidad — pedir fecha directamente al usuario
-                    console.warn('[BOT] ⏱️ getNextAvailableSlots tardó más de 25s — solicitando fecha al usuario');
-                    session.step = 'AI_ASKING_DATE';
-                    await replyFn('¡Claro que sí! ¿Para qué fecha, día de la semana o mes te gustaría agendar tu cita? 📅');
+                    // Timeout — el HIS está lento. Resetear sesión y pedir reintento.
+                    console.warn('[BOT] ⏱️ getNextAvailableSlots tardó más de 25s — solicitando reintento al usuario');
+                    session.step = 'WELCOME'; // Resetear para que el próximo mensaje vuelva a buscar fechas
+                    await replyFn(
+                        '⚠️ El sistema está un poco lento en este momento al cargar los horarios disponibles.\n\n' +
+                        'Por favor escríbeme de nuevo *\'quiero una cita\'* en unos segundos para intentarlo otra vez. 😊'
+                    );
                     return;
                 }
 
