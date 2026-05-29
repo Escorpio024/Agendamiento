@@ -432,7 +432,7 @@ client.on('message', async (msg) => {
         // Palabras que solo son exit si estamos dentro de un proceso de agendamiento
         const bookingOnlyExitWords = ['cancelar'];
 
-        const bookingSteps = ['AI_ASKING_TYPE', 'AI_ASKING_DATE', 'AI_SELECT_DAY', 'AI_SELECT_TIME', 'AI_CONFIRM_PHONE', 'AI_ENTER_PHONE'];
+        const bookingSteps = ['AI_ASKING_TYPE', 'AI_ASKING_DATE', 'AI_SELECT_DAY', 'AI_SELECT_TIME', 'AI_CONFIRM_PHONE', 'AI_ENTER_PHONE', 'CONSULTAR_OTRO_CEDULA'];
         const isBookingStep = bookingSteps.includes(session.step);
 
         const isGlobalExit    = globalExitWords.some(w => cleanExitMsg.includes(w));
@@ -888,6 +888,72 @@ client.on('message', async (msg) => {
         }
 
 
+
+        // ─── STEP: CONSULTAR_OTRO_CEDULA — pedir cédula de otro paciente para consultar ───
+        if (session.step === 'CONSULTAR_OTRO_CEDULA') {
+            const cedula = text.replace(/\D/g, '');
+            if (cedula.length < 5) {
+                await reply('⚠️ Por favor escríbeme un número de cédula válido (mínimo 5 dígitos).');
+                return;
+            }
+            // Buscar el paciente en la BD
+            const searchTerms = [cedula, cedula.padStart(14, ' '), cedula.padStart(14, '0')];
+            let pacOtro = null;
+            try {
+                const nuiOtro = await prisma.pacienteNUI.findFirst({
+                    where: { OR: searchTerms.flatMap(t => [{ KCN_COD_NUI: t }, { KCN_COD: t }]) }
+                });
+                if (nuiOtro) {
+                    pacOtro = { nombre: nuiOtro.KCN_NOM?.trim(), cod: nuiOtro.KCN_COD || nuiOtro.KCN_COD_NUI };
+                } else {
+                    const factOtro = await prisma.tMUSUARIOSFACTURACION.findFirst({
+                        where: { OR: searchTerms.flatMap(t => [{ KC2_OACOD_NUI: t }, { KC2_COD: t }]) }
+                    });
+                    if (factOtro) {
+                        pacOtro = {
+                            nombre: `${factOtro.KC2_PNOMBRE || ''} ${factOtro.KC2_PAPELLIDO || ''}`.trim(),
+                            cod: factOtro.KC2_COD
+                        };
+                    }
+                }
+            } catch (e) {
+                console.error('[CONSULTAR_OTRO] Error buscando paciente:', e.message);
+            }
+
+            if (!pacOtro) {
+                session.step = 'WELCOME';
+                await reply(
+                    `❌ No encontré ningún paciente con la cédula *${cedula}* en nuestra base de datos.\n\n` +
+                    `¿Deseas intentar con otra cédula o prefieres consultar tus propias citas?`
+                );
+                return;
+            }
+
+            // Encontrado — buscar sus citas
+            const nombreOtro = pacOtro.nombre
+                ? pacOtro.nombre.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ')
+                : 'el paciente';
+            const citasOtro = await availabilityService.getUserAppointments(pacOtro.cod);
+            const futurasOtro = citasOtro.filter(c => {
+                const dp = new Date(c.fecha + 'T12:00:00');
+                dp.setHours(23, 59, 59);
+                return dp >= new Date();
+            });
+
+            session.step = 'WELCOME';
+
+            if (futurasOtro.length > 0) {
+                const citasTexto = futurasOtro.map(c => `• ${formatDateNatural(c.fecha)} a las ${c.hora} (${c.tipo})`).join('\n');
+                await reply(
+                    `📋 Citas próximas de *${nombreOtro}*:\n\n${citasTexto}\n\n¿Necesitas algo más?`
+                );
+            } else {
+                await reply(
+                    `📋 *${nombreOtro}* no tiene citas futuras agendadas en el sistema.\n\n¿Necesitas algo más?`
+                );
+            }
+            return;
+        }
 
         // --- PROCESAMIENTO CON IA ---
         // TODOS los mensajes de pacientes registrados van a IA.
@@ -1495,6 +1561,21 @@ client.on('message', async (msg) => {
                     await handleConsultarHorarios(userId, message, session, replyFn, entities);
                     break;
                 case 'CONSULTAR_CITA': {
+                    // Detectar si quiere consultar a OTRO paciente (familiar, etc.)
+                    const _msgLow = message.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+                    const _quiereOtro = /\b(otro|otra|familiar|hijo|hija|esposo|esposa|mama|papa|hermano|hermana|paciente|persona|diferente)\b/.test(_msgLow);
+
+                    if (_quiereOtro) {
+                        // Pedir la CÉDULA del otro paciente (no el nombre)
+                        session.step = 'CONSULTAR_OTRO_CEDULA';
+                        await replyFn(
+                            `Claro, puedo consultar las citas de otra persona. 📋\n\n` +
+                            `Por favor escríbeme la *cédula* (número de documento) de la persona que deseas consultar:`
+                        );
+                        return;
+                    }
+
+                    // Consultar citas del paciente de la sesión activa
                     const citas = await availabilityService.getUserAppointments(session.id || session.phone);
                     const futuras = citas.filter(c => {
                         const datePart = new Date(c.fecha + 'T12:00:00');
@@ -1508,8 +1589,11 @@ client.on('message', async (msg) => {
                             `El usuario pregunta por sus citas. Informale: \n${citasTexto}`, { citas: citasTexto }, message, historyStr);
                         await replyFn(resp);
                     } else {
-                        const resp = await aiService.generateNaturalResponse('El usuario pregunta por sus citas pero no tiene ninguna agendada.', {}, message, historyStr);
-                        await replyFn(resp);
+                        const resp = await aiService.generateNaturalResponse(
+                            `El usuario ${session.name} pregunta por sus citas pero no tiene ninguna cita futura agendada.`, {}, message, historyStr);
+                        await replyFn(
+                            resp + `\n\n¿Deseas consultar las citas de *otra persona*? Si es así, escríbeme su cédula.`
+                        );
                     }
                     break;
                 }
