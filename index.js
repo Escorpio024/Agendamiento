@@ -222,8 +222,8 @@ const processedMessages = new Set();
 const processingLocks = new Map();
 
 async function withSenderLock(sender, fn) {
-    // Si ya hay un proceso activo para este sender, esperar máximo 45 segundos
-    const MAX_LOCK_WAIT_MS = 45000;
+    // Si ya hay un proceso activo para este sender, esperar máximo 30 segundos
+    const MAX_LOCK_WAIT_MS = 30000;
     const lockStart = Date.now();
     while (processingLocks.get(sender)) {
         if (Date.now() - lockStart > MAX_LOCK_WAIT_MS) {
@@ -971,7 +971,13 @@ client.on('message', async (msg) => {
             if (_wantsAppt) {
                 session.tipoCita = 'medicina general';
                 session.step = null;
-                await processWithAI(sender, text, session, reply);
+                try {
+                    await processWithAI(sender, text, session, reply);
+                } catch (e) {
+                    console.error('[FAST-PATH] ❌ Error inesperado en processWithAI:', e.message);
+                    session.step = 'AI_ASKING_DATE';
+                    await reply('Claro que sí 😊 ¿Para qué fecha te gustaría buscar la cita?');
+                }
                 return;
             }
         }
@@ -1840,12 +1846,30 @@ client.on('message', async (msg) => {
                 const nowLocal = new Date();
                 const todayStr = `${nowLocal.getFullYear()}-${String(nowLocal.getMonth()+1).padStart(2,'0')}-${String(nowLocal.getDate()).padStart(2,'0')}`;
 
-                // Buscar el primer día con disponibilidad para encontrar el punto de partida del cronograma
-                const firstAvail = await availabilityService.getNextAvailableSlots(todayStr, session.tipoCita, session.doctorPreferido, session.sede);
+                // Helper: query con timeout para no colgar el lock
+                const withTimeout = (promise, ms, fallback) =>
+                    Promise.race([promise, new Promise(r => setTimeout(() => r(fallback), ms))]);
+
+                // Buscar el primer día con disponibilidad
+                const firstAvail = await withTimeout(
+                    availabilityService.getNextAvailableSlots(todayStr, session.tipoCita, session.doctorPreferido, session.sede),
+                    25000, null
+                );
+
+                if (firstAvail === null) {
+                    // Timeout o sin disponibilidad — pedir fecha directamente al usuario
+                    console.warn('[BOT] ⏱️ getNextAvailableSlots tardó más de 25s — solicitando fecha al usuario');
+                    session.step = 'AI_ASKING_DATE';
+                    await replyFn('¡Claro que sí! ¿Para qué fecha, día de la semana o mes te gustaría agendar tu cita? 📅');
+                    return;
+                }
 
                 if (firstAvail) {
                     // Con el primer día disponible como ancla, obtener la semana completa (7 días desde ahí)
-                    const weekDays = await availabilityService.getWeekAvailability(firstAvail.date, session.tipoCita, session.doctorPreferido, 7, 45, session.sede);
+                    const weekDays = await withTimeout(
+                        availabilityService.getWeekAvailability(firstAvail.date, session.tipoCita, session.doctorPreferido, 7, 45, session.sede),
+                        25000, []
+                    );
 
                     if (weekDays.length > 0) {
                         session.diasDisponibles = weekDays;
