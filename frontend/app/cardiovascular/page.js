@@ -1404,6 +1404,10 @@ export default function CardiovascularPage() {
                 />
             )}
 
+            {showControlesViewer && (
+                <ControlesViewerModal onClose={() => setShowControlesViewer(false)} />
+            )}
+
             {/* ── Decorativos ── */}
             <div className="fixed inset-0 chat-bg pointer-events-none" />
             <div className="fixed top-[-160px] left-[-160px] w-[600px] h-[600px] rounded-full pointer-events-none"
