@@ -207,8 +207,8 @@ class ControlCVDService {
                 const dd = record.fechaControl.substring(6, 8);
                 const fechaFormat = `${yyyy}-${mm}-${dd}`;
 
-                // Buscar cupos (Medicina General sirve para agendar PYP_CARDIO)
-                const slots = await availabilityService.getAvailableSlots(fechaFormat, 'medicina general', null, true);
+                // Buscar cupos (Medicina General sirve para agendar PYP_CARDIO, buscando exclusivamente al doctor P Y P MEDICOS)
+                const slots = await availabilityService.getAvailableSlots(fechaFormat, 'medicina general', 'p y p medicos', true);
 
                 if (!slots || slots.length === 0) {
                     logger.warn(`[Control CVD] No se encontraron horarios el ${fechaFormat} para el paciente ${record.cedula}. No se agendó automáticamente.`);
