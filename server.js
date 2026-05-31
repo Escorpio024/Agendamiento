@@ -226,6 +226,32 @@ app.post('/api/appointments/:id/remind', async (req, res) => {
 
 // ─── MÓDULO CARDIOVASCULAR ────────────────────────────────────────────────────
 
+// GET /api/cardiovascular/controles — Listar controles a 3 meses
+app.get('/api/cardiovascular/controles', async (req, res) => {
+    try {
+        const controles = await botPrisma.controlReminder.findMany({
+            orderBy: { fechaControl: 'asc' }
+        });
+        res.json(controles);
+    } catch (error) {
+        logger.error('[CARDIOVASCULAR] Error obteniendo controles:', error.message);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+// DELETE /api/cardiovascular/controles/:id — Eliminar control a 3 meses
+app.delete('/api/cardiovascular/controles/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        await botPrisma.controlReminder.delete({ where: { id } });
+        res.json({ success: true });
+    } catch (error) {
+        logger.error('[CARDIOVASCULAR] Error eliminando control:', error.message);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+
 // Códigos CUPS de exámenes cardiovasculares (exactos tal como aparecen en Xenco)
 const CVD_CODES = [
     // Creatinina en suero / orina

@@ -6,7 +6,7 @@ import {
     Clock, User, Phone, Building2, Hash, Stethoscope,
     FileText, ChevronRight, AlertCircle, Activity,
     HeartPulse, Loader2, ClipboardList, X, XCircle, AlertTriangle, RefreshCw, ShieldAlert, Download,
-    Edit3, Save, Trash2, History, CalendarPlus, ChevronDown, Check, RotateCcw
+    Edit3, Save, Trash2, History, CalendarPlus, ChevronDown, Check, RotateCcw, CalendarCheck2
 } from 'lucide-react';
 
 // ─── Config ──────────────────────────────────────────────────────────────────
@@ -1038,6 +1038,143 @@ function InfoField({ icon: Icon, label, value, full }) {
     );
 }
 
+// ─── ControlesViewerModal ──────────────────────────────────────────────────
+function ControlesViewerModal({ onClose }) {
+    const [controles, setControles] = useState([]);
+    const [loading, setLoading] = useState(true);
+
+    const loadControles = useCallback(() => {
+        setLoading(true);
+        fetch(`${API_BASE}/api/cardiovascular/controles`)
+            .then(res => res.json())
+            .then(data => {
+                setControles(data);
+                setLoading(false);
+            })
+            .catch(() => setLoading(false));
+    }, []);
+
+    useEffect(() => { loadControles(); }, [loadControles]);
+
+    const handleEliminar = async (id) => {
+        if (!confirm('¿Seguro que deseas cancelar y eliminar este control programado?')) return;
+        try {
+            const res = await fetch(`${API_BASE}/api/cardiovascular/controles/${id}`, { method: 'DELETE' });
+            if (res.ok) {
+                loadControles();
+            } else {
+                alert('Error al eliminar');
+            }
+        } catch (e) {
+            alert('Error de red');
+        }
+    };
+
+    const getEstadoBadge = (estado) => {
+        if (estado === 'BOOKED_AND_REMINDED') return { text: 'AGENDADO Y AVISADO', bg: 'rgba(161,227,216,0.15)', color: '#A1E3D8' };
+        if (estado === 'FAILED') return { text: 'FALLIDO', bg: 'rgba(177,64,64,0.15)', color: '#F9A8A8' };
+        return { text: 'PENDIENTE', bg: 'rgba(251,191,36,0.15)', color: '#FCD34D' };
+    };
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            style={{ background: 'rgba(8,7,12,0.85)', backdropFilter: 'blur(8px)' }}
+            onClick={e => e.target === e.currentTarget && onClose()}>
+            <div className="relative w-full max-w-4xl max-h-[90vh] overflow-hidden rounded-2xl flex flex-col shadow-2xl"
+                style={{ background: 'rgba(20,18,28,0.98)', border: '1px solid rgba(130,99,177,0.3)' }}>
+                {/* Header */}
+                <div className="flex items-center justify-between px-6 py-4 border-b flex-shrink-0"
+                    style={{ borderColor: 'rgba(130,99,177,0.2)' }}>
+                    <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl flex items-center justify-center"
+                            style={{ background: 'linear-gradient(135deg, rgba(130,99,177,0.4) 0%, rgba(90,68,144,0.4) 100%)' }}>
+                            <CalendarCheck2 size={20} color="#C4AFED" />
+                        </div>
+                        <div>
+                            <h2 className="text-base font-bold" style={{ color: '#F5F5F7' }}>Visor de Controles a 3 Meses</h2>
+                            <p className="text-xs" style={{ color: 'rgba(196,175,237,0.7)' }}>
+                                {loading ? 'Cargando...' : `${controles.length} pacientes programados para seguimiento CVD`}
+                            </p>
+                        </div>
+                    </div>
+                    <button onClick={onClose}
+                        className="w-8 h-8 rounded-lg flex items-center justify-center transition-all"
+                        style={{ background: 'rgba(245,245,247,0.06)', color: 'rgba(245,245,247,0.5)' }}
+                        onMouseEnter={e => e.currentTarget.style.background = 'rgba(177,64,64,0.2)'}
+                        onMouseLeave={e => e.currentTarget.style.background = 'rgba(245,245,247,0.06)'}>
+                        <X size={15} />
+                    </button>
+                </div>
+
+                {/* List */}
+                <div className="flex-1 overflow-y-auto p-6">
+                    {loading ? (
+                        <div className="flex items-center justify-center py-20">
+                            <Loader2 size={30} className="animate-spin text-[#8263B1]" />
+                        </div>
+                    ) : controles.length === 0 ? (
+                        <EmptyState message="No hay controles a 3 meses programados actualmente." />
+                    ) : (
+                        <div className="grid grid-cols-1 gap-3">
+                            {controles.map(c => {
+                                const badge = getEstadoBadge(c.estado);
+                                return (
+                                    <div key={c.id} className="flex items-center justify-between p-4 rounded-xl border transition-all"
+                                        style={{ background: 'rgba(45,40,62,0.4)', borderColor: 'rgba(130,99,177,0.2)' }}
+                                        onMouseEnter={e => e.currentTarget.style.background = 'rgba(45,40,62,0.7)'}
+                                        onMouseLeave={e => e.currentTarget.style.background = 'rgba(45,40,62,0.4)'}>
+                                        <div className="flex-1 flex flex-col gap-2">
+                                            <div className="flex items-center gap-3">
+                                                <span className="font-bold text-sm" style={{ color: '#F5F5F7' }}>{c.paciente}</span>
+                                                <span className="text-xs font-mono" style={{ color: '#C4AFED', background: 'rgba(130,99,177,0.15)', padding: '2px 6px', borderRadius: '4px' }}>
+                                                    CC: {c.cedula}
+                                                </span>
+                                                <span className="text-[10px] font-bold px-2 py-0.5 rounded uppercase" style={{ background: badge.bg, color: badge.color }}>
+                                                    {badge.text}
+                                                </span>
+                                            </div>
+                                            <div className="flex items-center gap-6 mt-1">
+                                                <div className="flex items-center gap-1.5">
+                                                    <History size={13} style={{ color: 'rgba(245,245,247,0.4)' }} />
+                                                    <span className="text-xs" style={{ color: 'rgba(245,245,247,0.6)' }}>
+                                                        Original: {formatDate(c.fechaCitaOriginal)}
+                                                    </span>
+                                                </div>
+                                                <div className="flex items-center gap-1.5">
+                                                    <Calendar size={13} style={{ color: '#A1E3D8' }} />
+                                                    <span className="text-xs font-semibold" style={{ color: '#A1E3D8' }}>
+                                                        Control a buscar: {formatDate(c.fechaControl)}
+                                                    </span>
+                                                </div>
+                                                <div className="flex items-center gap-1.5">
+                                                    <Bell size={13} style={{ color: 'rgba(245,245,247,0.4)' }} />
+                                                    <span className="text-xs" style={{ color: 'rgba(245,245,247,0.6)' }}>
+                                                        Aviso se enviará el: {formatDate(c.fechaRecordatorio)}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div className="flex-shrink-0 ml-4">
+                                            <button onClick={() => handleEliminar(c.id)}
+                                                className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all"
+                                                style={{ background: 'rgba(177,64,64,0.15)', color: '#F9A8A8', border: '1px solid rgba(177,64,64,0.3)' }}
+                                                onMouseEnter={e => e.currentTarget.style.background = 'rgba(177,64,64,0.25)'}
+                                                onMouseLeave={e => e.currentTarget.style.background = 'rgba(177,64,64,0.15)'}>
+                                                <Trash2 size={13} />
+                                                Cancelar
+                                            </button>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function CardiovascularPage() {
     const [searchId, setSearchId]       = useState('');
@@ -1067,6 +1204,7 @@ export default function CardiovascularPage() {
 
     // ── Programar cita ────────────────────────────────────────────────────────
     const [showProgramarCita, setShowProgramarCita] = useState(false);
+    const [showControlesViewer, setShowControlesViewer] = useState(false);
 
     // ── Filtro por fecha ──────────────────────────────────────────────────────
     const applyDateFilter = (list) => {
@@ -1322,6 +1460,20 @@ export default function CardiovascularPage() {
                         onMouseLeave={e => patient && (e.currentTarget.style.boxShadow = '0 0 18px rgba(130,99,177,0.2)')}>
                         <ClipboardList size={13} />
                         Generar Informe
+                    </button>
+                    <button
+                        onClick={() => setShowControlesViewer(true)}
+                        className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all"
+                        style={{
+                            background: 'linear-gradient(135deg, rgba(130,99,177,0.3) 0%, rgba(90,68,144,0.3) 100%)',
+                            color: '#E2D4FF',
+                            border: '1px solid rgba(130,99,177,0.4)',
+                            boxShadow: '0 0 15px rgba(130,99,177,0.15)',
+                        }}
+                        onMouseEnter={e => e.currentTarget.style.boxShadow = '0 0 25px rgba(130,99,177,0.3)'}
+                        onMouseLeave={e => e.currentTarget.style.boxShadow = '0 0 15px rgba(130,99,177,0.15)'}>
+                        <CalendarCheck2 size={13} />
+                        Visor Controles 3 Meses
                     </button>
                 </div>
             </header>
