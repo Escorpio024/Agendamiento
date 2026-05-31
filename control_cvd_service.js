@@ -119,7 +119,7 @@ class ControlCVDService {
                 SELECT KC3_MEDICO, KC3_FCH, KC3_COD, KC3_ESTADO
                 FROM TMCITASUSUARIOS
                 WHERE KC3_FCH = ${todayDec}
-                  AND (KC3_ESTADO IS NULL OR KC3_ESTADO <> 'CA')
+                  AND KC3_NUM > 0
                   AND KC3_COD IS NOT NULL
                   AND (KC3_ARTIC LIKE '%890301%')
                   AND LEN(LTRIM(RTRIM(KC3_COD))) = 14
