@@ -723,6 +723,14 @@ function getFieldsByEspecialidad(espCod) {
         KC3_ARTIC:          '*230101',
         KC3_C_COSTO:        '7312',
     };
+    // PyP / Riesgo Cardiovascular
+    if (cod === 'PYP_CARDIO') return {
+        KC3_TIPO:           'VD',
+        KC3_TIPO_SERVICIO:  201,
+        KC3_GRUPO_ATENCION: 'O',
+        KC3_ARTIC:          '890301-7',
+        KC3_C_COSTO:        '7310',
+    };
     // Medicina General (999), Pediatría (510), Ginecología (280), etc.
     // Valor nativo confirmado: TIPO='VD', GRUPO='O'
     return {

@@ -69,3 +69,15 @@ model CvdCitaProgramada {
   notas       String?
   creadoEn    DateTime @default(now())
 }
+
+model ControlReminder {
+  id                String   @id @default(cuid())
+  cedula            String
+  paciente          String
+  medicoOriginal    String?
+  fechaCitaOriginal String
+  fechaControl      String
+  fechaRecordatorio String
+  estado            String   @default("PENDING")
+  createdAt         DateTime @default(now())
+}

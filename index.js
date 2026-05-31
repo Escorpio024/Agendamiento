@@ -13,6 +13,7 @@ const availabilityService = require('./availability_service');
 const { findPaciente, updateCelular, dateToDecimal, codigoToNombreServicio } = require('./availability_service');
 const chatService = require('./chat_service');
 const reminderService = require('./reminder_service');
+const controlCvdService = require('./control_cvd_service');
 const server = require('./server');
 const mediaHandler = require('./media_handler');
 
@@ -128,6 +129,7 @@ client.on('ready', async () => {
     console.log('✅ Bot médico con IA listo.');
     server.start(client);
     reminderService.init(client);
+    controlCvdService.init(client);
     await loadHistoricalMessages();
 });
 
