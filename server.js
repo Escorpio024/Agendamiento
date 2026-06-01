@@ -10,6 +10,7 @@ const fs = require('fs');
 const botPrisma = require('./dbBot');
 const medicalPrisma = require('./db');
 const logger = require('./logger');
+const controlCVDService = require('./control_cvd_service');
 
 // ─── CORS: Configurable desde .env ────────────────────────────────────────────
 // En desarrollo: CORS_ORIGIN=* (permisivo)
@@ -232,7 +233,16 @@ app.get('/api/cardiovascular/controles', async (req, res) => {
         const controles = await botPrisma.controlReminder.findMany({
             orderBy: { fechaControl: 'asc' }
         });
-        res.json(controles);
+        
+        const enriched = await Promise.all(controles.map(async (c) => {
+            let telefono = await controlCVDService.getWhatsAppId(c.cedula);
+            if (telefono) {
+                telefono = telefono.replace('@c.us', '');
+            }
+            return { ...c, telefono: telefono || 'SIN TELÉFONO' };
+        }));
+
+        res.json(enriched);
     } catch (error) {
         logger.error('[CARDIOVASCULAR] Error obteniendo controles:', error.message);
         res.status(500).json({ error: 'Internal Server Error' });

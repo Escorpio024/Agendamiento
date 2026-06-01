@@ -1129,10 +1129,13 @@ function ControlesViewerModal({ onClose }) {
                                         onMouseEnter={e => e.currentTarget.style.background = 'rgba(45,40,62,0.7)'}
                                         onMouseLeave={e => e.currentTarget.style.background = 'rgba(45,40,62,0.4)'}>
                                         <div className="flex-1 flex flex-col gap-2">
-                                            <div className="flex items-center gap-3">
+                                            <div className="flex items-center gap-3 mt-1">
                                                 <span className="font-bold text-sm" style={{ color: '#F5F5F7' }}>{c.paciente}</span>
-                                                <span className="text-xs font-mono" style={{ color: '#C4AFED', background: 'rgba(130,99,177,0.15)', padding: '2px 6px', borderRadius: '4px' }}>
+                                                <span className="text-xs font-mono flex items-center gap-1" style={{ color: '#C4AFED', background: 'rgba(130,99,177,0.15)', padding: '2px 6px', borderRadius: '4px' }}>
                                                     CC: {c.cedula}
+                                                </span>
+                                                <span className="text-xs font-mono flex items-center gap-1" style={{ color: c.telefono === 'SIN TELÉFONO' ? '#F9A8A8' : '#A1E3D8', background: c.telefono === 'SIN TELÉFONO' ? 'rgba(177,64,64,0.15)' : 'rgba(161,227,216,0.15)', padding: '2px 6px', borderRadius: '4px' }}>
+                                                    <Phone size={10} /> {c.telefono}
                                                 </span>
                                                 <span className="text-[10px] font-bold px-2 py-0.5 rounded uppercase" style={{ background: badge.bg, color: badge.color }}>
                                                     {badge.text}
