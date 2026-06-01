@@ -1048,7 +1048,12 @@ function ControlesViewerModal({ onClose }) {
         fetch(`${API_BASE}/api/cardiovascular/controles`)
             .then(res => res.json())
             .then(data => {
-                setControles(data);
+                if (Array.isArray(data)) {
+                    setControles(data);
+                } else {
+                    console.error('Error del servidor:', data);
+                    setControles([]);
+                }
                 setLoading(false);
             })
             .catch(() => setLoading(false));
