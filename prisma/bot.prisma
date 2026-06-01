@@ -76,6 +76,7 @@ model ControlReminder {
   paciente          String
   medicoOriginal    String?
   fechaCitaOriginal String
+  articuloCita      String?
   fechaControl      String
   fechaRecordatorio String
   estado            String   @default("PENDING")

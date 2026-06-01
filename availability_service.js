@@ -714,7 +714,11 @@ async function getAvailableSlots(fechaStr, tipo = 'medicina general', preferredD
 
 // Mapear especialidad a los campos nativos del Visor de Agenda
 function getFieldsByEspecialidad(espCod) {
-    const cod = String(espCod || '').trim();
+    const codRaw = String(espCod || '').trim();
+    const parts = codRaw.split('|');
+    const cod = parts[0];
+    const subCodigo = parts[1];
+
     // Odontología: ESP_COD 461
     if (cod === '461') return {
         KC3_TIPO:           'VOS',  // Visita Odontología
@@ -728,7 +732,7 @@ function getFieldsByEspecialidad(espCod) {
         KC3_TIPO:           'VD',
         KC3_TIPO_SERVICIO:  201,
         KC3_GRUPO_ATENCION: 'O',
-        KC3_ARTIC:          '890301-7',
+        KC3_ARTIC:          subCodigo || '890301-7',
         KC3_C_COSTO:        '7310',
     };
     // Medicina General (999), Pediatría (510), Ginecología (280), etc.

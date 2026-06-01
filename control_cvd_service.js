@@ -114,17 +114,18 @@ class ControlCVDService {
         try {
             const todayDec = this.dateToDecimal(new Date());
 
-            // Buscar citas de CVD ('890301-7' o '890301') de hoy que no estén canceladas
+            // Buscar citas de CVD exactas (controles válidos) finalizadas hoy
             const citasCvd = await prisma.$queryRaw`
-                SELECT KC3_MEDICO, KC3_FCH, KC3_COD, KC3_ESTADO
-                FROM TMCITASUSUARIOS
-                WHERE KC3_FCH = ${todayDec}
-                  AND KC3_NUM > 0
-                  AND KC3_COD IS NOT NULL
-                  AND (KC3_ARTIC LIKE '%890301%')
-                  AND LEN(LTRIM(RTRIM(KC3_COD))) = 14
-                  AND KC3_COD <> '00000000000000'
-                  AND CAST(KC3_COD AS BIGINT) > 0
+                SELECT c.KC3_MEDICO, c.KC3_FCH, c.KC3_COD, c.KC3_ESTADO, c.KC3_ARTIC, e.ENT_NOMBRE
+                FROM TMCITASUSUARIOS c
+                LEFT JOIN TMENTIDADES e ON e.ENT_COD = c.KC3_ENTIDAD
+                WHERE c.KC3_FCH = ${todayDec}
+                  AND c.KC3_NUM > 0
+                  AND c.KC3_COD IS NOT NULL
+                  AND LTRIM(RTRIM(c.KC3_ARTIC)) IN ('890301-7', '890301-8', '890301-12', '890301-13', '890301-14', '890301-15', '890301-16')
+                  AND LEN(LTRIM(RTRIM(c.KC3_COD))) = 14
+                  AND c.KC3_COD <> '00000000000000'
+                  AND CAST(c.KC3_COD AS BIGINT) > 0
             `;
 
             logger.info(`[Control CVD] Detección finalizada: ${citasCvd.length} citas CVD encontradas hoy (${todayDec})`);
@@ -143,9 +144,18 @@ class ControlCVDService {
 
                 if (exists) continue;
 
-                // Calcular fecha a 3 meses
+                // Definir cantidad de meses según la EPS
+                const entName = String(cita.ENT_NOMBRE || '').toUpperCase();
+                let monthsToAdd = 3; // Por defecto 3 meses
+                if (entName.includes('NUEVA EPS')) {
+                    monthsToAdd = 2;
+                } else if (entName.includes('SAVIA')) {
+                    monthsToAdd = 3;
+                }
+
+                // Calcular fecha a X meses
                 const d = new Date();
-                d.setMonth(d.getMonth() + 3);
+                d.setMonth(d.getMonth() + monthsToAdd);
 
                 // Ajustar si cae domingo (pasar a lunes)
                 if (d.getDay() === 0) { // 0 es Domingo
@@ -159,18 +169,21 @@ class ControlCVDService {
                 dRemind.setDate(dRemind.getDate() - 8);
                 const fechaRecordatorioStr = this.dateToString(dRemind);
 
+                const articuloValido = String(cita.KC3_ARTIC || '').trim();
+
                 await botPrisma.controlReminder.create({
                     data: {
                         cedula: cedula,
                         paciente: nombre,
                         medicoOriginal: String(cita.KC3_MEDICO),
                         fechaCitaOriginal: String(cita.KC3_FCH),
+                        articuloCita: articuloValido,
                         fechaControl: fechaControlStr,
                         fechaRecordatorio: fechaRecordatorioStr,
                         estado: 'PENDING'
                     }
                 });
-                logger.info(`[Control CVD] Registrado futuro control para ${cedula} - Control: ${fechaControlStr}, Recordatorio: ${fechaRecordatorioStr}`);
+                logger.info(`[Control CVD] Registrado futuro control para ${cedula} (EPS: ${entName}) a ${monthsToAdd} meses - Control: ${fechaControlStr}, Código: ${articuloValido}`);
             }
         } catch (e) {
             logger.error('[Control CVD] Error detectando citas:', e.message);
@@ -229,12 +242,14 @@ class ControlCVDService {
 
                 const pacData = { KC0_COD: record.cedula, zona: '99' }; 
                 
-                // Sobrescribimos el tipo en reserveSlot con 'PYP_CARDIO' para que getFieldsByEspecialidad modifique los campos nativos de la cita
+                const tipoEspecialidad = record.articuloCita ? `PYP_CARDIO|${record.articuloCita}` : 'PYP_CARDIO';
+
+                // Sobrescribimos el tipo en reserveSlot con 'PYP_CARDIO|cod' para que getFieldsByEspecialidad asigne el código correcto
                 const reserved = await availabilityService.reserveSlot(
                     fechaFormat, 
                     slot.time, 
                     waId, 
-                    'PYP_CARDIO', 
+                    tipoEspecialidad, 
                     slot.doctorId, 
                     pacData 
                 );
