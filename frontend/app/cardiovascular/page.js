@@ -1140,6 +1140,11 @@ function ControlesViewerModal({ onClose }) {
                                                 <span className="text-[10px] font-bold px-2 py-0.5 rounded uppercase" style={{ background: badge.bg, color: badge.color }}>
                                                     {badge.text}
                                                 </span>
+                                                {c.canceladaEnXenco && (
+                                                    <span className="text-[10px] font-bold px-2 py-0.5 rounded uppercase" style={{ background: 'rgba(239, 68, 68, 0.2)', color: '#FCA5A5', border: '1px solid rgba(239, 68, 68, 0.5)' }}>
+                                                        CANCELADA EN XENCO
+                                                    </span>
+                                                )}
                                             </div>
                                             <div className="flex items-center gap-6 mt-1">
                                                 <div className="flex items-center gap-1.5">

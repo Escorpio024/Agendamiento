@@ -80,5 +80,12 @@ model ControlReminder {
   fechaControl      String
   fechaRecordatorio String
   estado            String   @default("PENDING")
+  citaMedico        String?
+  citaFch           String?
+  citaHh            String?
+  citaMm            String?
+  citaZona          String?
+  citaSeqk          String?
+  citaHora          String?
   createdAt         DateTime @default(now())
 }

@@ -239,7 +239,40 @@ app.get('/api/cardiovascular/controles', async (req, res) => {
             if (telefono) {
                 telefono = telefono.replace('@c.us', '');
             }
-            return { ...c, telefono: telefono || 'SIN TELÉFONO' };
+            
+            // Si la cita ya está agendada, verificamos en tiempo real en Xenco si sigue activa o si el paciente la canceló.
+            let xencoEstado = null;
+            if (c.estado === 'BOOKED' || c.estado === 'BOOKED_AND_REMINDED') {
+                if (c.citaFch) {
+                    try {
+                        const cedula14 = c.cedula.padStart(14, '0');
+                        const cedulaSinCeros = c.cedula.replace(/^0+/, '');
+                        const sqlCita = `
+                            SELECT TOP 1 KC3_ESTADO 
+                            FROM TMCITASUSUARIOS 
+                            WHERE KC3_FCH = ${c.citaFch} 
+                              AND (KC3_COD = '${cedula14}' OR KC3_COD = '${cedulaSinCeros}' OR KC3_COD = '${c.cedula}')
+                              AND KC3_MEDICO = ${c.citaMedico || 0}
+                        `;
+                        const resCita = await medicalPrisma.$queryRawUnsafe(sqlCita);
+                        if (resCita && resCita.length > 0) {
+                            // En Xenco: C = Cancelada
+                            xencoEstado = String(resCita[0].KC3_ESTADO).trim();
+                        } else {
+                            // Si no se encontró la cita, asumimos que fue borrada/cancelada
+                            xencoEstado = 'C';
+                        }
+                    } catch (err) {
+                        logger.error('[CARDIOVASCULAR] Error consultando estado en Xenco:', err.message);
+                    }
+                }
+            }
+
+            return { 
+                ...c, 
+                telefono: telefono || 'SIN TELÉFONO',
+                canceladaEnXenco: xencoEstado === 'C'
+            };
         }));
 
         res.json(enriched);
