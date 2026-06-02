@@ -38,7 +38,14 @@ const MOCK_REALIZADOS = [];
 function formatDate(str) {
     if (!str) return '—';
     try {
-        const d = new Date(str.includes('T') ? str : str + 'T12:00:00');
+        let parsedStr = str;
+        // Si es formato YYYYMMDD (8 dígitos, sin guiones)
+        if (/^\d{8}$/.test(str)) {
+            parsedStr = `${str.slice(0, 4)}-${str.slice(4, 6)}-${str.slice(6, 8)}`;
+        }
+        
+        const d = new Date(parsedStr.includes('T') ? parsedStr : parsedStr + 'T12:00:00');
+        if (isNaN(d.getTime())) return str; // Retorna el string original si sigue siendo inválido
         return d.toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' });
     } catch { return str; }
 }
@@ -102,7 +109,7 @@ function EmptyState({ message }) {
 
 // ─── ExamenProgramadoRow — con botón Eliminar ─────────────────────────────────
 function ExamenProgramadoRow({ examen, onRemind, onEliminar, sendingId, eliminandoId }) {
-    const isSending    = sendingId   === examen.id;
+    const isSending = sendingId === examen.id;
     const isEliminando = eliminandoId === examen.id;
     return (
         <div className="flex items-center justify-between px-4 py-3 rounded-xl transition-all group"
@@ -334,8 +341,8 @@ function EliminarModal({ examen, onConfirm, onCancel, loading }) {
 // ─── Modal: Historial de movimientos ─────────────────────────────────────────
 function HistorialModal({ cedula, pacienteNombre, onClose }) {
     const [registros, setRegistros] = useState([]);
-    const [loading, setLoading]     = useState(true);
-    const [error, setError]         = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
 
     useEffect(() => {
         fetch(`${API_BASE}/api/cardiovascular/historial/${cedula}`)
@@ -470,19 +477,19 @@ function HistorialModal({ cedula, pacienteNombre, onClose }) {
 
 // ─── Modal: Programar Cita CVD ────────────────────────────────────────────────
 function ProgramarCitaModal({ patient, onClose, onSuccess }) {
-    const [medicos, setMedicos]         = useState([]);
+    const [medicos, setMedicos] = useState([]);
     const [loadMedicos, setLoadMedicos] = useState(true);
     const [form, setForm] = useState({
-        doctorId:     '',
+        doctorId: '',
         doctorNombre: '',
-        examCodigo:   '',
-        tipoExamen:   '',
-        fecha:        '',
-        hora:         '',
-        notas:        '',
+        examCodigo: '',
+        tipoExamen: '',
+        fecha: '',
+        hora: '',
+        notas: '',
     });
-    const [saving, setSaving]   = useState(false);
-    const [errMsg, setErrMsg]   = useState('');
+    const [saving, setSaving] = useState(false);
+    const [errMsg, setErrMsg] = useState('');
 
     useEffect(() => {
         fetch(`${API_BASE}/api/cardiovascular/medicos-cvd`)
@@ -495,8 +502,8 @@ function ProgramarCitaModal({ patient, onClose, onSuccess }) {
 
     const handleDoctorChange = (e) => {
         const opt = medicos.find(m => String(m.cod) === e.target.value);
-        setField('doctorId',     opt ? String(opt.cod) : '');
-        setField('doctorNombre', opt ? opt.nombre       : '');
+        setField('doctorId', opt ? String(opt.cod) : '');
+        setField('doctorNombre', opt ? opt.nombre : '');
     };
 
     const handleProcChange = (e) => {
@@ -510,18 +517,18 @@ function ProgramarCitaModal({ patient, onClose, onSuccess }) {
         setSaving(true); setErrMsg('');
         try {
             const res = await fetch(`${API_BASE}/api/cardiovascular/cita`, {
-                method:  'POST',
+                method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    cedula:       patient.documento,
-                    paciente:     patient.nombre,
-                    doctorId:     form.doctorId     || null,
+                    cedula: patient.documento,
+                    paciente: patient.nombre,
+                    doctorId: form.doctorId || null,
                     doctorNombre: form.doctorNombre || null,
-                    examCodigo:   form.examCodigo,
-                    tipoExamen:   form.tipoExamen,
-                    fecha:        form.fecha  || null,
-                    hora:         form.hora   || null,
-                    notas:        form.notas  || null,
+                    examCodigo: form.examCodigo,
+                    tipoExamen: form.tipoExamen,
+                    fecha: form.fecha || null,
+                    hora: form.hora || null,
+                    notas: form.notas || null,
                 }),
             });
             if (!res.ok) {
@@ -722,21 +729,21 @@ function ReportModal({ patient, programados, pendientes, realizados, onClose }) 
         return d >= now;
     });
     const exCorroborar = realizados.filter(ex => { const m = diffMonths(ex.fecha); return m !== null && m >= 1 && m < 3; });
-    const exRenovar    = realizados.filter(ex => { const m = diffMonths(ex.fecha); return m !== null && m >= 3; });
-    const exVigentes   = realizados.filter(ex => { const m = diffMonths(ex.fecha); return m !== null && m < 1; });
+    const exRenovar = realizados.filter(ex => { const m = diffMonths(ex.fecha); return m !== null && m >= 3; });
+    const exVigentes = realizados.filter(ex => { const m = diffMonths(ex.fecha); return m !== null && m < 1; });
 
     const tieneProblemas = citasPerdidas.length > 0 || exRenovar.length > 0 || pendientes.length > 0;
-    const tieneAlertas   = exCorroborar.length > 0;
-    const nivelAlerta    = tieneProblemas ? 'crítico' : tieneAlertas ? 'atención' : 'normal';
+    const tieneAlertas = exCorroborar.length > 0;
+    const nivelAlerta = tieneProblemas ? 'crítico' : tieneAlertas ? 'atención' : 'normal';
 
-    const colorAlerta  = nivelAlerta === 'crítico' ? '#F9A8A8' : nivelAlerta === 'atención' ? '#FCD34D' : '#A1E3D8';
-    const bgAlerta     = nivelAlerta === 'crítico' ? 'rgba(177,64,64,0.12)' : nivelAlerta === 'atención' ? 'rgba(251,191,36,0.1)' : 'rgba(161,227,216,0.08)';
+    const colorAlerta = nivelAlerta === 'crítico' ? '#F9A8A8' : nivelAlerta === 'atención' ? '#FCD34D' : '#A1E3D8';
+    const bgAlerta = nivelAlerta === 'crítico' ? 'rgba(177,64,64,0.12)' : nivelAlerta === 'atención' ? 'rgba(251,191,36,0.1)' : 'rgba(161,227,216,0.08)';
     const borderAlerta = nivelAlerta === 'crítico' ? 'rgba(177,64,64,0.35)' : nivelAlerta === 'atención' ? 'rgba(251,191,36,0.3)' : 'rgba(161,227,216,0.2)';
 
     const downloadPDF = () => {
         const alertaLabel = nivelAlerta === 'crítico' ? '⚠️ Estado Crítico — Se requieren acciones inmediatas'
             : nivelAlerta === 'atención' ? '🔶 Requiere Atención — Hay exámenes que deben verificarse'
-            : '✅ Estado Normal — El proceso está al día';
+                : '✅ Estado Normal — El proceso está al día';
 
         const renderItems = (items, badge) => items.map(ex => `
             <tr>
@@ -744,7 +751,7 @@ function ReportModal({ patient, programados, pendientes, realizados, onClose }) 
                 <td>${ex.tipoExamen}</td>
                 <td>${ex.fecha ? formatDate(ex.fecha) : 'Sin fecha'}</td>
                 <td>${ex.doctor || '—'}</td>
-                <td><span class="badge badge-${badge.toLowerCase().replace(' ','-')}">${badge}</span></td>
+                <td><span class="badge badge-${badge.toLowerCase().replace(' ', '-')}">${badge}</span></td>
             </tr>`).join('');
 
         const tableSection = (title, items, badge, nota) => items.length === 0 ? '' : `
@@ -825,7 +832,7 @@ function ReportModal({ patient, programados, pendientes, realizados, onClose }) 
     ${tableSection('Citas Programadas Perdidas', citasPerdidas, 'CITA PERDIDA', 'Los siguientes exámenes tenían fecha asignada pero no fueron atendidos.')}
     ${tableSection('Exámenes que Requieren Renovación', exRenovar, 'RENOVAR', 'Superan los 3 meses de antigüedad.')}
     ${tableSection('Exámenes para Corroborar', exCorroborar, 'CORROBORAR', 'Superan 1 mes de antigüedad.')}
-    ${pendientes.length > 0 ? `<section><h3>Exámenes Pendientes</h3><table><thead><tr><th>Código</th><th>Examen</th><th>Estado</th></tr></thead><tbody>${pendientes.map(ex => `<tr><td>${ex.codigo||'—'}</td><td>${ex.tipoExamen}</td><td><span class="badge badge-pendiente">PENDIENTE</span></td></tr>`).join('')}</tbody></table></section>` : ''}
+    ${pendientes.length > 0 ? `<section><h3>Exámenes Pendientes</h3><table><thead><tr><th>Código</th><th>Examen</th><th>Estado</th></tr></thead><tbody>${pendientes.map(ex => `<tr><td>${ex.codigo || '—'}</td><td>${ex.tipoExamen}</td><td><span class="badge badge-pendiente">PENDIENTE</span></td></tr>`).join('')}</tbody></table></section>` : ''}
     ${tableSection('Exámenes Realizados Vigentes', exVigentes, 'VIGENTE', '')}
     ${tableSection('Citas Próximas Programadas', citasFuturas, 'PROGRAMADA', '')}
     <footer>
@@ -886,7 +893,7 @@ function ReportModal({ patient, programados, pendientes, realizados, onClose }) 
                             <p className="text-xs font-bold" style={{ color: colorAlerta }}>
                                 {nivelAlerta === 'crítico' && '⚠️ Estado Crítico — Se requieren acciones inmediatas'}
                                 {nivelAlerta === 'atención' && '🔶 Requiere Atención — Hay exámenes que deben verificarse'}
-                                {nivelAlerta === 'normal'   && '✅ Estado Normal — El proceso está al día'}
+                                {nivelAlerta === 'normal' && '✅ Estado Normal — El proceso está al día'}
                             </p>
                             <p className="text-[11px] mt-0.5" style={{ color: 'rgba(245,245,247,0.5)' }}>
                                 Generado automáticamente con base en los registros del sistema
@@ -979,7 +986,7 @@ function ReportItem({ codigo, nombre, fecha, badge, badgeColor, badgeText, nota 
                     <span className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>{nombre}</span>
                 </div>
                 {fecha && <p className="text-[11px] mt-0.5" style={{ color: 'rgba(245,245,247,0.35)' }}>{formatDate(fecha)}</p>}
-                {nota  && <p className="text-[11px] mt-0.5 italic" style={{ color: 'rgba(245,245,247,0.4)' }}>{nota}</p>}
+                {nota && <p className="text-[11px] mt-0.5 italic" style={{ color: 'rgba(245,245,247,0.4)' }}>{nota}</p>}
             </div>
             <span className="text-[10px] font-bold px-2 py-1 rounded-md flex-shrink-0 mt-0.5"
                 style={{ background: badgeColor, color: badgeText }}>
@@ -1096,7 +1103,7 @@ function ControlesViewerModal({ onClose }) {
                             <CalendarCheck2 size={20} color="#C4AFED" />
                         </div>
                         <div>
-                            <h2 className="text-base font-bold" style={{ color: '#F5F5F7' }}>Visor de Controles a 3 Meses</h2>
+                            <h2 className="text-base font-bold" style={{ color: '#F5F5F7' }}>Visor de Controles</h2>
                             <p className="text-xs" style={{ color: 'rgba(196,175,237,0.7)' }}>
                                 {loading ? 'Cargando...' : `${controles.length} pacientes programados para seguimiento CVD`}
                             </p>
@@ -1190,27 +1197,27 @@ function ControlesViewerModal({ onClose }) {
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function CardiovascularPage() {
-    const [searchId, setSearchId]       = useState('');
-    const [dateFilter, setDateFilter]   = useState('all');
-    const [showReport, setShowReport]   = useState(false);
-    const [loading, setLoading]         = useState(false);
-    const [patient, setPatient]         = useState(MOCK_PATIENT);
+    const [searchId, setSearchId] = useState('');
+    const [dateFilter, setDateFilter] = useState('all');
+    const [showReport, setShowReport] = useState(false);
+    const [loading, setLoading] = useState(false);
+    const [patient, setPatient] = useState(MOCK_PATIENT);
     const [programados, setProgramados] = useState(MOCK_PROGRAMADOS);
-    const [pendientes, setPendientes]   = useState(MOCK_PENDIENTES);
-    const [realizados, setRealizados]   = useState(MOCK_REALIZADOS);
-    const [sendingId, setSendingId]     = useState(null);
+    const [pendientes, setPendientes] = useState(MOCK_PENDIENTES);
+    const [realizados, setRealizados] = useState(MOCK_REALIZADOS);
+    const [sendingId, setSendingId] = useState(null);
     const [agendandoId, setAgendandoId] = useState(null);
-    const [toast, setToast]             = useState(null);
+    const [toast, setToast] = useState(null);
 
     // ── Edición de paciente ───────────────────────────────────────────────────
     const [editingPatient, setEditingPatient] = useState(false);
-    const [editPhone, setEditPhone]           = useState('');
-    const [editPhoneErr, setEditPhoneErr]     = useState('');
-    const [savingPatient, setSavingPatient]   = useState(false);
+    const [editPhone, setEditPhone] = useState('');
+    const [editPhoneErr, setEditPhoneErr] = useState('');
+    const [savingPatient, setSavingPatient] = useState(false);
 
     // ── Eliminación de programado ─────────────────────────────────────────────
     const [eliminandoExamen, setEliminandoExamen] = useState(null); // examen en proceso
-    const [eliminandoId, setEliminandoId]         = useState(null);
+    const [eliminandoId, setEliminandoId] = useState(null);
 
     // ── Historial ─────────────────────────────────────────────────────────────
     const [showHistorial, setShowHistorial] = useState(false);
@@ -1226,14 +1233,14 @@ export default function CardiovascularPage() {
         return list.filter(ex => {
             if (!ex.fecha) return false;
             const d = new Date(ex.fecha.includes('T') ? ex.fecha : ex.fecha + 'T12:00:00');
-            if (dateFilter === 'year')  return d.getFullYear() === now.getFullYear();
+            if (dateFilter === 'year') return d.getFullYear() === now.getFullYear();
             if (dateFilter === 'month') return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
             return true;
         });
     };
 
     const programadosFiltrados = applyDateFilter(programados);
-    const realizadosFiltrados  = applyDateFilter(realizados);
+    const realizadosFiltrados = applyDateFilter(realizados);
 
     const showToast = (text, type = 'success') => {
         setToast({ text, type });
@@ -1276,9 +1283,9 @@ export default function CardiovascularPage() {
         setSavingPatient(true);
         try {
             const res = await fetch(`${API_BASE}/api/cardiovascular/patient/${patient.documento}`, {
-                method:  'PUT',
+                method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body:    JSON.stringify({ telefono: digitsOnly }),
+                body: JSON.stringify({ telefono: digitsOnly }),
             });
             const data = await res.json();
             if (!res.ok) {
@@ -1301,12 +1308,12 @@ export default function CardiovascularPage() {
         setSendingId(id);
         try {
             const res = await fetch(`${API_BASE}/api/cardiovascular/remind/${encodeURIComponent(id)}`, {
-                method:  'POST',
+                method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    cedula:   patient?.documento,
+                    cedula: patient?.documento,
                     telefono: patient?.telefono,
-                    examen:   tipoExamen,
+                    examen: tipoExamen,
                 }),
             });
             if (res.ok) showToast('✅ Recordatorio enviado por WhatsApp');
@@ -1329,15 +1336,15 @@ export default function CardiovascularPage() {
         setEliminandoId(eliminandoExamen.id);
         try {
             const res = await fetch(`${API_BASE}/api/cardiovascular/programado/remove`, {
-                method:  'POST',
+                method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    cedula:     patient.documento,
+                    cedula: patient.documento,
                     examCodigo: eliminandoExamen.codigo,
                     tipoExamen: eliminandoExamen.tipoExamen,
-                    fecha:      eliminandoExamen.fecha,
-                    doctor:     eliminandoExamen.doctor,
-                    motivo:     motivo || null,
+                    fecha: eliminandoExamen.fecha,
+                    doctor: eliminandoExamen.doctor,
+                    motivo: motivo || null,
                 }),
             });
             if (res.ok) {
@@ -1369,10 +1376,10 @@ export default function CardiovascularPage() {
     };
 
     const cardStyle = {
-        background:    'rgba(26,23,33,0.85)',
-        border:        '1px solid var(--border)',
-        borderRadius:  '16px',
-        backdropFilter:'blur(12px)',
+        background: 'rgba(26,23,33,0.85)',
+        border: '1px solid var(--border)',
+        borderRadius: '16px',
+        backdropFilter: 'blur(12px)',
     };
 
     return (
@@ -1468,7 +1475,7 @@ export default function CardiovascularPage() {
                         className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all"
                         style={{
                             background: patient ? 'linear-gradient(135deg, rgba(130,99,177,0.35) 0%, rgba(177,64,64,0.35) 100%)' : 'rgba(45,40,62,0.3)',
-                            color:  patient ? '#E2D4FF' : 'rgba(245,245,247,0.2)',
+                            color: patient ? '#E2D4FF' : 'rgba(245,245,247,0.2)',
                             border: patient ? '1px solid rgba(130,99,177,0.5)' : '1px solid rgba(45,40,62,0.5)',
                             cursor: patient ? 'pointer' : 'not-allowed',
                             boxShadow: patient ? '0 0 18px rgba(130,99,177,0.2)' : 'none',
@@ -1535,8 +1542,8 @@ export default function CardiovascularPage() {
                     <div className="flex items-center gap-1 rounded-xl p-1"
                         style={{ background: 'rgba(15,14,19,0.8)', border: '1px solid var(--border)' }}>
                         {[
-                            { key: 'all',   label: 'Todos' },
-                            { key: 'year',  label: 'Este año' },
+                            { key: 'all', label: 'Todos' },
+                            { key: 'year', label: 'Este año' },
                             { key: 'month', label: 'Este mes' },
                         ].map(({ key, label }) => {
                             const active = dateFilter === key;
@@ -1548,7 +1555,7 @@ export default function CardiovascularPage() {
                                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
                                     style={{
                                         background: active ? 'rgba(177,64,64,0.3)' : 'transparent',
-                                        color:  active ? '#F9A8A8' : 'var(--text-muted)',
+                                        color: active ? '#F9A8A8' : 'var(--text-muted)',
                                         border: active ? '1px solid rgba(177,64,64,0.5)' : '1px solid transparent',
                                     }}>
                                     <Calendar size={11} />
@@ -1568,7 +1575,7 @@ export default function CardiovascularPage() {
                             background: patient
                                 ? 'linear-gradient(135deg, rgba(130,99,177,0.4) 0%, rgba(177,64,64,0.4) 100%)'
                                 : 'rgba(45,40,62,0.3)',
-                            color:  patient ? '#E2D4FF' : 'rgba(245,245,247,0.2)',
+                            color: patient ? '#E2D4FF' : 'rgba(245,245,247,0.2)',
                             border: patient ? '1px solid rgba(130,99,177,0.45)' : '1px solid rgba(45,40,62,0.5)',
                             cursor: patient ? 'pointer' : 'not-allowed',
                             boxShadow: patient ? '0 0 14px rgba(130,99,177,0.18)' : 'none',
@@ -1631,9 +1638,9 @@ export default function CardiovascularPage() {
                             />
                             {patient ? (
                                 <div className="grid grid-cols-2 gap-x-6 gap-y-3 mt-1">
-                                    <InfoField icon={User}     label="Nombre"   value={patient.nombre} />
-                                    <InfoField icon={Hash}     label="Cédula"   value={patient.documento} />
-                                    <InfoField icon={Clock}    label="Edad"     value={patient.edad ? `${patient.edad} años` : '—'} />
+                                    <InfoField icon={User} label="Nombre" value={patient.nombre} />
+                                    <InfoField icon={Hash} label="Cédula" value={patient.documento} />
+                                    <InfoField icon={Clock} label="Edad" value={patient.edad ? `${patient.edad} años` : '—'} />
                                     {editingPatient ? (
                                         <div>
                                             <p className="text-[10px] font-semibold uppercase tracking-wider mb-0.5"
