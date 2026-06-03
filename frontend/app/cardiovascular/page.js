@@ -60,7 +60,12 @@ function formatDateTime(iso) {
 
 function diffMonths(fechaStr) {
     if (!fechaStr) return null;
-    const d = new Date(fechaStr.includes('T') ? fechaStr : fechaStr + 'T12:00:00');
+    let parsedStr = fechaStr;
+    if (/^\d{8}$/.test(fechaStr)) {
+        parsedStr = `${fechaStr.slice(0, 4)}-${fechaStr.slice(4, 6)}-${fechaStr.slice(6, 8)}`;
+    }
+    const d = new Date(parsedStr.includes('T') ? parsedStr : parsedStr + 'T12:00:00');
+    if (isNaN(d.getTime())) return null;
     const now = new Date();
     return (now.getFullYear() - d.getFullYear()) * 12 + (now.getMonth() - d.getMonth())
         + (now.getDate() < d.getDate() ? -1 : 0);
@@ -1084,8 +1089,32 @@ function ControlesViewerModal({ onClose }) {
 
     const getEstadoBadge = (estado) => {
         if (estado === 'BOOKED_AND_REMINDED') return { text: 'AGENDADO Y AVISADO', bg: 'rgba(161,227,216,0.15)', color: '#A1E3D8' };
-        if (estado === 'FAILED') return { text: 'FALLIDO', bg: 'rgba(177,64,64,0.15)', color: '#F9A8A8' };
+        if (estado === 'BOOKED')              return { text: 'CITA AGENDADA', bg: 'rgba(74,222,128,0.15)', color: '#86EFAC' };
+        if (estado === 'BOOKING_FAILED_NO_SLOT')  return { text: 'SIN CUPO', bg: 'rgba(251,146,60,0.15)', color: '#FED7AA' };
+        if (estado === 'BOOKING_FAILED_XENCO')    return { text: 'ERROR XENCO', bg: 'rgba(177,64,64,0.15)', color: '#F9A8A8' };
+        if (estado === 'FAILED_NO_PHONE')         return { text: 'SIN TELÉFONO', bg: 'rgba(177,64,64,0.15)', color: '#F9A8A8' };
+        if (estado === 'FAILED')                  return { text: 'FALLIDO', bg: 'rgba(177,64,64,0.15)', color: '#F9A8A8' };
+        if (estado === 'REMINDED_NO_BOOKING')     return { text: 'AVISADO SIN CITA', bg: 'rgba(251,191,36,0.15)', color: '#FCD34D' };
         return { text: 'PENDIENTE', bg: 'rgba(251,191,36,0.15)', color: '#FCD34D' };
+    };
+
+    const [procesando, setProcesando] = React.useState(false);
+    const [procesMsg, setProcesMsg] = React.useState('');
+
+    const handleProcesarPendientes = async () => {
+        if (!confirm('\u00bfDeseas iniciar el agendamiento automático para todos los controles PENDIENTES ahora mismo?\n\nCada paciente recibirá un WhatsApp confirmando su cita.')) return;
+        setProcesando(true);
+        setProcesMsg('');
+        try {
+            const res = await fetch(`${API_BASE}/api/cardiovascular/controles/procesar-pendientes`, { method: 'POST' });
+            const data = await res.json();
+            setProcesMsg(data.message || 'Procesando...');
+            // Recargar lista después de 5 segundos
+            setTimeout(() => { loadControles(); setProcesando(false); }, 8000);
+        } catch (e) {
+            setProcesMsg('Error de red. Intenta de nuevo.');
+            setProcesando(false);
+        }
     };
 
     return (
@@ -1116,6 +1145,21 @@ function ControlesViewerModal({ onClose }) {
                         onMouseLeave={e => e.currentTarget.style.background = 'rgba(245,245,247,0.06)'}>
                         <X size={15} />
                     </button>
+                </div>
+
+                {/* Barra de acciones */}
+                <div className="flex items-center gap-3 px-6 py-3 flex-shrink-0" style={{ background: 'rgba(130,99,177,0.06)', borderBottom: '1px solid rgba(130,99,177,0.1)' }}>
+                    <button
+                        onClick={handleProcesarPendientes}
+                        disabled={procesando}
+                        className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all"
+                        style={{ background: procesando ? 'rgba(130,99,177,0.2)' : 'rgba(130,99,177,0.35)', color: '#C4AFED', border: '1px solid rgba(130,99,177,0.4)' }}>
+                        {procesando ? <Loader2 size={13} className="animate-spin" /> : <CalendarCheck2 size={13} />}
+                        {procesando ? 'Procesando y enviando WhatsApp...' : '📲 Agendar Pendientes y Avisar Ahora'}
+                    </button>
+                    {procesMsg && (
+                        <span className="text-xs" style={{ color: '#A1E3D8' }}>✔ {procesMsg}</span>
+                    )}
                 </div>
 
                 {/* List */}
@@ -1163,13 +1207,13 @@ function ControlesViewerModal({ onClose }) {
                                                 <div className="flex items-center gap-1.5">
                                                     <Calendar size={13} style={{ color: '#A1E3D8' }} />
                                                     <span className="text-xs font-semibold" style={{ color: '#A1E3D8' }}>
-                                                        Control a buscar: {formatDate(c.fechaControl)}
+                                                        Cita control: {formatDate(c.fechaControl)}{c.citaHora ? ` — ${c.citaHora}` : ''}
                                                     </span>
                                                 </div>
                                                 <div className="flex items-center gap-1.5">
                                                     <Bell size={13} style={{ color: 'rgba(245,245,247,0.4)' }} />
                                                     <span className="text-xs" style={{ color: 'rgba(245,245,247,0.6)' }}>
-                                                        Aviso se enviará el: {formatDate(c.fechaRecordatorio)}
+                                                        Recordatorio laboratorios: {formatDate(c.fechaRecordatorio)}
                                                     </span>
                                                 </div>
                                             </div>

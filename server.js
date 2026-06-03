@@ -294,6 +294,29 @@ app.delete('/api/cardiovascular/controles/:id', async (req, res) => {
     }
 });
 
+// POST /api/cardiovascular/controles/procesar-pendientes — Disparar agendamiento AHORA para pendientes
+app.post('/api/cardiovascular/controles/procesar-pendientes', async (req, res) => {
+    try {
+        const totalPending = await botPrisma.controlReminder.count({ where: { estado: 'PENDING' } });
+        if (totalPending === 0) {
+            return res.json({ success: true, message: 'No hay controles pendientes para procesar.', procesados: 0 });
+        }
+        // Responder inmediatamente y luego procesar en background
+        res.json({ 
+            success: true, 
+            message: `Iniciando agendamiento para ${totalPending} controles pendientes. Los pacientes recibirán su confirmación de WhatsApp en los próximos minutos.`, 
+            procesados: totalPending 
+        });
+        setImmediate(() => {
+            controlCVDService.executeImmediateBooking()
+                .catch(e => logger.error('[CARDIOVASCULAR] Error en agendamiento manual:', e.message));
+        });
+    } catch (error) {
+        logger.error('[CARDIOVASCULAR] Error iniciando agendamiento manual:', error.message);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
 
 // Códigos CUPS de exámenes cardiovasculares (exactos tal como aparecen en Xenco)
 const CVD_CODES = [
