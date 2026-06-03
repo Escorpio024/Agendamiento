@@ -1554,7 +1554,7 @@ export default function CardiovascularPage() {
                         onMouseEnter={e => e.currentTarget.style.boxShadow = '0 0 25px rgba(130,99,177,0.3)'}
                         onMouseLeave={e => e.currentTarget.style.boxShadow = '0 0 15px rgba(130,99,177,0.15)'}>
                         <CalendarCheck2 size={13} />
-                        Visor Controles 3 Meses
+                        Visor de Controles
                     </button>
                 </div>
             </header>
