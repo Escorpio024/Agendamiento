@@ -1098,8 +1098,8 @@ function ControlesViewerModal({ onClose }) {
         return { text: 'PENDIENTE', bg: 'rgba(251,191,36,0.15)', color: '#FCD34D' };
     };
 
-    const [procesando, setProcesando] = React.useState(false);
-    const [procesMsg, setProcesMsg] = React.useState('');
+    const [procesando, setProcesando] = useState(false);
+    const [procesMsg, setProcesMsg] = useState('');
 
     const handleProcesarPendientes = async () => {
         if (!confirm('\u00bfDeseas iniciar el agendamiento automático para todos los controles PENDIENTES ahora mismo?\n\nCada paciente recibirá un WhatsApp confirmando su cita.')) return;
