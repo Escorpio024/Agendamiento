@@ -1217,6 +1217,19 @@ function ControlesViewerModal({ onClose }) {
                                                     </span>
                                                 </div>
                                             </div>
+                                            {/* EPS y código */}
+                                            <div className="flex items-center gap-2 mt-1.5">
+                                                {c.epsInfo && (
+                                                    <span className="text-[10px] px-2 py-0.5 rounded font-semibold" style={{ background: c.epsInfo.includes('NUEVA EPS') ? 'rgba(59,130,246,0.15)' : 'rgba(168,85,247,0.15)', color: c.epsInfo.includes('NUEVA EPS') ? '#93C5FD' : '#D8B4FE' }}>
+                                                        🏥 {c.epsInfo}
+                                                    </span>
+                                                )}
+                                                {c.articuloCita && (
+                                                    <span className="text-[10px] px-2 py-0.5 rounded font-mono" style={{ background: 'rgba(130,99,177,0.15)', color: '#C4AFED' }}>
+                                                        {c.articuloCita}
+                                                    </span>
+                                                )}
+                                            </div>
                                         </div>
                                         <div className="flex-shrink-0 ml-4">
                                             <button onClick={() => handleEliminar(c.id)}

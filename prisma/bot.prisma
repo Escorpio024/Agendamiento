@@ -80,6 +80,7 @@ model ControlReminder {
   fechaControl      String
   fechaRecordatorio String
   estado            String   @default("PENDING")
+  epsInfo           String?
   citaMedico        String?
   citaFch           String?
   citaHh            String?

@@ -162,12 +162,14 @@ class ControlCVDService {
                     continue;
                 }
 
-                // Determinar meses según EPS
+                // Determinar meses según EPS (Savia=3, Nueva EPS=2, Otras=3)
                 const entName = String(cita.ENT_NOMBRE || '').toUpperCase();
-                let monthsToAdd = 3; // Por defecto: 3 meses
+                let monthsToAdd = 3; // Por defecto: 3 meses (Savia u otras EPS)
                 if (entName.includes('NUEVA EPS')) {
-                    monthsToAdd = 2;
+                    monthsToAdd = 2; // Nueva EPS: 2 meses
                 }
+                // Savia explicitamente también es 3, no necesita condición aparte
+                const epsLabel = entName.includes('NUEVA EPS') ? 'NUEVA EPS (2 meses)' : (entName.includes('SAVIA') ? 'SAVIA (3 meses)' : `${entName || 'OTRA EPS'} (3 meses)`);
 
                 // Calcular fecha objetivo del control
                 const dControl = new Date();
@@ -193,10 +195,11 @@ class ControlCVDService {
                         articuloCita: articuloValido,
                         fechaControl: fechaControlStr,
                         fechaRecordatorio: fechaRecordatorioStr,
-                        estado: 'PENDING'
+                        estado: 'PENDING',
+                        epsInfo: epsLabel
                     }
                 });
-                logger.info(`[Control CVD] Registrado: ${cedula} | EPS: ${entName} | ${monthsToAdd} meses | Control: ${fechaControlStr} | Código: ${articuloValido}`);
+                logger.info(`[Control CVD] Registrado: ${cedula} | EPS: ${epsLabel} | Control: ${fechaControlStr} | Código: ${articuloValido}`);
             }
         } catch (e) {
             logger.error('[Control CVD] Error en detección:', e.message);
