@@ -220,109 +220,132 @@ class ControlCVDService {
             logger.info(`[Control CVD] Agendamiento inmediato: ${pending.length} controles pendientes.`);
 
             for (const record of pending) {
-                const waId = await this.getWhatsAppId(record.cedula);
+                // ── try individual por paciente: si uno falla, sigue con el siguiente ──
+                try {
+                    const waId = await this.getWhatsAppId(record.cedula);
 
-                if (!waId) {
-                    logger.warn(`[Control CVD] Sin teléfono para ${record.cedula}. Marcando FAILED_NO_PHONE.`);
-                    await botPrisma.controlReminder.update({
-                        where: { id: record.id },
-                        data: { estado: 'FAILED_NO_PHONE' }
-                    });
-                    continue;
-                }
+                    if (!waId) {
+                        logger.warn(`[Control CVD] Sin teléfono para ${record.cedula}. Marcando FAILED_NO_PHONE.`);
+                        await botPrisma.controlReminder.update({
+                            where: { id: record.id },
+                            data: { estado: 'FAILED_NO_PHONE' }
+                        });
+                        continue;
+                    }
 
-                // Convertir fechaControl '20260901' → 'YYYY-MM-DD'
-                const yyyy = record.fechaControl.substring(0, 4);
-                const mm   = record.fechaControl.substring(4, 6);
-                const dd   = record.fechaControl.substring(6, 8);
-                const fechaFormat = `${yyyy}-${mm}-${dd}`;
+                    // Convertir fechaControl '20260901' → 'YYYY-MM-DD'
+                    const yyyy = record.fechaControl.substring(0, 4);
+                    const mm   = record.fechaControl.substring(4, 6);
+                    const dd   = record.fechaControl.substring(6, 8);
+                    const fechaFormat = `${yyyy}-${mm}-${dd}`;
 
-                // Buscar cupos en la agenda de P Y P MEDICOS
-                const slots = await availabilityService.getAvailableSlots(
-                    fechaFormat, 'medicina general', 'p y p medicos', true
-                );
-
-                if (!slots || slots.length === 0) {
-                    logger.warn(`[Control CVD] Sin horarios disponibles el ${fechaFormat} para ${record.cedula}. Marcando BOOKING_FAILED_NO_SLOT.`);
-                    await botPrisma.controlReminder.update({
-                        where: { id: record.id },
-                        data: { estado: 'BOOKING_FAILED_NO_SLOT' }
-                    });
-
-                    // Avisarle que no se pudo agendar, que llame a la clínica
-                    await this.client.sendMessage(waId,
-                        `🏥 *AURORA - Clínica*\n\n` +
-                        `Hola ${record.paciente}, 😊\n\n` +
-                        `Ayer asististe a tu control de Riesgo Cardiovascular. ¡Gracias por tu compromiso con tu salud!\n\n` +
-                        `Intentamos apartarte tu cita de control a los próximos meses automáticamente, pero por el momento no encontramos horarios disponibles en la agenda.\n\n` +
-                        `Por favor, comunícate con nosotros para programar tu cita de seguimiento. 📞`
+                    // Buscar cupos en la agenda de P Y P MEDICOS
+                    const slots = await availabilityService.getAvailableSlots(
+                        fechaFormat, 'medicina general', 'p y p medicos', true
                     );
-                    continue;
-                }
 
-                // Elegir un slot del medio para no saturar primero o último turno
-                const slot = slots[Math.floor(slots.length / 2)];
+                    if (!slots || slots.length === 0) {
+                        logger.warn(`[Control CVD] Sin horarios disponibles el ${fechaFormat} para ${record.cedula}. Marcando BOOKING_FAILED_NO_SLOT.`);
+                        await botPrisma.controlReminder.update({
+                            where: { id: record.id },
+                            data: { estado: 'BOOKING_FAILED_NO_SLOT' }
+                        });
 
-                const pacData = { KC0_COD: record.cedula, zona: '99' };
-                const tipoEspecialidad = record.articuloCita ? `PYP_CARDIO|${record.articuloCita}` : 'PYP_CARDIO';
-
-                const reserved = await availabilityService.reserveSlot(
-                    fechaFormat,
-                    slot.time,
-                    waId,
-                    tipoEspecialidad,
-                    slot.doctorId,
-                    pacData
-                );
-
-                if (reserved) {
-                    const fechaObj = new Date(parseInt(yyyy), parseInt(mm) - 1, parseInt(dd));
-                    const fechaAmigable = fechaObj.toLocaleDateString('es-CO', {
-                        weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
-                    });
-
-                    logger.info(`[Control CVD] ✅ Cita agendada: ${record.cedula} → ${fechaFormat} ${slot.time}`);
-
-                    // Guardar datos de la cita para rastrear si fue cancelada
-                    await botPrisma.controlReminder.update({
-                        where: { id: record.id },
-                        data: {
-                            estado:     'BOOKED',
-                            citaMedico: String(slot.doctorId),
-                            citaFch:    record.fechaControl,
-                            citaHora:   slot.time,
+                        // Avisarle que no se pudo agendar — try propio para no cortar el loop
+                        try {
+                            await this.client.sendMessage(waId,
+                                `🏥 *AURORA - Clínica*\n\n` +
+                                `Hola ${record.paciente}, 😊\n\n` +
+                                `Ayer asististe a tu control de Riesgo Cardiovascular. ¡Gracias por tu compromiso con tu salud!\n\n` +
+                                `Intentamos apartarte tu cita de control a los próximos meses automáticamente, pero por el momento no encontramos horarios disponibles en la agenda.\n\n` +
+                                `Por favor, comunícate con nosotros para programar tu cita de seguimiento. 📞`
+                            );
+                        } catch (sendErr) {
+                            logger.warn(`[Control CVD] No se pudo enviar WhatsApp SIN CUPO a ${record.cedula}: ${sendErr.message}`);
                         }
-                    });
+                        continue;
+                    }
 
-                    // Mensaje al paciente: cita confirmada
-                    const msgConfirmacion =
-                        `🏥 *AURORA - Clínica*\n\n` +
-                        `Hola ${record.paciente}, 😊\n\n` +
-                        `Ayer asististe a tu control de Riesgo Cardiovascular. ¡Gracias por cuidar tu salud!\n\n` +
-                        `✅ Hemos agendado automáticamente tu *cita de control de seguimiento:*\n\n` +
-                        `📅 *Fecha:* ${fechaAmigable}\n` +
-                        `🕐 *Hora:* ${slot.time}\n` +
-                        `👨‍⚕️ *Médico:* ${slot.doctorName}\n\n` +
-                        `Te enviaremos un recordatorio 8 días antes con las instrucciones sobre tus exámenes de laboratorio. 🔬\n\n` +
-                        `Si necesitas cambiar esta cita, escríbenos o comunícate con la clínica. 📞`;
+                    // Elegir un slot del medio para no saturar primero o último turno
+                    const slot = slots[Math.floor(slots.length / 2)];
 
-                    await this.client.sendMessage(waId, msgConfirmacion);
+                    const pacData = { KC0_COD: record.cedula, zona: '99' };
+                    const tipoEspecialidad = record.articuloCita ? `PYP_CARDIO|${record.articuloCita}` : 'PYP_CARDIO';
 
-                } else {
-                    logger.warn(`[Control CVD] Falló reserva en Xenco para ${record.cedula}.`);
-                    await botPrisma.controlReminder.update({
-                        where: { id: record.id },
-                        data: { estado: 'BOOKING_FAILED_XENCO' }
-                    });
-
-                    await this.client.sendMessage(waId,
-                        `🏥 *AURORA - Clínica*\n\n` +
-                        `Hola ${record.paciente}, 😊\n\n` +
-                        `Ayer asististe a tu control de Riesgo Cardiovascular.\n\n` +
-                        `Intentamos apartar tu cita de seguimiento automáticamente pero ocurrió un inconveniente técnico. Por favor comunícate con la clínica para programarla. 📞`
+                    const reserved = await availabilityService.reserveSlot(
+                        fechaFormat,
+                        slot.time,
+                        waId,
+                        tipoEspecialidad,
+                        slot.doctorId,
+                        pacData
                     );
+
+                    if (reserved) {
+                        const fechaObj = new Date(parseInt(yyyy), parseInt(mm) - 1, parseInt(dd));
+                        const fechaAmigable = fechaObj.toLocaleDateString('es-CO', {
+                            weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+                        });
+
+                        logger.info(`[Control CVD] ✅ Cita agendada: ${record.cedula} → ${fechaFormat} ${slot.time}`);
+
+                        // Guardar datos de la cita para rastrear si fue cancelada
+                        await botPrisma.controlReminder.update({
+                            where: { id: record.id },
+                            data: {
+                                estado:     'BOOKED',
+                                citaMedico: String(slot.doctorId),
+                                citaFch:    record.fechaControl,
+                                citaHora:   slot.time,
+                            }
+                        });
+
+                        // Mensaje al paciente: cita confirmada
+                        const msgConfirmacion =
+                            `🏥 *AURORA - Clínica*\n\n` +
+                            `Hola ${record.paciente}, 😊\n\n` +
+                            `Ayer asististe a tu control de Riesgo Cardiovascular. ¡Gracias por cuidar tu salud!\n\n` +
+                            `✅ Hemos agendado automáticamente tu *cita de control de seguimiento:*\n\n` +
+                            `📅 *Fecha:* ${fechaAmigable}\n` +
+                            `🕐 *Hora:* ${slot.time}\n` +
+                            `👨‍⚕️ *Médico:* ${slot.doctorName}\n\n` +
+                            `Te enviaremos un recordatorio 8 días antes con las instrucciones sobre tus exámenes de laboratorio. 🔬\n\n` +
+                            `Si necesitas cambiar esta cita, escríbenos o comunícate con la clínica. 📞`;
+
+                        try {
+                            await this.client.sendMessage(waId, msgConfirmacion);
+                        } catch (sendErr) {
+                            logger.warn(`[Control CVD] No se pudo enviar WhatsApp CONFIRMACIÓN a ${record.cedula}: ${sendErr.message}`);
+                        }
+
+                    } else {
+                        logger.warn(`[Control CVD] Falló reserva en Xenco para ${record.cedula}.`);
+                        await botPrisma.controlReminder.update({
+                            where: { id: record.id },
+                            data: { estado: 'BOOKING_FAILED_XENCO' }
+                        });
+
+                        try {
+                            await this.client.sendMessage(waId,
+                                `🏥 *AURORA - Clínica*\n\n` +
+                                `Hola ${record.paciente}, 😊\n\n` +
+                                `Ayer asististe a tu control de Riesgo Cardiovascular.\n\n` +
+                                `Intentamos apartar tu cita de seguimiento automáticamente pero ocurrió un inconveniente técnico. Por favor comunícate con la clínica para programarla. 📞`
+                            );
+                        } catch (sendErr) {
+                            logger.warn(`[Control CVD] No se pudo enviar WhatsApp ERROR XENCO a ${record.cedula}: ${sendErr.message}`);
+                        }
+                    }
+
+                    // Pausa entre pacientes para no saturar WhatsApp
+                    await new Promise(r => setTimeout(r, 1500));
+
+                } catch (patientErr) {
+                    logger.error(`[Control CVD] Error procesando paciente ${record.cedula}: ${patientErr.message}`);
+                    // Continúa con el siguiente paciente
                 }
             }
+            logger.info(`[Control CVD] ✅ Agendamiento inmediato finalizado. Procesados: ${pending.length}`);
         } catch (e) {
             logger.error('[Control CVD] Error en agendamiento inmediato:', e.message);
         }
