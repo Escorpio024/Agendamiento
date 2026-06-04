@@ -1224,8 +1224,8 @@ async function getWeekAvailability(startDateStr, tipo = 'medicina general', doct
 
 // Busca el primer día con disponibilidad, en lotes de 3 en paralelo.
 async function getNextAvailableSlots(startDateStr, tipo, doctor, sede = 'Ebejico') {
-    const BATCH = 3;
-    const MAX = 60;
+    const BATCH = 2; // Reducido a 2 para no saturar el pool de conexiones de Prisma
+    const MAX = 30; // Reducido a 30 días para evitar timeouts en Prisma
     try {
         for (let i = 1; i <= MAX; i += BATCH) {
             const batch = [];

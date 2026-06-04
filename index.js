@@ -1855,12 +1855,12 @@ client.on('message', async (msg) => {
                 // Buscar el primer día con disponibilidad
                 const firstAvail = await withTimeout(
                     availabilityService.getNextAvailableSlots(todayStr, session.tipoCita, session.doctorPreferido, session.sede),
-                    25000, null
+                    45000, null
                 );
 
                 if (firstAvail === null) {
                     // Timeout — el HIS está lento. Resetear sesión y pedir reintento.
-                    console.warn('[BOT] ⏱️ getNextAvailableSlots tardó más de 25s — solicitando reintento al usuario');
+                    console.warn('[BOT] ⏱️ getNextAvailableSlots tardó más de 45s — solicitando reintento al usuario');
                     session.step = 'WELCOME'; // Resetear para que el próximo mensaje vuelva a buscar fechas
                     await replyFn(
                         '⚠️ El sistema está un poco lento en este momento al cargar los horarios disponibles.\n\n' +
@@ -1873,7 +1873,7 @@ client.on('message', async (msg) => {
                     // Con el primer día disponible como ancla, obtener la semana completa (7 días desde ahí)
                     const weekDays = await withTimeout(
                         availabilityService.getWeekAvailability(firstAvail.date, session.tipoCita, session.doctorPreferido, 7, 45, session.sede),
-                        25000, []
+                        45000, []
                     );
 
                     if (weekDays.length > 0) {
