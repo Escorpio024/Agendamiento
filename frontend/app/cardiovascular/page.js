@@ -1054,6 +1054,8 @@ function InfoField({ icon: Icon, label, value, full }) {
 function ControlesViewerModal({ onClose }) {
     const [controles, setControles] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [filtroFecha, setFiltroFecha] = useState('TODOS');
+    const [filtroEstado, setFiltroEstado] = useState('TODOS');
 
     const loadControles = useCallback(() => {
         setLoading(true);
@@ -1101,6 +1103,28 @@ function ControlesViewerModal({ onClose }) {
     const [procesando, setProcesando] = useState(false);
     const [procesMsg, setProcesMsg] = useState('');
 
+    // ─── Filtros calculados ───────────────────────────────────────────────
+    const fechasUnicas = [...new Set(controles.map(c => c.fechaCitaOriginal))].sort().reverse();
+
+    const estadosResumen = {
+        TOTAL: controles.length,
+        PENDIENTE: controles.filter(c => !['BOOKED','BOOKED_AND_REMINDED','BOOKING_FAILED_NO_SLOT','BOOKING_FAILED_XENCO','FAILED_NO_PHONE','FAILED','REMINDED_NO_BOOKING'].includes(c.estado)).length,
+        AGENDADO: controles.filter(c => c.estado === 'BOOKED' || c.estado === 'BOOKED_AND_REMINDED').length,
+        SIN_CUPO: controles.filter(c => c.estado === 'BOOKING_FAILED_NO_SLOT').length,
+        ERROR: controles.filter(c => ['BOOKING_FAILED_XENCO','FAILED_NO_PHONE','FAILED'].includes(c.estado)).length,
+    };
+
+    const controlesFiltrados = controles.filter(c => {
+        const pasaFecha = filtroFecha === 'TODOS' || c.fechaCitaOriginal === filtroFecha;
+        const esPendiente = !['BOOKED','BOOKED_AND_REMINDED','BOOKING_FAILED_NO_SLOT','BOOKING_FAILED_XENCO','FAILED_NO_PHONE','FAILED','REMINDED_NO_BOOKING'].includes(c.estado);
+        let pasaEstado = true;
+        if (filtroEstado === 'PENDIENTE') pasaEstado = esPendiente;
+        else if (filtroEstado === 'AGENDADO') pasaEstado = c.estado === 'BOOKED' || c.estado === 'BOOKED_AND_REMINDED';
+        else if (filtroEstado === 'SIN_CUPO') pasaEstado = c.estado === 'BOOKING_FAILED_NO_SLOT';
+        else if (filtroEstado === 'ERROR') pasaEstado = ['BOOKING_FAILED_XENCO','FAILED_NO_PHONE','FAILED'].includes(c.estado);
+        return pasaFecha && pasaEstado;
+    });
+
     const handleProcesarPendientes = async () => {
         if (!confirm('\u00bfDeseas iniciar el agendamiento automático para todos los controles PENDIENTES ahora mismo?\n\nCada paciente recibirá un WhatsApp confirmando su cita.')) return;
         setProcesando(true);
@@ -1134,7 +1158,7 @@ function ControlesViewerModal({ onClose }) {
                         <div>
                             <h2 className="text-base font-bold" style={{ color: '#F5F5F7' }}>Visor de Controles</h2>
                             <p className="text-xs" style={{ color: 'rgba(196,175,237,0.7)' }}>
-                                {loading ? 'Cargando...' : `${controles.length} pacientes programados para seguimiento CVD`}
+                                {loading ? 'Cargando...' : `${controlesFiltrados.length} de ${controles.length} pacientes`}
                             </p>
                         </div>
                     </div>
@@ -1162,6 +1186,48 @@ function ControlesViewerModal({ onClose }) {
                     )}
                 </div>
 
+                {/* ── Resumen de estados ── */}
+                <div className="flex items-center gap-2 px-6 py-2 flex-shrink-0 flex-wrap" style={{ background: 'rgba(20,18,28,0.8)', borderBottom: '1px solid rgba(130,99,177,0.1)' }}>
+                    {[
+                        { key: 'TODOS',    label: 'Todos',     count: estadosResumen.TOTAL,    bg: 'rgba(130,99,177,0.2)',   color: '#C4AFED' },
+                        { key: 'PENDIENTE',label: 'Pendientes',count: estadosResumen.PENDIENTE, bg: 'rgba(251,191,36,0.15)', color: '#FCD34D' },
+                        { key: 'AGENDADO', label: 'Agendados', count: estadosResumen.AGENDADO,  bg: 'rgba(74,222,128,0.15)', color: '#86EFAC' },
+                        { key: 'SIN_CUPO', label: 'Sin cupo',  count: estadosResumen.SIN_CUPO,  bg: 'rgba(251,146,60,0.15)', color: '#FED7AA' },
+                        { key: 'ERROR',    label: 'Error',     count: estadosResumen.ERROR,     bg: 'rgba(177,64,64,0.15)',  color: '#F9A8A8' },
+                    ].map(btn => (
+                        <button key={btn.key}
+                            onClick={() => setFiltroEstado(btn.key)}
+                            className="flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-semibold transition-all"
+                            style={{
+                                background: filtroEstado === btn.key ? btn.bg : 'rgba(255,255,255,0.04)',
+                                color: filtroEstado === btn.key ? btn.color : 'rgba(245,245,247,0.4)',
+                                border: `1px solid ${filtroEstado === btn.key ? btn.color.replace(')', ',0.4)').replace('rgb', 'rgba') : 'rgba(255,255,255,0.07)'}`,
+                                transform: filtroEstado === btn.key ? 'scale(1.05)' : 'scale(1)'
+                            }}>
+                            <span style={{ background: btn.bg, color: btn.color, borderRadius: '50%', width: 16, height: 16, display:'inline-flex', alignItems:'center', justifyContent:'center', fontSize: 10, fontWeight: 800 }}>{btn.count}</span>
+                            {btn.label}
+                        </button>
+                    ))}
+
+                    {/* Separador */}
+                    <div style={{ width: 1, height: 20, background: 'rgba(130,99,177,0.2)', margin: '0 4px' }} />
+
+                    {/* Filtro por fecha */}
+                    <div className="flex items-center gap-1.5">
+                        <Calendar size={12} style={{ color: 'rgba(196,175,237,0.5)' }} />
+                        <select
+                            value={filtroFecha}
+                            onChange={e => setFiltroFecha(e.target.value)}
+                            className="text-[11px] rounded-lg px-2 py-1 outline-none"
+                            style={{ background: 'rgba(130,99,177,0.15)', color: '#C4AFED', border: '1px solid rgba(130,99,177,0.25)', cursor: 'pointer' }}>
+                            <option value="TODOS">📅 Todos los días</option>
+                            {fechasUnicas.map(f => (
+                                <option key={f} value={f}>📅 {formatDate(f)}</option>
+                            ))}
+                        </select>
+                    </div>
+                </div>
+
                 {/* List */}
                 <div className="flex-1 overflow-y-auto p-6">
                     {loading ? (
@@ -1172,7 +1238,12 @@ function ControlesViewerModal({ onClose }) {
                         <EmptyState message="No hay controles a 3 meses programados actualmente." />
                     ) : (
                         <div className="grid grid-cols-1 gap-3">
-                            {controles.map(c => {
+                            {controlesFiltrados.length === 0 ? (
+                                <div className="text-center py-12" style={{ color: 'rgba(196,175,237,0.4)' }}>
+                                    <CalendarCheck2 size={32} style={{ margin: '0 auto 12px', opacity: 0.3 }} />
+                                    <p className="text-sm">No hay pacientes con este filtro</p>
+                                </div>
+                            ) : controlesFiltrados.map(c => {
                                 const badge = getEstadoBadge(c.estado);
                                 return (
                                     <div key={c.id} className="flex items-center justify-between p-4 rounded-xl border transition-all"
