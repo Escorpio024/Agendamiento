@@ -13,7 +13,8 @@ module.exports = {
       // Mínimo tiempo activo para que no cuente como crash inmediato
       min_uptime: '30s',
       env: {
-        NODE_ENV: 'production'
+        NODE_ENV: 'production',
+        TZ: 'America/Bogota'
       }
     },
     {
@@ -27,7 +28,8 @@ module.exports = {
       min_uptime: '10s',
       env: {
         NODE_ENV: 'production',
-        PORT: 3000
+        PORT: 3000,
+        TZ: 'America/Bogota'
       }
     }
   ]
