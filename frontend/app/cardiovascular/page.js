@@ -1091,7 +1091,8 @@ function ControlesViewerModal({ onClose }) {
 
     const getEstadoBadge = (estado) => {
         if (estado === 'BOOKED_AND_REMINDED') return { text: 'AGENDADO Y AVISADO', bg: 'rgba(161,227,216,0.15)', color: '#A1E3D8' };
-        if (estado === 'BOOKED')              return { text: 'CITA AGENDADA', bg: 'rgba(74,222,128,0.15)', color: '#86EFAC' };
+        if (estado === 'BOOKED')              return { text: 'AGENDADA POR BOT', bg: 'rgba(74,222,128,0.15)', color: '#86EFAC' };
+        if (estado === 'BOOKED_PRESENCIAL')   return { text: 'PRESENCIAL ✅', bg: 'rgba(56,189,248,0.15)', color: '#7DD3FC' };
         if (estado === 'BOOKING_FAILED_NO_SLOT')  return { text: 'SIN CUPO', bg: 'rgba(251,146,60,0.15)', color: '#FED7AA' };
         if (estado === 'BOOKING_FAILED_XENCO')    return { text: 'ERROR XENCO', bg: 'rgba(177,64,64,0.15)', color: '#F9A8A8' };
         if (estado === 'FAILED_NO_PHONE')         return { text: 'SIN TELÉFONO', bg: 'rgba(177,64,64,0.15)', color: '#F9A8A8' };
@@ -1108,18 +1109,20 @@ function ControlesViewerModal({ onClose }) {
 
     const estadosResumen = {
         TOTAL: controles.length,
-        PENDIENTE: controles.filter(c => !['BOOKED','BOOKED_AND_REMINDED','BOOKING_FAILED_NO_SLOT','BOOKING_FAILED_XENCO','FAILED_NO_PHONE','FAILED','REMINDED_NO_BOOKING'].includes(c.estado)).length,
+        PENDIENTE: controles.filter(c => !['BOOKED','BOOKED_AND_REMINDED','BOOKED_PRESENCIAL','BOOKING_FAILED_NO_SLOT','BOOKING_FAILED_XENCO','FAILED_NO_PHONE','FAILED','REMINDED_NO_BOOKING'].includes(c.estado)).length,
         AGENDADO: controles.filter(c => c.estado === 'BOOKED' || c.estado === 'BOOKED_AND_REMINDED').length,
+        PRESENCIAL: controles.filter(c => c.estado === 'BOOKED_PRESENCIAL').length,
         SIN_CUPO: controles.filter(c => c.estado === 'BOOKING_FAILED_NO_SLOT').length,
         ERROR: controles.filter(c => ['BOOKING_FAILED_XENCO','FAILED_NO_PHONE','FAILED'].includes(c.estado)).length,
     };
 
     const controlesFiltrados = controles.filter(c => {
         const pasaFecha = filtroFecha === 'TODOS' || c.fechaCitaOriginal === filtroFecha;
-        const esPendiente = !['BOOKED','BOOKED_AND_REMINDED','BOOKING_FAILED_NO_SLOT','BOOKING_FAILED_XENCO','FAILED_NO_PHONE','FAILED','REMINDED_NO_BOOKING'].includes(c.estado);
+        const esPendiente = !['BOOKED','BOOKED_AND_REMINDED','BOOKED_PRESENCIAL','BOOKING_FAILED_NO_SLOT','BOOKING_FAILED_XENCO','FAILED_NO_PHONE','FAILED','REMINDED_NO_BOOKING'].includes(c.estado);
         let pasaEstado = true;
         if (filtroEstado === 'PENDIENTE') pasaEstado = esPendiente;
         else if (filtroEstado === 'AGENDADO') pasaEstado = c.estado === 'BOOKED' || c.estado === 'BOOKED_AND_REMINDED';
+        else if (filtroEstado === 'PRESENCIAL') pasaEstado = c.estado === 'BOOKED_PRESENCIAL';
         else if (filtroEstado === 'SIN_CUPO') pasaEstado = c.estado === 'BOOKING_FAILED_NO_SLOT';
         else if (filtroEstado === 'ERROR') pasaEstado = ['BOOKING_FAILED_XENCO','FAILED_NO_PHONE','FAILED'].includes(c.estado);
         return pasaFecha && pasaEstado;
@@ -1189,11 +1192,12 @@ function ControlesViewerModal({ onClose }) {
                 {/* ── Resumen de estados ── */}
                 <div className="flex items-center gap-2 px-6 py-2 flex-shrink-0 flex-wrap" style={{ background: 'rgba(20,18,28,0.8)', borderBottom: '1px solid rgba(130,99,177,0.1)' }}>
                     {[
-                        { key: 'TODOS',    label: 'Todos',     count: estadosResumen.TOTAL,    bg: 'rgba(130,99,177,0.2)',   color: '#C4AFED' },
-                        { key: 'PENDIENTE',label: 'Pendientes',count: estadosResumen.PENDIENTE, bg: 'rgba(251,191,36,0.15)', color: '#FCD34D' },
-                        { key: 'AGENDADO', label: 'Agendados', count: estadosResumen.AGENDADO,  bg: 'rgba(74,222,128,0.15)', color: '#86EFAC' },
-                        { key: 'SIN_CUPO', label: 'Sin cupo',  count: estadosResumen.SIN_CUPO,  bg: 'rgba(251,146,60,0.15)', color: '#FED7AA' },
-                        { key: 'ERROR',    label: 'Error',     count: estadosResumen.ERROR,     bg: 'rgba(177,64,64,0.15)',  color: '#F9A8A8' },
+                        { key: 'TODOS',      label: 'Todos',        count: estadosResumen.TOTAL,      bg: 'rgba(130,99,177,0.2)',   color: '#C4AFED' },
+                        { key: 'PENDIENTE',  label: 'Pendientes',   count: estadosResumen.PENDIENTE,  bg: 'rgba(251,191,36,0.15)', color: '#FCD34D' },
+                        { key: 'AGENDADO',   label: 'Bot ✅',        count: estadosResumen.AGENDADO,   bg: 'rgba(74,222,128,0.15)', color: '#86EFAC' },
+                        { key: 'PRESENCIAL', label: 'Presencial 🏥', count: estadosResumen.PRESENCIAL, bg: 'rgba(56,189,248,0.15)', color: '#7DD3FC' },
+                        { key: 'SIN_CUPO',  label: 'Sin cupo',     count: estadosResumen.SIN_CUPO,   bg: 'rgba(251,146,60,0.15)', color: '#FED7AA' },
+                        { key: 'ERROR',     label: 'Error',        count: estadosResumen.ERROR,      bg: 'rgba(177,64,64,0.15)',  color: '#F9A8A8' },
                     ].map(btn => (
                         <button key={btn.key}
                             onClick={() => setFiltroEstado(btn.key)}

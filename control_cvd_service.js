@@ -123,6 +123,50 @@ class ControlCVDService {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // HELPER: Verifica si el paciente ya tiene una cita de control CVD
+    // agendada en Xenco dentro del rango 1-4 meses a futuro.
+    // Si existe → fue agendada presencialmente por la clínica.
+    // ─────────────────────────────────────────────────────────────────────────
+    async hasExistingControlCita(cedulaRaw) {
+        try {
+            // Construir código interno de 14 dígitos (mismo formato que Xenco)
+            const codigoPac = String(cedulaRaw).padStart(14, '0');
+
+            // Rango: desde hoy + 25 días hasta hoy + 4 meses (para capturar 2 y 3 meses)
+            const hoy = new Date();
+            const desde = new Date(hoy); desde.setDate(hoy.getDate() + 25);
+            const hasta = new Date(hoy); hasta.setMonth(hoy.getMonth() + 4);
+
+            const desdeDecimal = this.dateToDecimal(desde);
+            const hastaDecimal = this.dateToDecimal(hasta);
+
+            const citasFuturas = await prisma.$queryRaw`
+                SELECT TOP 1 c.KC3_FCH, c.KC3_ARTIC, c.KC3_MEDICO
+                FROM TMCITASUSUARIOS c
+                WHERE c.KC3_COD = ${codigoPac}
+                  AND c.KC3_FCH >= ${desdeDecimal}
+                  AND c.KC3_FCH <= ${hastaDecimal}
+                  AND c.KC3_NUM > 0
+                  AND LTRIM(RTRIM(c.KC3_ARTIC)) IN ('890301-7', '890301-8', '890301-12', '890301-13', '890301-14', '890301-15', '890301-16')
+            `;
+
+            if (citasFuturas && citasFuturas.length > 0) {
+                const c = citasFuturas[0];
+                return {
+                    found: true,
+                    fecha: String(c.KC3_FCH),
+                    artic: String(c.KC3_ARTIC || '').trim(),
+                    medico: String(c.KC3_MEDICO || '')
+                };
+            }
+            return { found: false };
+        } catch (e) {
+            logger.warn(`[Control CVD] No se pudo verificar cita existente para ${cedulaRaw}: ${e.message}`);
+            return { found: false }; // Si falla la consulta, continuar normalmente
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // FASE 1: DETECCIÓN (8 PM) — Busca controles CVD finalizados hoy
     // ─────────────────────────────────────────────────────────────────────────
     async detectFinishedAppointments() {
@@ -149,12 +193,12 @@ class ControlCVDService {
                 const cedula = String(cita.KC3_COD).trim().replace(/^0+/, '');
                 const nombre = await this.getNombreForPatient(cedula);
 
-                // Evitar duplicados
+                // Evitar duplicados (incluye BOOKED_PRESENCIAL para no re-procesar)
                 const exists = await botPrisma.controlReminder.findFirst({
                     where: {
                         cedula: cedula,
                         fechaCitaOriginal: String(cita.KC3_FCH),
-                        estado: { in: ['PENDING', 'BOOKED'] }
+                        estado: { in: ['PENDING', 'BOOKED', 'BOOKED_PRESENCIAL'] }
                     }
                 });
                 if (exists) {
@@ -186,20 +230,45 @@ class ControlCVDService {
 
                 const articuloValido = String(cita.KC3_ARTIC || '').trim();
 
-                await botPrisma.controlReminder.create({
-                    data: {
-                        cedula,
-                        paciente: nombre,
-                        medicoOriginal: String(cita.KC3_MEDICO),
-                        fechaCitaOriginal: String(cita.KC3_FCH),
-                        articuloCita: articuloValido,
-                        fechaControl: fechaControlStr,
-                        fechaRecordatorio: fechaRecordatorioStr,
-                        estado: 'PENDING',
-                        epsInfo: epsLabel
-                    }
-                });
-                logger.info(`[Control CVD] Registrado: ${cedula} | EPS: ${epsLabel} | Control: ${fechaControlStr} | Código: ${articuloValido}`);
+                // ── Verificar si el paciente YA tiene cita agendada en Xenco ──
+                const citaExistente = await this.hasExistingControlCita(cedula);
+
+                if (citaExistente.found) {
+                    // Ya fue agendado presencialmente en la clínica
+                    logger.info(`[Control CVD] Paciente ${cedula} ya tiene cita en Xenco el ${citaExistente.fecha}. Marcando BOOKED_PRESENCIAL.`);
+                    await botPrisma.controlReminder.create({
+                        data: {
+                            cedula,
+                            paciente: nombre,
+                            medicoOriginal: String(cita.KC3_MEDICO),
+                            fechaCitaOriginal: String(cita.KC3_FCH),
+                            articuloCita: articuloValido,
+                            fechaControl: citaExistente.fecha,   // fecha real en Xenco
+                            fechaRecordatorio: fechaRecordatorioStr,
+                            estado: 'BOOKED_PRESENCIAL',
+                            epsInfo: epsLabel,
+                            citaMedico: citaExistente.medico,
+                            citaFch: citaExistente.fecha,
+                        }
+                    });
+                    logger.info(`[Control CVD] Presencial registrado: ${cedula} | Cita Xenco: ${citaExistente.fecha} | Artículo: ${citaExistente.artic}`);
+                } else {
+                    // No tiene cita → el bot la intentará agendar mañana a las 9 AM
+                    await botPrisma.controlReminder.create({
+                        data: {
+                            cedula,
+                            paciente: nombre,
+                            medicoOriginal: String(cita.KC3_MEDICO),
+                            fechaCitaOriginal: String(cita.KC3_FCH),
+                            articuloCita: articuloValido,
+                            fechaControl: fechaControlStr,
+                            fechaRecordatorio: fechaRecordatorioStr,
+                            estado: 'PENDING',
+                            epsInfo: epsLabel
+                        }
+                    });
+                    logger.info(`[Control CVD] Pendiente para bot: ${cedula} | EPS: ${epsLabel} | Control: ${fechaControlStr}`);
+                }
             }
         } catch (e) {
             logger.error('[Control CVD] Error en detección:', e.message);
