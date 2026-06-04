@@ -281,9 +281,9 @@ class ControlCVDService {
     // ─────────────────────────────────────────────────────────────────────────
     async executeImmediateBooking() {
         try {
-            // Buscar controles PENDING (detectados pero sin agendar aún)
+            // Buscar controles PENDING o SIN_CUPO (detectados pero sin agendar aún, o que fallaron por cupo antes)
             const pending = await botPrisma.controlReminder.findMany({
-                where: { estado: 'PENDING' }
+                where: { estado: { in: ['PENDING', 'BOOKING_FAILED_NO_SLOT'] } }
             });
 
             logger.info(`[Control CVD] Agendamiento inmediato: ${pending.length} controles pendientes.`);
@@ -291,6 +291,22 @@ class ControlCVDService {
             for (const record of pending) {
                 // ── try individual por paciente: si uno falla, sigue con el siguiente ──
                 try {
+                    // 1. Verificación de última hora: ¿El paciente ya sacó cita presencialmente?
+                    const citaExistente = await this.hasExistingControlCita(record.cedula);
+                    if (citaExistente.found) {
+                        logger.info(`[Control CVD] Paciente ${record.cedula} ya sacó cita en Xenco el ${citaExistente.fecha} antes de que el bot agendara. Marcando BOOKED_PRESENCIAL.`);
+                        await botPrisma.controlReminder.update({
+                            where: { id: record.id },
+                            data: {
+                                estado: 'BOOKED_PRESENCIAL',
+                                fechaControl: citaExistente.fecha,
+                                citaMedico: citaExistente.medico,
+                                citaFch: citaExistente.fecha
+                            }
+                        });
+                        continue;
+                    }
+
                     const waId = await this.getWhatsAppId(record.cedula);
 
                     if (!waId) {
@@ -315,22 +331,28 @@ class ControlCVDService {
 
                     if (!slots || slots.length === 0) {
                         logger.warn(`[Control CVD] Sin horarios disponibles el ${fechaFormat} para ${record.cedula}. Marcando BOOKING_FAILED_NO_SLOT.`);
+                        
+                        // Solo enviar el mensaje de WhatsApp si el paciente estaba PENDING.
+                        // Si ya estaba en SIN_CUPO, no volver a enviarle el mensaje para no hacer spam.
+                        const enviarMensaje = record.estado === 'PENDING';
+
                         await botPrisma.controlReminder.update({
                             where: { id: record.id },
                             data: { estado: 'BOOKING_FAILED_NO_SLOT' }
                         });
 
-                        // Avisarle que no se pudo agendar — try propio para no cortar el loop
-                        try {
-                            await this.client.sendMessage(waId,
-                                `🏥 *AURORA - Clínica*\n\n` +
-                                `Hola ${record.paciente}, 😊\n\n` +
-                                `Ayer asististe a tu control de Riesgo Cardiovascular. ¡Gracias por tu compromiso con tu salud!\n\n` +
-                                `Intentamos apartarte tu cita de control a los próximos meses automáticamente, pero por el momento no encontramos horarios disponibles en la agenda.\n\n` +
-                                `Por favor, comunícate con nosotros para programar tu cita de seguimiento. 📞`
-                            );
-                        } catch (sendErr) {
-                            logger.warn(`[Control CVD] No se pudo enviar WhatsApp SIN CUPO a ${record.cedula}: ${sendErr.message}`);
+                        if (enviarMensaje) {
+                            try {
+                                await this.client.sendMessage(waId,
+                                    `🏥 *AURORA - Clínica*\n\n` +
+                                    `Hola ${record.paciente}, 😊\n\n` +
+                                    `Ayer asististe a tu control de Riesgo Cardiovascular. ¡Gracias por tu compromiso con tu salud!\n\n` +
+                                    `Intentamos apartarte tu cita de control a los próximos meses automáticamente, pero por el momento no encontramos horarios disponibles en la agenda.\n\n` +
+                                    `Por favor, comunícate con nosotros para programar tu cita de seguimiento. 📞`
+                                );
+                            } catch (sendErr) {
+                                logger.warn(`[Control CVD] No se pudo enviar WhatsApp SIN CUPO a ${record.cedula}: ${sendErr.message}`);
+                            }
                         }
                         continue;
                     }
