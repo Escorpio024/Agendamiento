@@ -47,8 +47,17 @@ class ChatService {
             // Siempre construir un Date válido y luego convertir a ISO string
             // ISO string evita el bug de Prisma SQLite que guarda Date como número Unix
             const rawTs = messageData.timestamp;
-            const tsDate = rawTs instanceof Date ? rawTs : new Date(typeof rawTs === 'number' && rawTs > 1e12 ? rawTs : (rawTs || Date.now()));
-            const tsISO  = tsDate.toISOString();
+            // WhatsApp da timestamps en SEGUNDOS (~1.75 billion). Si < 1e10 = segundos → × 1000.
+            // Si ya viene en ms (> 1e10) o es un Date, usarlo directo.
+            let tsDate;
+            if (rawTs instanceof Date) {
+                tsDate = rawTs;
+            } else if (typeof rawTs === 'number' && rawTs > 0) {
+                tsDate = new Date(rawTs < 1e10 ? rawTs * 1000 : rawTs);
+            } else {
+                tsDate = new Date();
+            }
+            const tsISO = tsDate.toISOString();
 
             // Usar $executeRaw para el INSERT/UPSERT:
             // - Evita que Prisma LEA registros con timestamps rotos antes de escribir
