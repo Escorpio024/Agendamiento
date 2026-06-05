@@ -460,6 +460,10 @@ async function getAvailableSlots(fechaStr, tipo = 'medicina general', preferredD
     
     // Ahora filtramos esos turnos "actuales" por especialidad y sede
     let turnos = Object.values(turnosPorDoctor).filter(t => {
+        // El Visor de Agendas SI respeta TME_FCH_FIN. Si un médico se retiró, su FCH_FIN es menor a hoy,
+        // aunque siga teniendo slots fantasma generados en TME2 para fechas futuras.
+        if (t.TME_FCH_FIN && t.TME_FCH_FIN < dateDecimal) return false;
+        
         if (sede === 'Sevilla') return t.TME_CODM == 444;
         return !especialidad || t.TME_ESPECIALIDAD == especialidad.ESP_COD;
     });
