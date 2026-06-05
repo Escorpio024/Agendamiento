@@ -1175,17 +1175,25 @@ function ControlesViewerModal({ onClose }) {
                 </div>
 
                 {/* Barra de acciones */}
-                <div className="flex items-center gap-3 px-6 py-3 flex-shrink-0" style={{ background: 'rgba(130,99,177,0.06)', borderBottom: '1px solid rgba(130,99,177,0.1)' }}>
+                <div className="flex items-center gap-3 px-6 py-3 flex-shrink-0 flex-wrap" style={{ background: 'rgba(130,99,177,0.06)', borderBottom: '1px solid rgba(130,99,177,0.1)' }}>
+                    <button
+                        onClick={handleScanPresencial}
+                        disabled={escaneando || procesando}
+                        className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all"
+                        style={{ background: escaneando ? 'rgba(56,189,248,0.1)' : 'rgba(56,189,248,0.2)', color: '#7DD3FC', border: '1px solid rgba(56,189,248,0.35)' }}>
+                        {escaneando ? <Loader2 size={13} className="animate-spin" /> : <span>🔍</span>}
+                        {escaneando ? 'Verificando en Xenco...' : '🏥 Verificar Presenciales en Xenco'}
+                    </button>
                     <button
                         onClick={handleProcesarPendientes}
-                        disabled={procesando}
+                        disabled={procesando || escaneando}
                         className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all"
                         style={{ background: procesando ? 'rgba(130,99,177,0.2)' : 'rgba(130,99,177,0.35)', color: '#C4AFED', border: '1px solid rgba(130,99,177,0.4)' }}>
                         {procesando ? <Loader2 size={13} className="animate-spin" /> : <CalendarCheck2 size={13} />}
                         {procesando ? 'Procesando y enviando WhatsApp...' : '📲 Agendar Pendientes y Avisar Ahora'}
                     </button>
-                    {procesMsg && (
-                        <span className="text-xs" style={{ color: '#A1E3D8' }}>✔ {procesMsg}</span>
+                    {(procesMsg || scanMsg) && (
+                        <span className="text-xs" style={{ color: '#A1E3D8' }}>✔ {procesMsg || scanMsg}</span>
                     )}
                 </div>
 

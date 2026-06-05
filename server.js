@@ -317,6 +317,27 @@ app.post('/api/cardiovascular/controles/procesar-pendientes', async (req, res) =
     }
 });
 
+// POST /api/cardiovascular/controles/scan-presenciales — Verifica masivamente en Xenco quién ya tiene cita agendada presencialmente
+app.post('/api/cardiovascular/controles/scan-presenciales', async (req, res) => {
+    try {
+        const total = await botPrisma.controlReminder.count({
+            where: { estado: { in: ['BOOKING_FAILED_NO_SLOT', 'PENDING', 'BOOKING_FAILED_XENCO', 'FAILED_NO_PHONE'] } }
+        });
+        if (total === 0) {
+            return res.json({ success: true, message: 'No hay pacientes pendientes para escanear.', total: 0, marcados: 0 });
+        }
+        // Responder inmediatamente, procesar en background
+        res.json({ success: true, message: `Escaneando ${total} pacientes contra Xenco... El Visor se actualizará en los próximos minutos.`, total });
+        setImmediate(() => {
+            controlCVDService.scanAndMarkPresencial()
+                .catch(e => logger.error('[CARDIOVASCULAR] Error en escaneo masivo:', e.message));
+        });
+    } catch (error) {
+        logger.error('[CARDIOVASCULAR] Error iniciando escaneo masivo:', error.message);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
 
 // Códigos CUPS de exámenes cardiovasculares (exactos tal como aparecen en Xenco)
 const CVD_CODES = [

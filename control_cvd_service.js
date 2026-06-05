@@ -502,6 +502,72 @@ class ControlCVDService {
             logger.error('[Control CVD] Error en recordatorio de laboratorios:', e.message);
         }
     }
+    // ─────────────────────────────────────────────────────────────────────────
+    // ESCANEO MASIVO: Verifica todos los SIN CUPO contra Xenco
+    // Marca como BOOKED_PRESENCIAL si el paciente ya tiene cita futura.
+    // No filtra por artículo — sirve para cualquier tipo de control agendado.
+    // ─────────────────────────────────────────────────────────────────────────
+    async scanAndMarkPresencial() {
+        try {
+            const sinCupo = await botPrisma.controlReminder.findMany({
+                where: { estado: { in: ['BOOKING_FAILED_NO_SLOT', 'PENDING', 'BOOKING_FAILED_XENCO', 'FAILED_NO_PHONE'] } }
+            });
+
+            logger.info(`[Control CVD] Escaneando ${sinCupo.length} pacientes sin cupo contra Xenco...`);
+
+            const hoy = new Date();
+            const desdeDecimal = this.dateToDecimal(hoy); // desde hoy mismo en adelante
+            const hasta = new Date(hoy); hasta.setMonth(hoy.getMonth() + 5);
+            const hastaDecimal = this.dateToDecimal(hasta);
+
+            let marcados = 0;
+            for (const record of sinCupo) {
+                try {
+                    // Formato de 14 dígitos que usa Xenco
+                    const codigoPac = String(record.cedula).padStart(14, '0');
+
+                    // Buscar CUALQUIER cita futura (no filtra por artículo)
+                    const citasFuturas = await prisma.$queryRaw`
+                        SELECT TOP 1 c.KC3_FCH, c.KC3_ARTIC, c.KC3_MEDICO, c.KC3_HH, c.KC3_MM
+                        FROM TMCITASUSUARIOS c
+                        WHERE c.KC3_COD = ${codigoPac}
+                          AND c.KC3_FCH >= ${desdeDecimal}
+                          AND c.KC3_FCH <= ${hastaDecimal}
+                          AND c.KC3_NUM > 0
+                          AND ISNULL(LTRIM(RTRIM(c.KC3_COD)), '') <> ''
+                          AND c.KC3_COD <> '00000000000000'
+                        ORDER BY c.KC3_FCH ASC
+                    `;
+
+                    if (citasFuturas && citasFuturas.length > 0) {
+                        const c = citasFuturas[0];
+                        const fechaStr = String(c.KC3_FCH);
+                        const horaStr = c.KC3_HH != null ? `${String(c.KC3_HH).padStart(2,'0')}:${String(c.KC3_MM||0).padStart(2,'0')}` : null;
+
+                        await botPrisma.controlReminder.update({
+                            where: { id: record.id },
+                            data: {
+                                estado:       'BOOKED_PRESENCIAL',
+                                fechaControl: fechaStr,
+                                citaMedico:   String(c.KC3_MEDICO || ''),
+                                citaFch:      fechaStr,
+                                citaHora:     horaStr,
+                            }
+                        });
+                        logger.info(`[Control CVD] ✅ Presencial detectado: ${record.cedula} → ${fechaStr} (artic: ${c.KC3_ARTIC})`);
+                        marcados++;
+                    }
+                } catch (innerErr) {
+                    logger.warn(`[Control CVD] Error escaneando ${record.cedula}: ${innerErr.message}`);
+                }
+            }
+            logger.info(`[Control CVD] Escaneo completado: ${marcados} pacientes marcados como BOOKED_PRESENCIAL de ${sinCupo.length} revisados.`);
+            return { total: sinCupo.length, marcados };
+        } catch (e) {
+            logger.error('[Control CVD] Error en escaneo masivo presencial:', e.message);
+            return { total: 0, marcados: 0 };
+        }
+    }
 }
 
 module.exports = new ControlCVDService();
