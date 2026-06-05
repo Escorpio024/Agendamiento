@@ -281,9 +281,9 @@ class ControlCVDService {
     // ─────────────────────────────────────────────────────────────────────────
     async executeImmediateBooking() {
         try {
-            // Buscar controles PENDING o SIN_CUPO (detectados pero sin agendar aún, o que fallaron por cupo antes)
+            // Buscar controles PENDING, SIN_CUPO o ERROR_XENCO (para reintento)
             const pending = await botPrisma.controlReminder.findMany({
-                where: { estado: { in: ['PENDING', 'BOOKING_FAILED_NO_SLOT'] } }
+                where: { estado: { in: ['PENDING', 'BOOKING_FAILED_NO_SLOT', 'BOOKING_FAILED_XENCO'] } }
             });
 
             logger.info(`[Control CVD] Agendamiento inmediato: ${pending.length} controles pendientes.`);
