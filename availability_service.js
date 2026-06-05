@@ -1227,7 +1227,7 @@ async function getNextAvailableSlots(startDateStr, tipo, doctor, sede = 'Ebejico
     const BATCH = 2; // Reducido a 2 para no saturar el pool de conexiones de Prisma
     const MAX = 30; // Reducido a 30 días para evitar timeouts en Prisma
     try {
-        for (let i = 1; i <= MAX; i += BATCH) {
+        for (let i = 0; i <= MAX; i += BATCH) {
             const batch = [];
             for (let j = i; j < Math.min(i + BATCH, MAX + 1); j++) {
                 const d = new Date(startDateStr + 'T12:00:00');
