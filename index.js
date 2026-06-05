@@ -1,4 +1,14 @@
 require('dotenv').config();
+
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('[CRITICAL] Unhandled Rejection at:', promise, 'reason:', reason);
+    // Evitar que el proceso de Node crashee
+});
+
+process.on('uncaughtException', (error) => {
+    console.error('[CRITICAL] Uncaught Exception:', error);
+    // Evitar que el proceso de Node crashee
+});
 const audioService = require('./audio_service');
 
 const { Client, LocalAuth } = require('whatsapp-web.js');
@@ -159,35 +169,38 @@ client.on('auth_failure', (msg) => {
 // Solo activo si WhatsApp está habilitado
 if (process.env.NO_WHATSAPP !== 'true') {
     let keepaliveFailCount = 0;
+    let keepaliveReconnecting = false;
     setInterval(async () => {
+        if (keepaliveReconnecting) return; // Ya está reconectando, no volver a entrar
         try {
             const state = await client.getState();
-            keepaliveFailCount = 0;
-            console.log(`[KEEPALIVE] Estado WA: ${state}`);
+            keepaliveFailCount = 0; // Reset en éxito
             if (state !== 'CONNECTED') {
                 console.warn('[KEEPALIVE] ⚠️ No conectado, intentando reconectar...');
                 client.initialize().catch(() => {});
             }
         } catch (e) {
             keepaliveFailCount++;
-            const isChromeCrash = e.message && (
-                e.message.includes('detached Frame') ||
-                e.message.includes('Target closed') ||
-                e.message.includes('Session closed') ||
-                e.message.includes('Protocol error')
-            );
-            if (isChromeCrash) {
-                console.error(`[KEEPALIVE] 💀 Chrome caído (${e.message.substring(0,50)}). PM2 reiniciará el proceso...`);
-                process.exit(1);
-            }
             console.warn(`[KEEPALIVE] Error #${keepaliveFailCount} comprobando estado:`, e.message?.substring(0, 80));
-            if (keepaliveFailCount >= 3) {
-                console.error('[KEEPALIVE] 💀 3 fallos consecutivos. Reiniciando proceso...');
-                process.exit(1);
+            // Solo intentar reconectar suave — NUNCA matar el proceso.
+            // Matar el proceso (process.exit) cortaba las conversaciones activas.
+            if (keepaliveFailCount >= 5) {
+                console.warn('[KEEPALIVE] 5 fallos consecutivos — intentando reiniciar WA sin matar el proceso...');
+                keepaliveReconnecting = true;
+                keepaliveFailCount = 0;
+                try {
+                    await client.initialize();
+                    console.log('[KEEPALIVE] ✅ Reconexión exitosa.');
+                } catch (reinitErr) {
+                    console.error('[KEEPALIVE] ❌ Reconexión fallida:', reinitErr.message?.substring(0, 80));
+                } finally {
+                    keepaliveReconnecting = false;
+                }
             }
         }
     }, 4 * 60 * 1000);
 }
+
 
 
 client.on('message_create', async (msg) => {
@@ -244,21 +257,22 @@ async function withSenderLock(sender, fn) {
 }
 
 client.on('message', async (msg) => {
-    const sender = msg.from;
-    const textBody = msg.body ? msg.body.trim() : "";
-    console.log(`\n======================================================`);
-    console.log(`[INBOX LOG MAESTRO] Entrante de ${sender}: "${textBody}"`);
-    console.log(`======================================================\n`);
+    try {
+        const sender = msg.from;
+        const textBody = msg.body ? msg.body.trim() : "";
+        console.log(`\n======================================================`);
+        console.log(`[INBOX LOG MAESTRO] Entrante de ${sender}: "${textBody}"`);
+        console.log(`======================================================\n`);
 
-    // Prevent double-processing if WhatsApp Web fires the event twice
-    if (processedMessages.has(msg.id._serialized)) return;
-    processedMessages.add(msg.id._serialized);
-    if (processedMessages.size > 2000) processedMessages.clear();
+        // Prevent double-processing if WhatsApp Web fires the event twice
+        if (processedMessages.has(msg.id._serialized)) return;
+        processedMessages.add(msg.id._serialized);
+        if (processedMessages.size > 2000) processedMessages.clear();
 
-    const chat = await msg.getChat();
+        const chat = await msg.getChat();
 
-    // Serializar mensajes del mismo sender para evitar race conditions
-    await withSenderLock(sender, async () => {
+        // Serializar mensajes del mismo sender para evitar race conditions
+        await withSenderLock(sender, async () => {
 
         // Identificamos si es nota de voz (ptt = push to talk) o audio normal
         const isAudio = msg.type === 'ptt' || msg.type === 'audio';
@@ -1848,9 +1862,12 @@ client.on('message', async (msg) => {
                 const nowLocal = new Date();
                 const todayStr = `${nowLocal.getFullYear()}-${String(nowLocal.getMonth()+1).padStart(2,'0')}-${String(nowLocal.getDate()).padStart(2,'0')}`;
 
-                // Helper: query con timeout para no colgar el lock
+                // Helper: query con timeout para no colgar el lock. Añadido .catch para evitar UnhandledPromiseRejection si la BD tira error después del timeout
                 const withTimeout = (promise, ms, fallback) =>
-                    Promise.race([promise, new Promise(r => setTimeout(() => r(fallback), ms))]);
+                    Promise.race([
+                        promise.catch(err => { console.error('[Timeout] Background promise rejected:', err.message); return fallback; }),
+                        new Promise(r => setTimeout(() => r(fallback), ms))
+                    ]);
 
                 // Buscar el primer día con disponibilidad
                 const firstAvail = await withTimeout(
@@ -2172,7 +2189,9 @@ client.on('message', async (msg) => {
             userData.step = 'POST_CONFIRM';
         }
     }); // cierra el con-lock
-
+    } catch (err) {
+        console.error('[CRITICAL] Uncaught exception in message handler:', err);
+    }
 });
 
 async function loadHistoricalMessages() {

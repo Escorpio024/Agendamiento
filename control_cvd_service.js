@@ -326,7 +326,7 @@ class ControlCVDService {
 
                     // Buscar cupos en la agenda de P Y P MEDICOS (busca desde la fecha de control hacia adelante)
                     const availResult = await availabilityService.getNextAvailableSlots(
-                        fechaFormat, 'medicina general', 'p y p medicos'
+                        fechaFormat, 'medicina general', 'p y p medicos', 30, 'Ebejico', true
                     );
 
                     if (!availResult || !availResult.slots || availResult.slots.length === 0) {
@@ -343,10 +343,6 @@ class ControlCVDService {
 
                         if (enviarMensaje) {
                             try {
-                                await this.client.sendMessage(waId,
-                                    `🏥 *AURORA - Clínica*\n\n` +
-                                    `Hola ${record.paciente}, 😊\n\n` +
-                                    `Ayer asististe a tu control de Riesgo Cardiovascular. ¡Gracias por tu compromiso con tu salud!\n\n` +
                                     `Intentamos apartarte tu cita de control a los próximos meses automáticamente, pero por el momento no encontramos horarios disponibles en la agenda.\n\n` +
                                     `Por favor, comunícate con nosotros para programar tu cita de seguimiento. 📞`
                                 );
@@ -373,7 +369,9 @@ class ControlCVDService {
                         waId,
                         tipoEspecialidad,
                         slot.doctorId,
-                        pacData
+                        pacData,
+                        'Ebejico',
+                        true // isCVD flag
                     );
 
                     if (reserved) {
@@ -413,7 +411,18 @@ class ControlCVDService {
                             `Si necesitas cambiar esta cita, escríbenos o comunícate con la clínica. 📞`;
 
                         try {
-                            await this.client.sendMessage(waId, msgConfirmacion);
+                            const isRegistered = await Promise.race([
+                                this.client.isRegisteredUser(waId),
+                                new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout isRegisteredUser')), 5000))
+                            ]);
+                            if (isRegistered) {
+                                await Promise.race([
+                                    this.client.sendMessage(waId, msgConfirmacion),
+                                    new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout sendMessage')), 5000))
+                                ]);
+                            } else {
+                                logger.warn(`[Control CVD] No se pudo enviar WhatsApp CONFIRMACIÓN a ${record.cedula}: El número no tiene WhatsApp activo.`);
+                            }
                         } catch (sendErr) {
                             logger.warn(`[Control CVD] No se pudo enviar WhatsApp CONFIRMACIÓN a ${record.cedula}: ${sendErr.message}`);
                         }
@@ -426,12 +435,23 @@ class ControlCVDService {
                         });
 
                         try {
-                            await this.client.sendMessage(waId,
-                                `🏥 *AURORA - Clínica*\n\n` +
-                                `Hola ${record.paciente}, 😊\n\n` +
-                                `Ayer asististe a tu control de Riesgo Cardiovascular.\n\n` +
-                                `Intentamos apartar tu cita de seguimiento automáticamente pero ocurrió un inconveniente técnico. Por favor comunícate con la clínica para programarla. 📞`
-                            );
+                            const isRegistered = await Promise.race([
+                                this.client.isRegisteredUser(waId),
+                                new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout isRegisteredUser')), 5000))
+                            ]);
+                            if (isRegistered) {
+                                await Promise.race([
+                                    this.client.sendMessage(waId,
+                                        `🏥 *AURORA - Clínica*\n\n` +
+                                        `Hola ${record.paciente}, 😊\n\n` +
+                                        `Ayer asististe a tu control de Riesgo Cardiovascular.\n\n` +
+                                        `Intentamos apartar tu cita de seguimiento automáticamente pero ocurrió un inconveniente técnico. Por favor comunícate con la clínica para programarla. 📞`
+                                    ),
+                                    new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout sendMessage')), 5000))
+                                ]);
+                            } else {
+                                logger.warn(`[Control CVD] No se pudo enviar WhatsApp ERROR XENCO a ${record.cedula}: El número no tiene WhatsApp activo.`);
+                            }
                         } catch (sendErr) {
                             logger.warn(`[Control CVD] No se pudo enviar WhatsApp ERROR XENCO a ${record.cedula}: ${sendErr.message}`);
                         }

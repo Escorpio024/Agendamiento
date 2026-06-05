@@ -30,31 +30,40 @@ const TTL_ESP     = 60 * 60 * 1000; // 60 min — especialidades muy estáticas
 async function _getTurnosCache() {
     const now = Date.now();
     if (_cache.turnos && now < _cache.turnosExpiry) return _cache.turnos;
-    const todayDec = dateToDecimal(new Date());
-    _cache.turnos = await prisma.turnoMedico.findMany({
-        orderBy: { TME_FCH: 'desc' }
-    });
-    _cache.turnosExpiry = now + TTL_TURNOS;
-    logger.debug(`[CACHE] Turnos: ${_cache.turnos.length} registros cargados`);
-    return _cache.turnos;
+    try {
+        _cache.turnos = await prisma.turnoMedico.findMany({
+            orderBy: { TME_FCH: 'desc' }
+        });
+        _cache.turnosExpiry = now + TTL_TURNOS;
+        logger.debug(`[CACHE] Turnos: ${_cache.turnos.length} registros cargados`);
+        return _cache.turnos;
+    } catch (e) {
+        logger.error(`[DB] Error en _getTurnosCache: ${e.message}`);
+        return _cache.turnos || [];
+    }
 }
 
 /** Devuelve todos los médicos activos, cacheados 30 min */
 async function _getMedicosCache() {
     const now = Date.now();
     if (_cache.medicos && now < _cache.medicosExpiry) return _cache.medicos;
-    _cache.medicos = await prisma.medico.findMany({ 
-        where: { 
-            OR: [
-                { MED_EST_ESTADO: 'A' },
-                { MED_EST_ESTADO: null },
-                { MED_EST_ESTADO: '' }
-            ]
-        } 
-    });
-    _cache.medicosExpiry = now + TTL_MEDICOS;
-    logger.debug(`[CACHE] Médicos: ${_cache.medicos.length} activos cargados`);
-    return _cache.medicos;
+    try {
+        _cache.medicos = await prisma.medico.findMany({ 
+            where: { 
+                OR: [
+                    { MED_EST_ESTADO: 'A' },
+                    { MED_EST_ESTADO: null },
+                    { MED_EST_ESTADO: '' }
+                ]
+            } 
+        });
+        _cache.medicosExpiry = now + TTL_MEDICOS;
+        logger.debug(`[CACHE] Médicos: ${_cache.medicos.length} activos cargados`);
+        return _cache.medicos;
+    } catch (e) {
+        logger.error(`[DB] Error en _getMedicosCache: ${e.message}`);
+        return _cache.medicos || [];
+    }
 }
 
 /** Devuelve especialidad por espCod/tipo, cacheada 60 min */
@@ -65,13 +74,17 @@ async function _getEspecialidadCache(espCod, tipo) {
         return _cache.especialidades[key].val;
     }
     let esp = null;
-    if (espCod) {
-        esp = await prisma.especialidad.findFirst({ where: { ESP_COD: espCod } });
-        if (!esp && !/^\d+$/.test(tipo || '')) {
-            esp = await prisma.especialidad.findFirst({ where: { ESP_NOMBRE: { contains: String(tipo).toUpperCase() } } });
+    try {
+        if (espCod) {
+            esp = await prisma.especialidad.findFirst({ where: { ESP_COD: espCod } });
+            if (!esp && !/^\d+$/.test(tipo || '')) {
+                esp = await prisma.especialidad.findFirst({ where: { ESP_NOMBRE: { contains: String(tipo).toUpperCase() } } });
+            }
         }
+        _cache.especialidades[key] = { val: esp, exp: now + TTL_ESP };
+    } catch (e) {
+        logger.error(`[DB] Error en _getEspecialidadCache: ${e.message}`);
     }
-    _cache.especialidades[key] = { val: esp, exp: now + TTL_ESP };
     return esp;
 }
 
@@ -424,7 +437,7 @@ async function findPaciente(userId) {
 // DISPONIBILIDAD
 // =========================================
 
-async function getAvailableSlots(fechaStr, tipo = 'medicina general', preferredDoctor = null, skipLimit = false, sede = 'Ebejico') {
+async function getAvailableSlots(fechaStr, tipo = 'medicina general', preferredDoctor = null, skipLimit = false, sede = 'Ebejico', isCVD = false) {
     if (!prisma) return [];
     const dateStr = parseRelativeDate(fechaStr);
     const dateDecimal = dateToDecimal(new Date(dateStr + 'T12:00:00'));
@@ -488,6 +501,17 @@ async function getAvailableSlots(fechaStr, tipo = 'medicina general', preferredD
         const name = preferredDoctor.toLowerCase();
         const pref = turnos.filter(t => medicoMap[Number(t.TME_CODM)]?.MED_NOMBRE?.toLowerCase().includes(name));
         if (pref.length) filteredTurnos = pref;
+    }
+
+    // 4.5. Filtrar doctores exclusivos de PYP/CVD si no es el bot cardiovascular
+    if (!isCVD) {
+        const bloqueadosNormal = ['pypmedicos', 'pypenfermeria', 'medicoprueba'];
+        filteredTurnos = filteredTurnos.filter(t => {
+            const m = medicoMap[Number(t.TME_CODM)];
+            if (!m) return true;
+            const name = (m.MED_NOMBRE || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, '');
+            return !bloqueadosNormal.some(b => name.includes(b));
+        });
     }
 
     // 5. Citas ya agendadas para esa fecha (todas las del día)
@@ -755,7 +779,7 @@ function getFieldsByEspecialidad(espCod) {
     };
 }
 
-async function reserveSlot(fechaStr, hora, userId, tipo = 'medicina general', medicoId = null, pacienteData = null, sede = 'Ebejico') {
+async function reserveSlot(fechaStr, hora, userId, tipo = 'medicina general', medicoId = null, pacienteData = null, sede = 'Ebejico', isCVD = false) {
     if (!prisma) return false;
     try {
         const dateStr = parseRelativeDate(fechaStr);
@@ -788,7 +812,7 @@ async function reserveSlot(fechaStr, hora, userId, tipo = 'medicina general', me
         logger.debug(`[HABEJICO] reserveSlot: paciente.KC0_COD="${paciente.KC0_COD}" zona="${paciente.zona}" sede="${sede}"`);
 
         // Validar slot disponible
-        const slots = await getAvailableSlots(dateStr, tipo, null, true, sede);
+        const slots = await getAvailableSlots(dateStr, tipo, null, true, sede, isCVD);
         let slot = medicoId
             ? slots.find(s => s.doctorId === Number(medicoId) && s.hh === hh && s.mm === mm)
             : slots.find(s => s.hh === hh && s.mm === mm);
@@ -1196,7 +1220,7 @@ const DAY_NAMES_ES = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Vie
 
 // Escanea hasta maxScanDays días en paralelo (lotes de 3) y devuelve
 // hasta maxResults días con disponibilidad real. Las CITAS siempre en tiempo real.
-async function getWeekAvailability(startDateStr, tipo = 'medicina general', doctor = null, maxResults = 7, maxScanDays = 45, sede = 'Ebejico') {
+async function getWeekAvailability(startDateStr, tipo = 'medicina general', doctor = null, maxResults = 7, maxScanDays = 45, sede = 'Ebejico', isCVD = false) {
     const results = [];
     const BATCH = 3; // 3 días en paralelo — seguro con connectionLimit=10
     try {
