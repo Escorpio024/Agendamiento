@@ -32,7 +32,6 @@ async function _getTurnosCache() {
     if (_cache.turnos && now < _cache.turnosExpiry) return _cache.turnos;
     const todayDec = dateToDecimal(new Date());
     _cache.turnos = await prisma.turnoMedico.findMany({
-        where: { OR: [{ TME_FCH_FIN: { gte: todayDec } }, { TME_FCH_FIN: null }] },
         orderBy: { TME_FCH: 'desc' }
     });
     _cache.turnosExpiry = now + TTL_TURNOS;
@@ -44,7 +43,15 @@ async function _getTurnosCache() {
 async function _getMedicosCache() {
     const now = Date.now();
     if (_cache.medicos && now < _cache.medicosExpiry) return _cache.medicos;
-    _cache.medicos = await prisma.medico.findMany({ where: { MED_EST_ESTADO: 'A' } });
+    _cache.medicos = await prisma.medico.findMany({ 
+        where: { 
+            OR: [
+                { MED_EST_ESTADO: 'A' },
+                { MED_EST_ESTADO: null },
+                { MED_EST_ESTADO: '' }
+            ]
+        } 
+    });
     _cache.medicosExpiry = now + TTL_MEDICOS;
     logger.debug(`[CACHE] Médicos: ${_cache.medicos.length} activos cargados`);
     return _cache.medicos;
@@ -430,7 +437,9 @@ async function getAvailableSlots(fechaStr, tipo = 'medicina general', preferredD
     const allTurnosCache = await _getTurnosCache();
     const turnosRaw = allTurnosCache.filter(t => {
         if (t.TME_FCH > dateDecimal) return false;
-        if (t.TME_FCH_FIN && t.TME_FCH_FIN < dateDecimal) return false;
+        // Xenco a veces tiene TME_FCH_FIN antiguos (ej. 2021) pero sigue generando agenda TME2 válida, 
+        // así que NO podemos filtrar por TME_FCH_FIN.
+        // if (t.TME_FCH_FIN && t.TME_FCH_FIN < dateDecimal) return false;
         
         // Si es sede Sevilla, forzar al médico 444 e ignorar la especialidad
         if (sede === 'Sevilla') return t.TME_CODM == 444;
