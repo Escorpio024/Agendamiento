@@ -343,9 +343,14 @@ class ControlCVDService {
 
                         if (enviarMensaje) {
                             try {
-                                    `Intentamos apartarte tu cita de control a los próximos meses automáticamente, pero por el momento no encontramos horarios disponibles en la agenda.\n\n` +
-                                    `Por favor, comunícate con nosotros para programar tu cita de seguimiento. 📞`
-                                );
+                                const timeoutMs = 5000;
+                                await Promise.race([
+                                    client.sendMessage(`${record.telefono}@c.us`,
+                                        `Intentamos apartarte tu cita de control a los próximos meses automáticamente, pero por el momento no encontramos horarios disponibles en la agenda.\n\n` +
+                                        `Por favor, comunícate con nosotros para programar tu cita de seguimiento. 📞`
+                                    ),
+                                    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), timeoutMs))
+                                ]);
                             } catch (sendErr) {
                                 logger.warn(`[Control CVD] No se pudo enviar WhatsApp SIN CUPO a ${record.cedula}: ${sendErr.message}`);
                             }
