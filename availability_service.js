@@ -448,26 +448,21 @@ async function getAvailableSlots(fechaStr, tipo = 'medicina general', preferredD
 
     // 2. Turnos activos — cacheados 3 min, filtrados en JS por fecha
     const allTurnosCache = await _getTurnosCache();
-    const turnosRaw = allTurnosCache.filter(t => {
-        if (t.TME_FCH > dateDecimal) return false;
-        // Xenco a veces tiene TME_FCH_FIN antiguos (ej. 2021) pero sigue generando agenda TME2 válida, 
-        // así que NO podemos filtrar por TME_FCH_FIN.
-        // if (t.TME_FCH_FIN && t.TME_FCH_FIN < dateDecimal) return false;
-        
-        // Si es sede Sevilla, forzar al médico 444 e ignorar la especialidad
-        if (sede === 'Sevilla') return t.TME_CODM == 444;
-        
-        return !especialidad || t.TME_ESPECIALIDAD == especialidad.ESP_COD;
-    });
-
-    // Deduplicar: por cada doctor, quedarse solo con el turno MÁS RECIENTE
+    // Deduplicar: por cada doctor, quedarse solo con el turno MÁS RECIENTE (que define su especialidad actual)
     const turnosPorDoctor = {};
-    for (const t of turnosRaw) {
+    for (const t of allTurnosCache) {
+        if (t.TME_FCH > dateDecimal) continue;
         const key = String(t.TME_CODM);
-        if (!turnosPorDoctor[key]) turnosPorDoctor[key] = t;
+        if (!turnosPorDoctor[key]) {
+            turnosPorDoctor[key] = t;
+        }
     }
     
-    let turnos = Object.values(turnosPorDoctor);
+    // Ahora filtramos esos turnos "actuales" por especialidad y sede
+    let turnos = Object.values(turnosPorDoctor).filter(t => {
+        if (sede === 'Sevilla') return t.TME_CODM == 444;
+        return !especialidad || t.TME_ESPECIALIDAD == especialidad.ESP_COD;
+    });
     if (sede === 'Sevilla') {
         turnos = turnos.filter(t => t.TME_CODM == 444);
         
