@@ -297,7 +297,7 @@ app.delete('/api/cardiovascular/controles/:id', async (req, res) => {
 // POST /api/cardiovascular/controles/procesar-pendientes — Disparar agendamiento AHORA para pendientes
 app.post('/api/cardiovascular/controles/procesar-pendientes', async (req, res) => {
     try {
-        const totalPending = await botPrisma.controlReminder.count({ where: { estado: 'PENDING' } });
+        const totalPending = await botPrisma.controlReminder.count({ where: { estado: { in: ['PENDING', 'BOOKING_FAILED_NO_SLOT'] } } });
         if (totalPending === 0) {
             return res.json({ success: true, message: 'No hay controles pendientes para procesar.', procesados: 0 });
         }

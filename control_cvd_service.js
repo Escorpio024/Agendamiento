@@ -34,9 +34,9 @@ class ControlCVDService {
             await this.detectFinishedAppointments();
         });
 
-        // Fase 2 — Agendamiento Inmediato: Todos los días a las 9:00 AM
+        // Fase 2 — Agendamiento Inmediato: Todos los días a las 7:30 AM
         // Agenda la cita futura HOY mismo y le avisa al paciente.
-        cron.schedule('0 9 * * 1-6', async () => {
+        cron.schedule('30 7 * * 1-6', async () => {
             logger.info('📅 [Control CVD] Fase 2: Agendamiento inmediato de controles PENDIENTES...');
             await this.executeImmediateBooking();
         });
@@ -324,13 +324,13 @@ class ControlCVDService {
                     const dd   = record.fechaControl.substring(6, 8);
                     const fechaFormat = `${yyyy}-${mm}-${dd}`;
 
-                    // Buscar cupos en la agenda de P Y P MEDICOS
-                    const slots = await availabilityService.getAvailableSlots(
-                        fechaFormat, 'medicina general', 'p y p medicos', true
+                    // Buscar cupos en la agenda de P Y P MEDICOS (busca desde la fecha de control hacia adelante)
+                    const availResult = await availabilityService.getNextAvailableSlots(
+                        fechaFormat, 'medicina general', 'p y p medicos'
                     );
 
-                    if (!slots || slots.length === 0) {
-                        logger.warn(`[Control CVD] Sin horarios disponibles el ${fechaFormat} para ${record.cedula}. Marcando BOOKING_FAILED_NO_SLOT.`);
+                    if (!availResult || !availResult.slots || availResult.slots.length === 0) {
+                        logger.warn(`[Control CVD] Sin horarios disponibles a partir del ${fechaFormat} para ${record.cedula}. Marcando BOOKING_FAILED_NO_SLOT.`);
                         
                         // Solo enviar el mensaje de WhatsApp si el paciente estaba PENDING.
                         // Si ya estaba en SIN_CUPO, no volver a enviarle el mensaje para no hacer spam.
@@ -357,6 +357,10 @@ class ControlCVDService {
                         continue;
                     }
 
+                    // Extraer los slots y la fecha real en la que se encontró disponibilidad
+                    const slots = availResult.slots;
+                    const finalFechaFormat = availResult.date; // La fecha en la que realmente se va a agendar
+
                     // Elegir un slot del medio para no saturar primero o último turno
                     const slot = slots[Math.floor(slots.length / 2)];
 
@@ -364,7 +368,7 @@ class ControlCVDService {
                     const tipoEspecialidad = record.articuloCita ? `PYP_CARDIO|${record.articuloCita}` : 'PYP_CARDIO';
 
                     const reserved = await availabilityService.reserveSlot(
-                        fechaFormat,
+                        finalFechaFormat,
                         slot.time,
                         waId,
                         tipoEspecialidad,
@@ -373,21 +377,26 @@ class ControlCVDService {
                     );
 
                     if (reserved) {
-                        const fechaObj = new Date(parseInt(yyyy), parseInt(mm) - 1, parseInt(dd));
+                        // Parsear la fecha final en la que se agendó para el mensaje
+                        const [fYear, fMonth, fDay] = finalFechaFormat.split('-');
+                        const fechaObj = new Date(parseInt(fYear), parseInt(fMonth) - 1, parseInt(fDay));
                         const fechaAmigable = fechaObj.toLocaleDateString('es-CO', {
                             weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
                         });
 
                         logger.info(`[Control CVD] ✅ Cita agendada: ${record.cedula} → ${fechaFormat} ${slot.time}`);
 
+                        const newFechaSinGuiones = finalFechaFormat.replace(/-/g, '');
+
                         // Guardar datos de la cita para rastrear si fue cancelada
                         await botPrisma.controlReminder.update({
                             where: { id: record.id },
                             data: {
-                                estado:     'BOOKED',
-                                citaMedico: String(slot.doctorId),
-                                citaFch:    record.fechaControl,
-                                citaHora:   slot.time,
+                                estado:       'BOOKED',
+                                citaMedico:   String(slot.doctorId),
+                                citaFch:      newFechaSinGuiones,
+                                fechaControl: newFechaSinGuiones,
+                                citaHora:     slot.time,
                             }
                         });
 
