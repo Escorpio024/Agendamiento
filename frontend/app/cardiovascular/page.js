@@ -1101,8 +1101,6 @@ function ControlesViewerModal({ onClose }) {
         return { text: 'PENDIENTE', bg: 'rgba(251,191,36,0.15)', color: '#FCD34D' };
     };
 
-    const [procesando, setProcesando] = useState(false);
-    const [procesMsg, setProcesMsg] = useState('');
 
     // ─── Filtros calculados ───────────────────────────────────────────────
     const fechasUnicas = [...new Set(controles.map(c => c.fechaCitaOriginal))].sort().reverse();
@@ -1114,6 +1112,41 @@ function ControlesViewerModal({ onClose }) {
         PRESENCIAL: controles.filter(c => c.estado === 'BOOKED_PRESENCIAL').length,
         SIN_CUPO: controles.filter(c => c.estado === 'BOOKING_FAILED_NO_SLOT').length,
         ERROR: controles.filter(c => ['BOOKING_FAILED_XENCO','FAILED_NO_PHONE','FAILED'].includes(c.estado)).length,
+    };
+
+    const [procesando, setProcesando] = useState(false);
+    const [procesMsg, setProcesMsg] = useState('');
+    const [escaneando, setEscaneando] = useState(false);
+    const [scanMsg, setScanMsg] = useState('');
+
+    const handleProcesarPendientes = async () => {
+        if (!confirm('¿Deseas iniciar el agendamiento automático para todos los controles PENDIENTES ahora mismo?\n\nCada paciente recibirá un WhatsApp confirmando su cita.')) return;
+        setProcesando(true);
+        setProcesMsg('');
+        try {
+            const res = await fetch(`${API_BASE}/api/cardiovascular/controles/procesar-pendientes`, { method: 'POST' });
+            const data = await res.json();
+            setProcesMsg(data.message || 'Procesando...');
+            setTimeout(() => { loadControles(); setProcesando(false); }, 8000);
+        } catch (e) {
+            setProcesMsg('Error de red. Intenta de nuevo.');
+            setProcesando(false);
+        }
+    };
+
+    const handleScanPresencial = async () => {
+        if (!confirm('¿Deseas verificar en Xenco cuáles de los pacientes "Sin Cupo" ya tienen una cita agendada presencialmente?\n\nEsto puede tardar uno o dos minutos.')) return;
+        setEscaneando(true);
+        setScanMsg('');
+        try {
+            const res = await fetch(`${API_BASE}/api/cardiovascular/controles/scan-presenciales`, { method: 'POST' });
+            const data = await res.json();
+            setScanMsg(data.message || 'Escaneando...');
+            setTimeout(() => { loadControles(); setEscaneando(false); }, 90000);
+        } catch (e) {
+            setScanMsg('Error de red. Intenta de nuevo.');
+            setEscaneando(false);
+        }
     };
 
     const controlesFiltrados = controles.filter(c => {
@@ -1128,21 +1161,6 @@ function ControlesViewerModal({ onClose }) {
         return pasaFecha && pasaEstado;
     });
 
-    const handleProcesarPendientes = async () => {
-        if (!confirm('\u00bfDeseas iniciar el agendamiento automático para todos los controles PENDIENTES ahora mismo?\n\nCada paciente recibirá un WhatsApp confirmando su cita.')) return;
-        setProcesando(true);
-        setProcesMsg('');
-        try {
-            const res = await fetch(`${API_BASE}/api/cardiovascular/controles/procesar-pendientes`, { method: 'POST' });
-            const data = await res.json();
-            setProcesMsg(data.message || 'Procesando...');
-            // Recargar lista después de 5 segundos
-            setTimeout(() => { loadControles(); setProcesando(false); }, 8000);
-        } catch (e) {
-            setProcesMsg('Error de red. Intenta de nuevo.');
-            setProcesando(false);
-        }
-    };
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
