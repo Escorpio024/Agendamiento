@@ -826,7 +826,10 @@ async function reserveSlot(fechaStr, hora, userId, tipo = 'medicina general', me
 
         // Campos nativos según especialidad
         const espCod = slot.especialidadCod || null;
-        const fieldsEsp = getFieldsByEspecialidad(espCod);
+        
+        // Usar 'tipo' si viene formateado para un artículo específico (ej. PYP_CARDIO|...), o si es PYP_CARDIO, de lo contrario el espCod del slot
+        const tipoArticulo = (tipo && (tipo.includes('|') || tipo === 'PYP_CARDIO')) ? tipo : espCod;
+        const fieldsEsp = getFieldsByEspecialidad(tipoArticulo);
 
         const citaData = {
             KC3_ZONA:             zonaUsar,
@@ -1273,6 +1276,10 @@ function normalizeTipoCita(tipo) {
 
     if (t.includes('medicina general') || t.includes('medico general') || t.includes('médico general')) return '999';
     if (t.includes('medicina') || t.includes('general') || t === 'médico' || t === 'medico') return '999';
+    
+    // PYP Cardio se agenda en Medicina General (P Y P MEDICOS = 999)
+    if (t.includes('pyp_cardio')) return '999';
+    
     if (t.includes('odont') || t.includes('dent')) return '461';   // ODONTOLOGO GENERAL
     if (t.includes('pediat')) return '510';   // PEDIATRIA (ajustar al ESP_COD real)
     if (t.includes('gineco')) return '280';   // GINECOLOGIA (ajustar al ESP_COD real)

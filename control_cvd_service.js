@@ -365,13 +365,13 @@ class ControlCVDService {
                     const slot = slots[Math.floor(slots.length / 2)];
 
                     const pacData = { KC0_COD: record.cedula, zona: '99' };
-                    // reserveSlot necesita 'medicina general' para re-validar el slot internamente.
-                    // El artículo CVD se guarda en el registro pero no se pasa como tipo.
+                    const tipoEspecialidad = record.articuloCita ? `PYP_CARDIO|${record.articuloCita}` : 'PYP_CARDIO';
+
                     const reserved = await availabilityService.reserveSlot(
                         finalFechaFormat,
                         slot.time,
                         waId,
-                        'medicina general',  // tipo válido para getAvailableSlots
+                        tipoEspecialidad,
                         slot.doctorId,
                         pacData
                     );
