@@ -149,8 +149,9 @@ class ChatService {
                 return isNaN(d.getTime()) ? new Date() : d;
             };
 
-            // Enrich with remote patient data (SQL Server)
-            const enriched = await Promise.all(conversations.map(async (conv) => {
+            // Enrich with remote patient data (SQL Server) - Sequential to prevent Prisma Pool exhaustion
+            const enriched = [];
+            for (const conv of conversations) {
                 // Normalizar timestamps de la conversación y sus mensajes
                 conv.lastMessageAt = normalize(conv.lastMessageAt);
                 if (conv.messages) {
@@ -200,8 +201,8 @@ class ChatService {
                     }
                 }
 
-                return { ...conv, patientName, patientDocument };
-            }));
+                enriched.push({ ...conv, patientName, patientDocument });
+            }
 
             return enriched;
         } catch (e) {
