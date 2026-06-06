@@ -9,6 +9,8 @@
  *  4. Corre UNA vez al día a las 9 AM (no cada hora)
  *  5. Fix: variables phone/telefono → whatsappId (evitaba crash silencioso)
  */
+const fs        = require('fs');
+const path      = require('path');
 const prisma    = require('./db');
 const botPrisma = require('./dbBot');  // SQLite del bot (conversaciones WhatsApp reales)
 const cron      = require('node-cron');
@@ -21,6 +23,37 @@ class ReminderService {
         // Claves de recordatorios ya enviados hoy: "COD-FCH-HH-MM"
         // Se limpia automáticamente a medianoche
         this.sentToday = new Set();
+        this.sentFilePath = path.join(__dirname, 'sent_reminders.json');
+        this.loadSentReminders();
+    }
+
+    loadSentReminders() {
+        try {
+            if (fs.existsSync(this.sentFilePath)) {
+                const data = JSON.parse(fs.readFileSync(this.sentFilePath, 'utf8'));
+                // Verificar si es del mismo día
+                const today = new Date().toLocaleDateString('es-CO', { timeZone: 'America/Bogota' });
+                if (data.date === today && Array.isArray(data.sent)) {
+                    this.sentToday = new Set(data.sent);
+                    logger.info(`[Recordatorios] Cargados ${this.sentToday.size} recordatorios previamente enviados hoy.`);
+                }
+            }
+        } catch(e) {
+            logger.warn(`[Recordatorios] No se pudo cargar sent_reminders.json: ${e.message}`);
+        }
+    }
+
+    saveSentReminders() {
+        try {
+            const today = new Date().toLocaleDateString('es-CO', { timeZone: 'America/Bogota' });
+            const data = {
+                date: today,
+                sent: Array.from(this.sentToday)
+            };
+            fs.writeFileSync(this.sentFilePath, JSON.stringify(data));
+        } catch(e) {
+            logger.warn(`[Recordatorios] No se pudo guardar sent_reminders.json: ${e.message}`);
+        }
     }
 
     init(whatsappClient) {
@@ -58,6 +91,7 @@ class ReminderService {
         // ── Medianoche — limpiar deduplicación ──
         cron.schedule('0 0 * * *', () => {
             this.sentToday.clear();
+            this.saveSentReminders();
             logger.debug('[Recordatorios] Set de deduplicación limpiado para el nuevo día.');
         });
 
@@ -245,6 +279,7 @@ class ReminderService {
                 const ok = await this.sendReminderMessage(cita, nombre, waId, medico);
                 if (ok) {
                     this.sentToday.add(clave);
+                    this.saveSentReminders();
                     sent++;
                 }
 
