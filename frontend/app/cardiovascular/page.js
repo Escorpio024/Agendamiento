@@ -12,7 +12,8 @@ import {
 // ─── Config ──────────────────────────────────────────────────────────────────
 const IS_PROD = typeof window !== 'undefined' && window.location.hostname !== 'localhost';
 const SERVER_HOST = IS_PROD ? window.location.hostname : 'localhost';
-const API_BASE = `http://${SERVER_HOST}:3001`;
+const PROTOCOL = typeof window !== 'undefined' ? window.location.protocol : 'http:';
+const API_BASE = `${PROTOCOL}//${SERVER_HOST}:3001`;
 
 // ─── Catálogo de procedimientos CVD ──────────────────────────────────────────
 const CVD_PROCEDIMIENTOS = [

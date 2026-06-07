@@ -3,8 +3,9 @@ import { useState, useEffect, useCallback } from 'react';
 import { X, Calendar, User, RefreshCw, Search, Clock, Phone, Building2, UserCheck, MonitorCheck, FileText } from 'lucide-react';
 
 const IS_PROD = typeof window !== 'undefined' && window.location.hostname !== 'localhost';
-const SERVER_HOST = typeof window !== 'undefined' ? (IS_PROD ? window.location.hostname : 'localhost') : 'localhost';
-const API_BASE = `http://${SERVER_HOST}:3001`;
+const SERVER_HOST = IS_PROD ? window.location.hostname : 'localhost';
+const PROTOCOL = typeof window !== 'undefined' ? window.location.protocol : 'http:';
+const API_BASE = `${PROTOCOL}//${SERVER_HOST}:3001`;
 
 function toDecimal(dateStr) {
     if (typeof dateStr === 'string' && dateStr.includes('-')) {

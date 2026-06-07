@@ -5,8 +5,9 @@ import axios from 'axios';
 // Auto-detectar si estamos en producción (nube) o local
 const IS_PROD = typeof window !== 'undefined' && window.location.hostname !== 'localhost';
 const SERVER_HOST = IS_PROD ? window.location.hostname : 'localhost';
-const API_URL = `http://${SERVER_HOST}:3001/api`;
-const SOCKET_URL = `http://${SERVER_HOST}:3001`;
+const PROTOCOL = typeof window !== 'undefined' ? window.location.protocol : 'http:';
+const API_URL = `${PROTOCOL}//${SERVER_HOST}:3001/api`;
+const SOCKET_URL = `${PROTOCOL}//${SERVER_HOST}:3001`;
 
 export function useChat() {
     const [socket, setSocket] = useState(null);

@@ -1,6 +1,9 @@
 import { useRef, useEffect } from 'react';
 
-const BACKEND_URL = 'http://localhost:3001';
+const IS_PROD = typeof window !== 'undefined' && window.location.hostname !== 'localhost';
+const SERVER_HOST = IS_PROD ? window.location.hostname : 'localhost';
+const PROTOCOL = typeof window !== 'undefined' ? window.location.protocol : 'http:';
+const BACKEND_URL = `${PROTOCOL}//${SERVER_HOST}:3001`;
 
 export default function MessageList({ messages, currentBuffer }) {
     const endRef = useRef(null);
