@@ -130,25 +130,32 @@ class ControlCVDService {
     async hasExistingControlCita(cedulaRaw) {
         try {
             // Construir código interno de 14 dígitos (mismo formato que Xenco)
-            const codigoPac = String(cedulaRaw).padStart(14, '0');
+            const codigoPac    = String(cedulaRaw).padStart(14, '0');
+            // También buscar sin ceros (agendamientos manuales pueden usar cédula cruda)
+            const cedulaSinCeros = String(cedulaRaw).replace(/^0+/, '');
 
-            // Rango: desde hoy + 25 días hasta hoy + 4 meses (para capturar 2 y 3 meses)
+            // Rango: desde hoy + 10 días hasta hoy + 4 meses (para capturar 2 y 3 meses)
+            // Reducido de 25 a 10 para detectar citas agendadas para más próximas
             const hoy = new Date();
-            const desde = new Date(hoy); desde.setDate(hoy.getDate() + 25);
+            const desde = new Date(hoy); desde.setDate(hoy.getDate() + 10);
             const hasta = new Date(hoy); hasta.setMonth(hoy.getMonth() + 4);
 
             const desdeDecimal = this.dateToDecimal(desde);
             const hastaDecimal = this.dateToDecimal(hasta);
 
-            const citasFuturas = await prisma.$queryRaw`
+            const citasFuturas = await prisma.$queryRawUnsafe(`
                 SELECT TOP 1 c.KC3_FCH, c.KC3_ARTIC, c.KC3_MEDICO
                 FROM TMCITASUSUARIOS c
-                WHERE c.KC3_COD = ${codigoPac}
+                WHERE (
+                    c.KC3_COD = '${codigoPac}'
+                    OR c.KC3_COD = '${cedulaSinCeros}'
+                    OR LTRIM(RTRIM(c.KC3_COD)) = '${cedulaSinCeros}'
+                )
                   AND c.KC3_FCH >= ${desdeDecimal}
                   AND c.KC3_FCH <= ${hastaDecimal}
-                  AND c.KC3_NUM > 0
                   AND LTRIM(RTRIM(c.KC3_ARTIC)) IN ('890301-7', '890301-8', '890301-12', '890301-13', '890301-14', '890301-15', '890301-16')
-            `;
+                  AND ISNULL(c.KC3_ESTADO, '') NOT IN ('CA')
+            `);
 
             if (citasFuturas && citasFuturas.length > 0) {
                 const c = citasFuturas[0];
@@ -174,8 +181,9 @@ class ControlCVDService {
             const todayDec = this.dateToDecimal(new Date());
 
             // Buscar citas de CVD de control válido, facturadas hoy
+            // Se incluye KC3_ENTIDAD para guardar el código numérico de la EPS del paciente
             const citasCvd = await prisma.$queryRaw`
-                SELECT c.KC3_MEDICO, c.KC3_FCH, c.KC3_COD, c.KC3_ARTIC, e.ENT_NOMBRE
+                SELECT c.KC3_MEDICO, c.KC3_FCH, c.KC3_COD, c.KC3_ARTIC, c.KC3_ENTIDAD, e.ENT_NOMBRE
                 FROM TMCITASUSUARIOS c
                 LEFT JOIN TMENTIDADES e ON e.ENT_COD = c.KC3_ENTIDAD
                 WHERE c.KC3_FCH = ${todayDec}
@@ -192,6 +200,9 @@ class ControlCVDService {
             for (const cita of citasCvd) {
                 const cedula = String(cita.KC3_COD).trim().replace(/^0+/, '');
                 const nombre = await this.getNombreForPatient(cedula);
+
+                // Código numérico de entidad de la cita original (EPS del paciente en Xenco)
+                const entidadCodOrig = cita.KC3_ENTIDAD ? Number(cita.KC3_ENTIDAD) : null;
 
                 // Evitar duplicados (incluye BOOKED_PRESENCIAL para no re-procesar)
                 const exists = await botPrisma.controlReminder.findFirst({
@@ -247,6 +258,7 @@ class ControlCVDService {
                             fechaRecordatorio: fechaRecordatorioStr,
                             estado: 'BOOKED_PRESENCIAL',
                             epsInfo: epsLabel,
+                            entidadCod: entidadCodOrig,
                             citaMedico: citaExistente.medico,
                             citaFch: citaExistente.fecha,
                         }
@@ -264,10 +276,11 @@ class ControlCVDService {
                             fechaControl: fechaControlStr,
                             fechaRecordatorio: fechaRecordatorioStr,
                             estado: 'PENDING',
-                            epsInfo: epsLabel
+                            epsInfo: epsLabel,
+                            entidadCod: entidadCodOrig,
                         }
                     });
-                    logger.info(`[Control CVD] Pendiente para bot: ${cedula} | EPS: ${epsLabel} | Control: ${fechaControlStr}`);
+                    logger.info(`[Control CVD] Pendiente para bot: ${cedula} | EPS: ${epsLabel} (ENT_COD=${entidadCodOrig}) | Control: ${fechaControlStr}`);
                 }
             }
         } catch (e) {
@@ -325,8 +338,9 @@ class ControlCVDService {
                     const fechaFormat = `${yyyy}-${mm}-${dd}`;
 
                     // Buscar cupos en la agenda de P Y P MEDICOS (busca desde la fecha de control hacia adelante)
+                    // NOTA: firma correcta → getNextAvailableSlots(startDate, tipo, doctor, sede, isCVD)
                     const availResult = await availabilityService.getNextAvailableSlots(
-                        fechaFormat, 'medicina general', 'p y p medicos', 30, 'Ebejico', true
+                        fechaFormat, 'medicina general', 'p y p medicos', 'Ebejico', true
                     );
 
                     if (!availResult || !availResult.slots || availResult.slots.length === 0) {
@@ -365,7 +379,26 @@ class ControlCVDService {
                     // Elegir un slot del medio para no saturar primero o último turno
                     const slot = slots[Math.floor(slots.length / 2)];
 
-                    const pacData = { KC0_COD: record.cedula, zona: '99' };
+                    // Enriquecer pacData con entidad real del paciente para que el contrato en Xenco sea correcto
+                    let entidadPac = record.entidadCod || 0;
+                    if (!entidadPac) {
+                        try {
+                            const cedula14 = record.cedula.padStart(14, '0');
+                            const cedulaRaw = record.cedula.replace(/^0+/, '');
+                            const facRows = await prisma.$queryRawUnsafe(`
+                                SELECT TOP 1 KC2_EPS_POS, KC2_ZONA
+                                FROM TMUSUARIOSFACTURACION
+                                WHERE KC2_COD = '${cedula14}' OR KC2_OACOD_NUI = '${cedulaRaw}'
+                                ORDER BY KC2_FCH_DIG DESC
+                            `);
+                            if (facRows && facRows.length > 0 && facRows[0].KC2_EPS_POS) {
+                                entidadPac = Number(facRows[0].KC2_EPS_POS);
+                            }
+                        } catch (entErr) {
+                            logger.warn(`[Control CVD] No se pudo obtener entidad para ${record.cedula}: ${entErr.message}`);
+                        }
+                    }
+                    const pacData = { KC0_COD: record.cedula, zona: '99', KC0_ENTIDAD: entidadPac || 0 };
                     const tipoEspecialidad = record.articuloCita ? `PYP_CARDIO|${record.articuloCita}` : 'PYP_CARDIO';
 
                     const reserved = await availabilityService.reserveSlot(
@@ -549,20 +582,27 @@ class ControlCVDService {
             for (const record of sinCupo) {
                 try {
                     // Formato de 14 dígitos que usa Xenco
-                    const codigoPac = String(record.cedula).padStart(14, '0');
+                    const codigoPac    = String(record.cedula).padStart(14, '0');
+                    // También buscar sin padding de ceros (algunos ingresos manuales usan cédula cruda)
+                    const cedulaSinCeros = String(record.cedula).replace(/^0+/, '');
 
                     // Buscar CUALQUIER cita futura (no filtra por artículo)
-                    const citasFuturas = await prisma.$queryRaw`
+                    // Buscamos con ambas variantes: con padding y sin padding
+                    const citasFuturas = await prisma.$queryRawUnsafe(`
                         SELECT TOP 1 c.KC3_FCH, c.KC3_ARTIC, c.KC3_MEDICO, c.KC3_HH, c.KC3_MM
                         FROM TMCITASUSUARIOS c
-                        WHERE c.KC3_COD = ${codigoPac}
+                        WHERE (
+                            c.KC3_COD = '${codigoPac}'
+                            OR c.KC3_COD = '${cedulaSinCeros}'
+                            OR LTRIM(RTRIM(c.KC3_COD)) = '${cedulaSinCeros}'
+                        )
                           AND c.KC3_FCH >= ${desdeDecimal}
                           AND c.KC3_FCH <= ${hastaDecimal}
-                          AND c.KC3_NUM > 0
                           AND ISNULL(LTRIM(RTRIM(c.KC3_COD)), '') <> ''
                           AND c.KC3_COD <> '00000000000000'
+                          AND ISNULL(c.KC3_ESTADO, '') NOT IN ('CA')
                         ORDER BY c.KC3_FCH ASC
-                    `;
+                    `);
 
                     if (citasFuturas && citasFuturas.length > 0) {
                         const c = citasFuturas[0];

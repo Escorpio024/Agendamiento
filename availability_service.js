@@ -1257,10 +1257,11 @@ async function getWeekAvailability(startDateStr, tipo = 'medicina general', doct
     return results;
 }
 
-// Busca el primer día con disponibilidad, en lotes de 3 en paralelo.
-async function getNextAvailableSlots(startDateStr, tipo, doctor, sede = 'Ebejico') {
+// Busca el primer día con disponibilidad, en lotes de 2 en paralelo.
+// isCVD=true → incluye médicos PYP/CVD (p.ej. "P Y P MEDICOS") que normalmente están bloqueados para el bot general.
+async function getNextAvailableSlots(startDateStr, tipo, doctor, sede = 'Ebejico', isCVD = false) {
     const BATCH = 2; // Reducido a 2 para no saturar el pool de conexiones de Prisma
-    const MAX = 30; // Reducido a 30 días para evitar timeouts en Prisma
+    const MAX = 30; // Máximo 30 días hacia adelante
     try {
         for (let i = 0; i <= MAX; i += BATCH) {
             const batch = [];
@@ -1271,7 +1272,7 @@ async function getNextAvailableSlots(startDateStr, tipo, doctor, sede = 'Ebejico
             }
             const results = await Promise.all(batch.map(async dateStr => {
                 try {
-                    const slots = await _withRetry(() => getAvailableSlots(dateStr, tipo, doctor, false, sede), `next(${dateStr})`);
+                    const slots = await _withRetry(() => getAvailableSlots(dateStr, tipo, doctor, false, sede, isCVD), `next(${dateStr})`);
                     return slots.length ? { date: dateStr, slots } : null;
                 } catch (err) {
                     if (err.code === 'P1001') return 'ABORT';

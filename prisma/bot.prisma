@@ -81,6 +81,7 @@ model ControlReminder {
   fechaRecordatorio String
   estado            String   @default("PENDING")
   epsInfo           String?
+  entidadCod        Int?     // Código numérico ENT_COD de la EPS del paciente (para contratos en Xenco)
   citaMedico        String?
   citaFch           String?
   citaHh            String?
