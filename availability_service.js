@@ -840,10 +840,11 @@ async function reserveSlot(fechaStr, hora, userId, tipo = 'medicina general', me
         // Resolver contrato y secuencia según la entidad (EPS) del paciente
         // Mapa de contratos por entidad confirmados desde la BD nativa
         const contratoPorEntidad = {
-            235:  { num: 'RS-0159-2026',     seq: 3 },  // SURA EPS
-            141:  { num: '01_EVN_890982370', seq: 2 },  // NUEVA EPS
-            265:  { num: 'RC-0160-2026',     seq: 3 },  // (otra EPS)
-            550:  { num: '0474-2025',         seq: 1 },  // (otra EPS)
+            235:  { num: '0152-2025',         seq: 2 },  // ALIANZA MEDELLIN ANTIOQUIA EPS S.A.S
+            141:  { num: '01_EVN_890982370',   seq: 2 },  // NUEVA EPS S.A. (con punto)
+            341:  { num: 'Contrato',           seq: 0 },  // NUEVA EPS S.A (sin punto, subsidiada) — usa texto literal "Contrato" según BD nativa
+            265:  { num: 'RC-0160-2026',       seq: 3 },  // ALIANZA CONTRIBUTIVO
+            550:  { num: '0474-2025',          seq: 1 },  // ALIANZA otra variante
         };
         const contratoInfo = contratoPorEntidad[entidadPac] || { num: '0152-2025', seq: 2 };
 
