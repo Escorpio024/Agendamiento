@@ -149,60 +149,77 @@ class ChatService {
                 return isNaN(d.getTime()) ? new Date() : d;
             };
 
-            // Enrich with remote patient data (SQL Server) - Sequential to prevent Prisma Pool exhaustion
-            const enriched = [];
+            // Enrich with remote patient data (SQL Server) - BATCH QUERY to prevent Prisma Pool exhaustion and speed up load times
+            const phoneMap = new Map();
+            const orFact = [];
+            const orAseg = [];
+
             for (const conv of conversations) {
                 // Normalizar timestamps de la conversación y sus mensajes
                 conv.lastMessageAt = normalize(conv.lastMessageAt);
                 if (conv.messages) {
-                    conv.messages = conv.messages.map(m => ({
-                        ...m,
-                        timestamp: normalize(m.timestamp)
-                    }));
+                    conv.messages = conv.messages.map(m => ({ ...m, timestamp: normalize(m.timestamp) }));
                 }
 
                 const phoneClean = conv.id.replace(/@(c\.us|lid|s\.whatsapp\.net)/gi, '').replace(/\D/g, '');
                 const phone10 = phoneClean.slice(-10);
                 const phone7  = phoneClean.slice(-7);
+                
+                if (phone10) {
+                    phoneMap.set(conv.id, { phone10, phone7 });
+                    orFact.push({ KC2_TEL_RESP: { contains: phone10 } }, { KC2_TEL_RESP: { contains: phone7 } });
+                    orAseg.push({ KC0_RES_TEL: { contains: phone10 } }, { KC0_RES_TEL: { contains: phone7 } });
+                }
+            }
 
-                let patientName     = conv.name;
+            let factData = [];
+            let asegData = [];
+
+            // Perform bulk queries if there are phones to look up
+            if (orFact.length > 0) {
+                try {
+                    // Limit to 400 conditions per query to avoid SQL Server parameter limits (2100)
+                    const chunkFact = orFact.slice(0, 400); 
+                    const chunkAseg = orAseg.slice(0, 400);
+                    
+                    factData = await medicalPrisma.tMUSUARIOSFACTURACION.findMany({
+                        where: { OR: chunkFact },
+                        orderBy: { KC2_FCH_DIG: 'desc' }
+                    });
+                    
+                    asegData = await medicalPrisma.paciente.findMany({
+                        where: { OR: chunkAseg }
+                    });
+                } catch (e) {
+                    console.error('[CHAT] Error en batch query de pacientes:', e.message);
+                }
+            }
+
+            const enriched = conversations.map(conv => {
+                let patientName = conv.name;
                 let patientDocument = null;
 
-                if (phone10) {
-                    try {
-                        const pFact = await medicalPrisma.tMUSUARIOSFACTURACION.findFirst({
-                            where: {
-                                OR: [
-                                    { KC2_TEL_RESP: { contains: phone10 } },
-                                    { KC2_TEL_RESP: { contains: phone7  } }
-                                ]
-                            }
-                        });
-
-                        if (pFact) {
-                            patientName     = `${pFact.KC2_PNOMBRE || ''} ${pFact.KC2_PAPELLIDO || ''}`.trim() || pFact.KC2_NOM_RESP || conv.name;
-                            patientDocument = pFact.KC2_OACOD_NUI || pFact.KC2_COD;
-                        } else {
-                            const pAseg = await medicalPrisma.paciente.findFirst({
-                                where: {
-                                    OR: [
-                                        { KC0_RES_TEL: { contains: phone10 } },
-                                        { KC0_RES_TEL: { contains: phone7  } }
-                                    ]
-                                }
-                            });
-                            if (pAseg) {
-                                patientName     = pAseg.KC0_NOM || conv.name;
-                                patientDocument = pAseg.KC0_COD;
-                            }
+                const phones = phoneMap.get(conv.id);
+                if (phones) {
+                    const { phone10, phone7 } = phones;
+                    
+                    // Buscar primero en facturación
+                    const pFact = factData.find(f => f.KC2_TEL_RESP?.includes(phone10) || f.KC2_TEL_RESP?.includes(phone7));
+                    if (pFact) {
+                        patientName = `${pFact.KC2_PNOMBRE || ''} ${pFact.KC2_PAPELLIDO || ''}`.trim() || pFact.KC2_NOM_RESP || conv.name;
+                        patientDocument = pFact.KC2_OACOD_NUI || pFact.KC2_COD;
+                    } else {
+                        // Fallback a aseguradora
+                        const pAseg = asegData.find(a => a.KC0_RES_TEL?.includes(phone10) || a.KC0_RES_TEL?.includes(phone7));
+                        if (pAseg) {
+                            patientName = pAseg.KC0_NOM || conv.name;
+                            patientDocument = pAseg.KC0_COD;
                         }
-                    } catch (e) {
-                        console.error('[CHAT] Error enriqueciendo paciente desde BD remota:', e.message);
                     }
                 }
 
-                enriched.push({ ...conv, patientName, patientDocument });
-            }
+                return { ...conv, patientName, patientDocument };
+            });
 
             return enriched;
         } catch (e) {
