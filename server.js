@@ -91,7 +91,13 @@ app.get('/api/conversations/:id/messages', async (req, res) => {
             orderBy: { timestamp: 'desc' },
             take: 50
         });
-        res.json(messages.reverse());
+        
+        const mappedMessages = messages.reverse().map(msg => ({
+            ...msg,
+            timestamp: msg.timestamp instanceof Date ? msg.timestamp.getTime() : new Date(msg.timestamp + (!String(msg.timestamp).endsWith('Z') ? 'Z' : '')).getTime()
+        }));
+        
+        res.json(mappedMessages);
     } catch (error) {
         res.status(500).json({ error: error.message });
     }

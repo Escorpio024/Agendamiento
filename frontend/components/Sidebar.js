@@ -51,7 +51,7 @@ export default function Sidebar({ conversations, activeId, onSelect, filter, set
 
         if (diffDays === 0) {
             // Today → only time  (e.g. "3:46 p.m.")
-            return date.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' });
+            return date.toLocaleTimeString('es-CO', { timeZone: 'America/Bogota', hour: '2-digit', minute: '2-digit' });
         } else if (diffDays === 1) {
             // Yesterday → "Ayer"
             return 'Ayer';

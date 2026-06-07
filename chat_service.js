@@ -141,12 +141,23 @@ class ChatService {
                 include: { messages: { take: 1, orderBy: { timestamp: 'desc' } } }
             });
 
-            // Normalizar timestamps — SQLite a veces los guarda como string o número
+            // Normalizar timestamps — Enviar como Unix Timestamp absoluto (milisegundos) para evitar problemas de Timezone
             const normalize = (val) => {
-                if (!val) return new Date();
-                if (val instanceof Date) return val;
-                const d = new Date(val);
-                return isNaN(d.getTime()) ? new Date() : d;
+                if (!val) return Date.now();
+                let d;
+                if (val instanceof Date) {
+                    d = val;
+                } else {
+                    let strVal = String(val);
+                    if (strVal.includes(' ') && !strVal.includes('T')) {
+                        strVal = strVal.replace(' ', 'T');
+                    }
+                    if (!strVal.endsWith('Z') && !strVal.includes('-05:00') && !strVal.includes('+')) {
+                        strVal += 'Z';
+                    }
+                    d = new Date(strVal);
+                }
+                return isNaN(d.getTime()) ? Date.now() : d.getTime();
             };
 
             // Enrich with remote patient data (SQL Server) - BATCH QUERY to prevent Prisma Pool exhaustion and speed up load times

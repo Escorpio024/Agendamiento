@@ -113,7 +113,7 @@ export default function MessageList({ messages, currentBuffer }) {
                         {/* Timestamp */}
                         <div className="px-4 pb-2 flex justify-end items-center gap-1">
                             <span className="text-[11px] opacity-70">
-                                {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                {new Date(msg.timestamp).toLocaleTimeString('es-CO', { timeZone: 'America/Bogota', hour: '2-digit', minute: '2-digit' })}
                             </span>
                             {msg.fromMe && (
                                 <svg className="w-4 h-4 text-[#A1E3D8]" viewBox="0 0 16 11" fill="currentColor">
