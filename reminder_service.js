@@ -80,10 +80,9 @@ class ReminderService {
         const tzOffset = new Date().toLocaleTimeString('es-CO', { timeZoneName: 'short' });
         logger.info(`[Recordatorios] Cron activo. Hora del servidor: ${tzOffset}`);
 
-        // ── Cada hora en punto — verifica citas de mañana ──
-        // Al ejecutar cada hora, capturamos a quienes agendan tarde en el día
-        // (La deduplicación con sentToday evita enviar el mismo mensaje 2 veces)
-        cron.schedule('0 * * * *', async () => {
+        // ── Cada hora en punto (solo de 7 AM a 8 PM) — verifica citas de mañana ──
+        // Así evitamos enviar mensajes en la madrugada (ej. 2 AM, 4 AM)
+        cron.schedule('0 7-20 * * *', async () => {
             logger.info('🔔 [Recordatorios] Envío horario de verificación iniciado...');
             await this.sendReminders();
         });
