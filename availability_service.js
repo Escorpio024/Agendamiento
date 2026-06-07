@@ -838,13 +838,13 @@ async function reserveSlot(fechaStr, hora, userId, tipo = 'medicina general', me
         const entidadPac = paciente.KC0_ENTIDAD ? Number(paciente.KC0_ENTIDAD) : 0;
 
         // Resolver contrato y secuencia según la entidad (EPS) del paciente
-        // Mapa de contratos por entidad confirmados desde la BD nativa
+        // Mapa de contratos por entidad confirmados desde citas nativas en BD Xenco
         const contratoPorEntidad = {
-            235:  { num: '0152-2025',         seq: 2 },  // ALIANZA MEDELLIN ANTIOQUIA EPS S.A.S
-            141:  { num: '01_EVN_890982370',   seq: 2 },  // NUEVA EPS S.A. (con punto)
-            341:  { num: 'Contrato',           seq: 0 },  // NUEVA EPS S.A (sin punto, subsidiada) — usa texto literal "Contrato" según BD nativa
-            265:  { num: 'RC-0160-2026',       seq: 3 },  // ALIANZA CONTRIBUTIVO
-            550:  { num: '0474-2025',          seq: 1 },  // ALIANZA otra variante
+            235:  { num: 'RS-0159-2026',       seq: 0 },  // ALIANZA MEDELLIN ANTIOQUIA EPS S.A.S (contrato 2026, Seq=0 según citas nativas)
+            141:  { num: '01_EVN_890982370',    seq: 2 },  // NUEVA EPS S.A. (con punto)
+            341:  { num: 'Contrato',            seq: 0 },  // NUEVA EPS S.A (sin punto, subsidiada)
+            265:  { num: 'RC-0160-2026',        seq: 3 },  // ALIANZA CONTRIBUTIVO
+            550:  { num: '0474-2025',           seq: 1 },  // ALIANZA otra variante
         };
         const contratoInfo = contratoPorEntidad[entidadPac] || { num: '0152-2025', seq: 2 };
 
