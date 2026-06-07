@@ -438,7 +438,7 @@ class ControlCVDService {
 
                         // Mensaje al paciente: cita confirmada
                         const msgConfirmacion =
-                            `🏥 *AURORA - Clínica*\n\n` +
+                            `🏥 *ESE Hospital San Rafael de Ebéjico*\n\n` +
                             `Hola ${record.paciente}, 😊\n\n` +
                             `Ayer asististe a tu control de Riesgo Cardiovascular. ¡Gracias por cuidar tu salud!\n\n` +
                             `✅ Hemos agendado automáticamente tu *cita de control de seguimiento:*\n\n` +
@@ -480,7 +480,7 @@ class ControlCVDService {
                             if (isRegistered) {
                                 await Promise.race([
                                     this.client.sendMessage(waId,
-                                        `🏥 *AURORA - Clínica*\n\n` +
+                                        `🏥 *ESE Hospital San Rafael de Ebéjico*\n\n` +
                                         `Hola ${record.paciente}, 😊\n\n` +
                                         `Ayer asististe a tu control de Riesgo Cardiovascular.\n\n` +
                                         `Intentamos apartar tu cita de seguimiento automáticamente pero ocurrió un inconveniente técnico. Por favor comunícate con la clínica para programarla. 📞`

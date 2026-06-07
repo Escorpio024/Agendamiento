@@ -333,7 +333,7 @@ class ReminderService {
                 (consultorio ? `🚪 *Consultorio:* ${consultorio}\n` : '') +
                 `\nPor favor, llega *15 minutos antes* de tu cita.\n\n` +
                 `Si necesitas cancelar o reprogramar, escríbeme por este chat.\n\n` +
-                `_Agente Aurora — Asistente de citas médicas_ 🤖`;
+                `_ESE Hospital San Rafael de Ebéjico_ 🏥`;
 
             // Verificar que WhatsApp esté conectado antes de enviar
             const waState = await this.client.getState().catch(() => null);

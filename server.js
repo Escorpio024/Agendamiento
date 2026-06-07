@@ -652,7 +652,7 @@ app.post('/api/cardiovascular/remind/:id', async (req, res) => {
         ochoDias.setDate(ochoDias.getDate() + 8);
         const fechaDeseada = ochoDias.toLocaleDateString('es-CO', { day: '2-digit', month: 'long', year: 'numeric' });
 
-        const msg = `🔔 *RECORDATORIO — Exámenes de Riesgo Cardiovascular*\n\nHola, te recordamos que tienes exámenes pendientes por realizar:\n\n🧪 *${examen || 'Exámenes cardiovasculares'}*\n\n⚠️ *IMPORTANTE:* Recuerda que *TODOS* los exámenes te los debes realizar el *mismo día*.\n\n📅 Te sugerimos acercarte a nuestra institución para realizarlos en aproximadamente 8 días, es decir, alrededor del *${fechaDeseada}*. 😊\n\n_Agente Aurora — Sistema de Agendamiento_`;
+        const msg = `🔔 *RECORDATORIO — Exámenes de Riesgo Cardiovascular*\n\nHola, te recordamos que tienes exámenes pendientes por realizar:\n\n🧪 *${examen || 'Exámenes cardiovasculares'}*\n\n⚠️ *IMPORTANTE:* Recuerda que *TODOS* los exámenes te los debes realizar el *mismo día*.\n\n📅 Te sugerimos acercarte a nuestra institución para realizarlos en aproximadamente 8 días, es decir, alrededor del *${fechaDeseada}*. 😊\n\n_ESE Hospital San Rafael de Ebéjico_`;
         await whatsappClient.sendMessage(waId, msg);
         logger.info(`[CARDIOVASCULAR] ✅ Recordatorio enviado a ${waId} — examen: ${examId}`);
         res.json({ success: true });
