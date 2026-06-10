@@ -1150,6 +1150,21 @@ function ControlesViewerModal({ onClose }) {
         }
     };
 
+    const handleSync = async () => {
+        if (!confirm('¿Deseas buscar HOY MISMOS a los pacientes que terminaron cita en Xenco para programarlos? (Normalmente el bot lo hace solo a las 8:00 PM).')) return;
+        setProcesando(true);
+        setProcesMsg('Sincronizando...');
+        try {
+            const res = await fetch(`${API_BASE}/api/cardiovascular/sync`);
+            const data = await res.json();
+            setProcesMsg(data.message || 'Sincronizado');
+            setTimeout(() => { loadControles(); setProcesando(false); setProcesMsg(''); }, 3000);
+        } catch (e) {
+            setProcesMsg('Error al sincronizar.');
+            setProcesando(false);
+        }
+    };
+
     const controlesFiltrados = controles.filter(c => {
         const pasaFecha = filtroFecha === 'TODOS' || c.fechaCitaOriginal === filtroFecha;
         const esPendiente = !['BOOKED','BOOKED_AND_REMINDED','BOOKED_PRESENCIAL','BOOKING_FAILED_NO_SLOT','BOOKING_FAILED_XENCO','FAILED_NO_PHONE','FAILED','REMINDED_NO_BOOKING'].includes(c.estado);
@@ -1195,6 +1210,14 @@ function ControlesViewerModal({ onClose }) {
 
                 {/* Barra de acciones */}
                 <div className="flex items-center gap-3 px-6 py-3 flex-shrink-0 flex-wrap" style={{ background: 'rgba(130,99,177,0.06)', borderBottom: '1px solid rgba(130,99,177,0.1)' }}>
+                    <button
+                        onClick={handleSync}
+                        disabled={procesando || escaneando}
+                        className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all"
+                        style={{ background: procesando ? 'rgba(74,222,128,0.1)' : 'rgba(74,222,128,0.2)', color: '#86EFAC', border: '1px solid rgba(74,222,128,0.35)' }}>
+                        {procesando ? <Loader2 size={13} className="animate-spin" /> : <span>🔄</span>}
+                        Sincronizar Pacientes CVD
+                    </button>
                     <button
                         onClick={handleScanPresencial}
                         disabled={escaneando || procesando}
