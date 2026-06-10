@@ -240,7 +240,8 @@ app.get('/api/cardiovascular/controles', async (req, res) => {
             orderBy: { fechaControl: 'asc' }
         });
         
-        const enriched = await Promise.all(controles.map(async (c) => {
+        const enriched = [];
+        for (const c of controles) {
             let telefono = await controlCVDService.getWhatsAppId(c.cedula);
             if (telefono) {
                 telefono = telefono.replace('@c.us', '');
@@ -274,12 +275,12 @@ app.get('/api/cardiovascular/controles', async (req, res) => {
                 }
             }
 
-            return { 
+            enriched.push({ 
                 ...c, 
                 telefono: telefono || 'SIN TELÉFONO',
                 canceladaEnXenco: xencoEstado === 'C'
-            };
-        }));
+            });
+        }
 
         res.json(enriched);
     } catch (error) {
