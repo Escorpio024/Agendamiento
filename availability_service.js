@@ -1115,7 +1115,8 @@ async function getUserAppointments(userId) {
                 LTRIM(RTRIM(m.MED_NOMBRE)) AS medicoNombre,
                 c.KC3_ESTADO        AS estado,
                 c.KC3_OBSERVACION   AS observacion,
-                c.KC3_ESPECIALISTA  AS especialidadCod
+                c.KC3_ESPECIALISTA  AS especialidadCod,
+                m.MED_ESPECIAL      AS medicoEspecialidad
             FROM TMTURNOSMEDICOSDETALLE t
             INNER JOIN TMMEDICOS m ON m.MED_COD = t.TME2_CODM
             LEFT JOIN TMCITASUSUARIOS c
@@ -1131,17 +1132,21 @@ async function getUserAppointments(userId) {
 
         logger.debug(`[HABEJICO] getUserAppointments: ${rows.length} citas encontradas (fuente TME2)`);
 
-        return rows.map(r => ({
-            // ID robusto usando '|' como separador — los campos son numéricos, nunca contienen '|'
-            id:            `${Number(r.medicoId)}|${Number(r.fecha)}|${Number(r.hh)}|${Number(r.mm)}`,
-            fecha:         toLocalDateStr(decimalToDate(Number(r.fecha))),
-            hora:          timeLabel(Number(r.hh), Number(r.mm)),
-            medico:        r.medicoNombre || `Médico ${r.medicoId}`,
-            tipo:          r.observacion ? String(r.observacion).replace('WhatsApp - ', '').trim() : 'Medicina General',
-            especialidadCod: r.especialidadCod || null,
-            estado:        r.estado || null,
-            consultorio:   r.consultorio || null,
-        }));
+        return rows.map(r => {
+            const espCod = String(r.medicoEspecialidad || r.especialidadCod || '999').trim();
+            const tipoNombre = codigoToNombreServicio(espCod);
+            
+            return {
+                id:            `${Number(r.medicoId)}|${Number(r.fecha)}|${Number(r.hh)}|${Number(r.mm)}`,
+                fecha:         toLocalDateStr(decimalToDate(Number(r.fecha))),
+                hora:          timeLabel(Number(r.hh), Number(r.mm)),
+                medico:        r.medicoNombre || `Médico ${r.medicoId}`,
+                tipo:          tipoNombre,
+                especialidadCod: espCod,
+                estado:        r.estado || null,
+                consultorio:   r.consultorio || null,
+            };
+        });
     } catch (e) {
         console.error('[HABEJICO] getUserAppointments:', e.message);
         return [];

@@ -1675,11 +1675,14 @@ client.on('message', async (msg) => {
             const futuras = citas.filter(c => {
                 const datePart = new Date(c.fecha + 'T12:00:00');
                 datePart.setHours(23, 59, 59);
-                return datePart >= now;
+                const isFutura = datePart >= now;
+                // SOLO permitir cancelar citas de Medicina General
+                const esMedicinaGeneral = c.especialidadCod === '999' || c.tipo.toLowerCase().includes('general');
+                return isFutura && esMedicinaGeneral;
             });
 
             if (futuras.length === 0) {
-                await replyFn("No tienes citas futuras registradas para cancelar.");
+                await replyFn("No tienes citas de *Medicina General* programadas que puedas cancelar por aquí.\n\n_(Nota: Si necesitas cancelar una cita de Odontología u otra especialidad, por favor comunícate directamente con la clínica)_.");
                 return;
             }
 
@@ -1705,11 +1708,14 @@ client.on('message', async (msg) => {
             const futuras = citas.filter(c => {
                 const datePart = new Date(c.fecha + 'T12:00:00');
                 datePart.setHours(23, 59, 59);
-                return datePart >= now;
+                const isFutura = datePart >= now;
+                // SOLO permitir modificar citas de Medicina General
+                const esMedicinaGeneral = c.especialidadCod === '999' || c.tipo.toLowerCase().includes('general');
+                return isFutura && esMedicinaGeneral;
             });
 
             if (futuras.length === 0) {
-                await replyFn("No encuentro citas futuras para modificar. ¿Seguro que tienes una asignada?");
+                await replyFn("No tienes citas de *Medicina General* futuras para modificar.\n\n_(Nota: Si necesitas cambiar una cita de Odontología u otra especialidad, por favor comunícate directamente con la clínica)_.");
                 return;
             }
 
