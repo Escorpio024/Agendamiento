@@ -233,6 +233,18 @@ app.post('/api/appointments/:id/remind', async (req, res) => {
 
 // ─── MÓDULO CARDIOVASCULAR ────────────────────────────────────────────────────
 
+// GET /api/cardiovascular/sync — Forzar sincronización manual de pacientes CVD
+app.get('/api/cardiovascular/sync', async (req, res) => {
+    try {
+        console.log('[CARDIOVASCULAR] Sincronización manual solicitada por el usuario.');
+        await controlCVDService.detectFinishedAppointments();
+        res.json({ success: true, message: 'Sincronización ejecutada correctamente.' });
+    } catch (error) {
+        console.error('Error en sincronización manual CVD:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // GET /api/cardiovascular/controles — Listar controles a 3 meses
 app.get('/api/cardiovascular/controles', async (req, res) => {
     try {
