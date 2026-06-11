@@ -1116,7 +1116,7 @@ async function getUserAppointments(userId) {
                 c.KC3_ESTADO        AS estado,
                 c.KC3_OBSERVACION   AS observacion,
                 c.KC3_ESPECIALISTA  AS especialidadCod,
-                m.MED_ESPECIAL      AS medicoEspecialidad
+                m.MED_ESPECIALIDAD_1 AS medicoEspecialidad
             FROM TMTURNOSMEDICOSDETALLE t
             INNER JOIN TMMEDICOS m ON m.MED_COD = t.TME2_CODM
             LEFT JOIN TMCITASUSUARIOS c
