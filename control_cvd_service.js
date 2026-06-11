@@ -391,14 +391,21 @@ class ControlCVDService {
 
                         if (enviarMensaje) {
                             try {
-                                const timeoutMs = 5000;
-                                await Promise.race([
-                                    client.sendMessage(`${record.telefono}@c.us`,
-                                        `Intentamos apartarte tu cita de control a los próximos meses automáticamente, pero por el momento no encontramos horarios disponibles en la agenda.\n\n` +
-                                        `Por favor, comunícate con nosotros para programar tu cita de seguimiento. 📞`
-                                    ),
-                                    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), timeoutMs))
+                                const isRegistered = await Promise.race([
+                                    this.client.isRegisteredUser(waId),
+                                    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000))
                                 ]);
+                                if (isRegistered) {
+                                    await Promise.race([
+                                        this.client.sendMessage(waId,
+                                            `🏥 *ESE Hospital San Rafael de Ebéjico*\n\n` +
+                                            `Hola ${record.paciente}, 😊\n\n` +
+                                            `Intentamos apartarte tu cita de control de Riesgo Cardiovascular automáticamente, pero por el momento no encontramos horarios disponibles en la agenda.\n\n` +
+                                            `Por favor, comunícate con nosotros para programar tu cita de seguimiento. 📞`
+                                        ),
+                                        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000))
+                                    ]);
+                                }
                             } catch (sendErr) {
                                 logger.warn(`[Control CVD] No se pudo enviar WhatsApp SIN CUPO a ${record.cedula}: ${sendErr.message}`);
                             }
@@ -581,7 +588,22 @@ class ControlCVDService {
                     `⚠️ *Por favor ten listos tus exámenes de laboratorio antes de esa fecha.*\n\n` +
                     `Si necesitas cancelar o cambiar la cita, comunícate con nosotros. 📞`;
 
-                await this.client.sendMessage(waId, msgRecordatorio);
+                try {
+                    const isRegistered = await Promise.race([
+                        this.client.isRegisteredUser(waId),
+                        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000))
+                    ]);
+                    if (isRegistered) {
+                        await Promise.race([
+                            this.client.sendMessage(waId, msgRecordatorio),
+                            new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000))
+                        ]);
+                    } else {
+                        logger.warn(`[Control CVD] Recordatorio CVD: número sin WhatsApp activo para ${record.cedula}.`);
+                    }
+                } catch (sendErr) {
+                    logger.warn(`[Control CVD] No se pudo enviar recordatorio CVD a ${record.cedula}: ${sendErr.message}`);
+                }
 
                 await botPrisma.controlReminder.update({
                     where: { id: record.id },
