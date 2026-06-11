@@ -226,10 +226,44 @@ class ControlCVDService {
                 // Savia explicitamente también es 3, no necesita condición aparte
                 const epsLabel = entName.includes('NUEVA EPS') ? 'NUEVA EPS (2 meses)' : (entName.includes('SAVIA') ? 'SAVIA (3 meses)' : `${entName || 'OTRA EPS'} (3 meses)`);
 
+                // Determinar si el examen fue hecho en sábado
+                const fechaExamenRaw = String(cita.KC3_FCH); // ej: "20260609"
+                const examenDate = new Date(
+                    parseInt(fechaExamenRaw.substring(0, 4)),
+                    parseInt(fechaExamenRaw.substring(4, 6)) - 1,
+                    parseInt(fechaExamenRaw.substring(6, 8))
+                );
+                const examenFueSabado = examenDate.getDay() === 6; // 6 = sábado
+
                 // Calcular fecha objetivo del control
                 const dControl = new Date();
                 dControl.setMonth(dControl.getMonth() + monthsToAdd);
-                if (dControl.getDay() === 0) dControl.setDate(dControl.getDate() + 1); // No domingos
+
+                // Si el examen fue en sábado, ajustar la fecha de control al sábado más cercano
+                if (examenFueSabado) {
+                    const diaSemana = dControl.getDay(); // 0=Dom, 1=Lun, ... 6=Sáb
+                    if (diaSemana !== 6) {
+                        // Calcular sábado anterior y siguiente
+                        const diasHastaSabAnterior = diaSemana === 0 ? 1 : diaSemana + 1; // Dom=1, Lun=2, Mar=3, ...
+                        const diasHastaSabSiguiente = 6 - diaSemana; // Lun=5, Mar=4, Mie=3, Jue=2, Vie=1, Dom=6
+                        
+                        const sabAnterior = new Date(dControl);
+                        sabAnterior.setDate(dControl.getDate() - diasHastaSabAnterior);
+                        
+                        const sabSiguiente = new Date(dControl);
+                        sabSiguiente.setDate(dControl.getDate() + diasHastaSabSiguiente);
+                        
+                        // Escoger el sábado más cercano (en caso de empate, preferir el anterior)
+                        if (diasHastaSabSiguiente <= diasHastaSabAnterior) {
+                            dControl.setTime(sabSiguiente.getTime());
+                        } else {
+                            dControl.setTime(sabAnterior.getTime());
+                        }
+                        logger.info(`[Control CVD] Paciente ${cedula}: examen fue sábado → ajustando control de ${String(dControl.toISOString().substring(0,10))} a sábado más cercano.`);
+                    }
+                } else {
+                    if (dControl.getDay() === 0) dControl.setDate(dControl.getDate() + 1); // No domingos
+                }
 
                 const fechaControlStr = this.dateToString(dControl);
 
