@@ -586,7 +586,7 @@ class ControlCVDService {
                     `📅 *Fecha:* ${fechaAmigable}\n` +
                     `🕐 *Hora:* ${record.citaHora || 'Consultar en clínica'}\n\n` +
                     `⚠️ *Por favor ten listos tus exámenes de laboratorio antes de esa fecha.*\n\n` +
-                    `Si necesitas cancelar o cambiar la cita, comunícate con nosotros. 📞`;
+                    `Si quieres reagendar o cancelar tu cita comunicate a este numero de telefono (310) 519-1482 📞`;
 
                 try {
                     const isRegistered = await Promise.race([

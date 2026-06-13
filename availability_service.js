@@ -617,103 +617,10 @@ async function getAvailableSlots(fechaStr, tipo = 'medicina general', preferredD
             continue; // Ya procesamos este doctor, pasar al siguiente
         }
 
-        if (sede === 'Sevilla') {
-            // El usuario requiere que para Sevilla SÓLO se tomen los espacios del Visor (TME2).
-            // Si llegamos aquí, el Visor está vacío para este doctor. NO generamos matemáticamente.
-            continue;
-        }
-
-        // ── MODO B: Xenco no tiene slots pre-generados — generar desde el horario (TMTURNOSMEDICOS) ──
-        const franjas = [];
-        // Turno mañana: solo si TME_ACTIVIDAD_M está activo (no es null ni 'N')
-        const mañanaActiva = turno.TME_ACTIVIDAD_M && turno.TME_ACTIVIDAD_M.trim() !== 'N' && turno.TME_ACTIVIDAD_M.trim() !== '';
-        if (mañanaActiva && turno.TME_HH_I != null && turno.TME_HH_F != null) {
-            franjas.push({ hi: Number(turno.TME_HH_I), mi: Number(turno.TME_MM_I || 0), hf: Number(turno.TME_HH_F), mf: Number(turno.TME_MM_F || 0) });
-        }
-        // Turno tarde: solo si TME_ACTIVIDAD_T está activo
-        const tardeActiva = turno.TME_ACTIVIDAD_T && turno.TME_ACTIVIDAD_T.trim() !== 'N' && turno.TME_ACTIVIDAD_T.trim() !== '';
-        if (tardeActiva && turno.TME_HH_I_A != null && turno.TME_HH_F_A != null) {
-            franjas.push({ hi: Number(turno.TME_HH_I_A), mi: Number(turno.TME_MM_I_A || 0), hf: Number(turno.TME_HH_F_A), mf: Number(turno.TME_MM_F_A || 0) });
-        }
-        // Fallback: si ambos campos de actividad están vacíos, usar las horas directamente
-        if (!mañanaActiva && !tardeActiva) {
-            if (turno.TME_HH_I != null && turno.TME_HH_F != null) {
-                franjas.push({ hi: Number(turno.TME_HH_I), mi: Number(turno.TME_MM_I || 0), hf: Number(turno.TME_HH_F), mf: Number(turno.TME_MM_F || 0) });
-            }
-            if (turno.TME_HH_I_A != null && turno.TME_HH_F_A != null) {
-                franjas.push({ hi: Number(turno.TME_HH_I_A), mi: Number(turno.TME_MM_I_A || 0), hf: Number(turno.TME_HH_F_A), mf: Number(turno.TME_MM_F_A || 0) });
-            }
-        }
-
-        logger.debug(`[SLOTS-TME] Dr.${medico.MED_NOMBRE?.trim()} | ActM=${turno.TME_ACTIVIDAD_M} ActT=${turno.TME_ACTIVIDAD_T} | Franjas=${franjas.length} | Dur=${dur}min (modo template)`);
-
-        // Tiempos KC3 conocidos para este doctor (slots que realmente existen en el Visor de Agenda)
-        const kc3Times = new Set(
-            allCitas
-                .filter(c => String(c.KC3_MEDICO).trim() === doctorKey)
-                .map(c => parseInt(c.KC3_HH) * 60 + parseInt(c.KC3_MM))
-        );
-        const doctorTieneKC3 = kc3Times.size > 0;
-
-        for (const f of franjas) {
-            // Pre-calcular todos los slots posibles de esta franja
-            const slotsFragma = [];
-            let t = f.hi * 60 + f.mi;
-            const endMin = f.hf * 60 + f.mf;
-            while (t + dur <= endMin) { slotsFragma.push(t); t += dur; }
-
-            // Si el doctor tiene KC3 para esta fecha, detectar huecos en MEDIO del horario
-            // Un hueco "eliminado" es: 2+ slots SIN KC3 que tienen citas ANTES y DESPUÉS
-            // Los huecos al FINAL del horario son simplemente slots sin reservar → NO eliminar
-            const esHuecoEliminado = new Set();
-            if (doctorTieneKC3) {
-                let racha = [];
-                for (const st of slotsFragma) {
-                    if (!kc3Times.has(st)) {
-                        racha.push(st);
-                    } else {
-                        // Hay registro KC3 DESPUÉS del hueco → el hueco es intermedio (almuerzo/pausa)
-                        if (racha.length >= 2) {
-                            racha.forEach(s => esHuecoEliminado.add(s));
-                        }
-                        racha = []; // reset
-                    }
-                }
-                // Los slots de racha al final NO se marcan (son disponibles sin reservar)
-            }
-
-            for (const totalMin of slotsFragma) {
-                const currH = Math.floor(totalMin / 60);
-                const currM = totalMin % 60;
-
-                if (esHuecoEliminado.has(totalMin)) {
-                    logger.debug(`[SLOT-SKIP] Dr.${medico.MED_NOMBRE?.trim()} ${timeLabel(currH, currM)} → hueco eliminado del Visor (almuerzo/pausa)`);
-                    continue;
-                }
-
-                const isBooked = citasOcupadas.some(c => {
-                    if (String(c.KC3_MEDICO).trim() !== doctorKey) return false;
-                    const cMin = parseInt(c.KC3_HH) * 60 + parseInt(c.KC3_MM);
-                    return cMin < totalMin + dur && totalMin < cMin + dur;
-                });
-
-                if (!isBooked) {
-                    const slotDate = createLocalDate(dateStr, currH, currM);
-                    if (slotDate > now || dateStr !== toLocalDateStr(now)) {
-                        slots.push({
-                            time: timeLabel(currH, currM),
-                            hh: currH, mm: currM,
-                            doctorId: Number(turno.TME_CODM),
-                            doctorName: medico.MED_NOMBRE?.trim() || `Médico ${turno.TME_CODM}`,
-                            especialidadCod: turno.TME_ESPECIALIDAD || especialidad?.ESP_COD,
-                            consultorio: turno.TME_CONSULTORIO,
-                            duracion: dur,
-                            sortValue: totalMin
-                        });
-                    }
-                }
-            }
-        }
+        // ── MODO B DESACTIVADO ──
+        // Si llegamos aquí, el Visor está vacío para este doctor en esta fecha.
+        // Solo mostraremos los espacios que realmente existan en el Visor de Agenda.
+        continue;
     }
 
 
