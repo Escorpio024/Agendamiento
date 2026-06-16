@@ -31,11 +31,18 @@ async function _getTurnosCache() {
     const now = Date.now();
     if (_cache.turnos && now < _cache.turnosExpiry) return _cache.turnos;
     try {
+        const todayDecimal = parseInt(toLocalDateStr(new Date()).replace(/-/g, ''));
         _cache.turnos = await prisma.turnoMedico.findMany({
+            where: {
+                OR: [
+                    { TME_FCH_FIN: { gte: todayDecimal } },
+                    { TME_FCH_FIN: null }
+                ]
+            },
             orderBy: { TME_FCH: 'desc' }
         });
         _cache.turnosExpiry = now + TTL_TURNOS;
-        logger.debug(`[CACHE] Turnos: ${_cache.turnos.length} registros cargados`);
+        logger.debug(`[CACHE] Turnos: ${_cache.turnos.length} registros cargados (optimizados)`);
         return _cache.turnos;
     } catch (e) {
         logger.error(`[DB] Error en _getTurnosCache: ${e.message}`);
