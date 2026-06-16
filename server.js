@@ -867,7 +867,7 @@ app.get('/api/visor/medicos', async (req, res) => {
                 INNER JOIN TMTURNOSMEDICOSDETALLE t ON t.TME2_CODM = m.MED_COD
                 WHERE t.TME2_FCH BETWEEN ${desde} AND ${hasta}
                   AND m.MED_NOMBRE IS NOT NULL
-                  AND m.MED_EST_ESTADO = 'A'
+                  AND (m.MED_EST_ESTADO = 'A' OR m.MED_EST_ESTADO IS NULL OR LTRIM(RTRIM(m.MED_EST_ESTADO)) = '')
             ) sub
             ORDER BY nombre
         `;
