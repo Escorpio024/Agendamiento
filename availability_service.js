@@ -2,16 +2,16 @@ const prisma = require('./db');
 const logger = require('./logger');
 
 // =========================================
-// MÉDICOS EXCLUIDOS DEL BOT (TEMPORAL)
+// MÉDICOS PERMITIDOS POR SEDE (LISTA BLANCA)
 // ─────────────────────────────────────────
-// Estos médicos NO serán ofrecidos por el bot a pacientes de Ebejico.
-// Razón: están reservados para sedes externas (ej. Sevilla) hasta que
-// se implemente la solución multi-sede.
-// Para reactivarlos: eliminar su código de este array.
+// El bot SOLO ofrecerá citas con los médicos que estén en la lista
+// correspondiente a su sede. Cualquier otro médico es ignorado.
+//
+// Sede Ebejico (bot general): Medico 1 (333), Medico 2 (123), Medico 3 (555)
+// Sede Sevilla:               Medico Sevilla (444), Medico Sevilla 1 (777)
 // =========================================
-const MEDICOS_EXCLUIDOS_BOT = [
-    444,  // MEDICO SEVILLA — reservado para sede Sevilla (pendiente implementación)
-];
+const MEDICOS_PERMITIDOS_EBEJICO = [333, 123, 555];
+const MEDICOS_PERMITIDOS_SEVILLA = [444, 777];
 
 // =========================================
 // CACHE EN MEMORIA (datos semi-estáticos)
@@ -458,32 +458,36 @@ async function getAvailableSlots(fechaStr, tipo = 'medicina general', preferredD
         }
     }
     
-    // Ahora filtramos esos turnos "actuales" por especialidad y sede
+    // Ahora filtramos esos turnos "actuales" por sede (lista blanca) y especialidad
+    const listaPermitidos = sede === 'Sevilla' ? MEDICOS_PERMITIDOS_SEVILLA : MEDICOS_PERMITIDOS_EBEJICO;
+
     let turnos = Object.values(turnosPorDoctor).filter(t => {
         // El Visor de Agendas SI respeta TME_FCH_FIN. Si un médico se retiró, su FCH_FIN es menor a hoy,
         // aunque siga teniendo slots fantasma generados en TME2 para fechas futuras.
         if (t.TME_FCH_FIN && t.TME_FCH_FIN < dateDecimal) return false;
-        
-        if (sede === 'Sevilla') return t.TME_CODM == 444;
-        return !especialidad || t.TME_ESPECIALIDAD == especialidad.ESP_COD;
-    });
-    if (sede === 'Sevilla') {
-        turnos = turnos.filter(t => t.TME_CODM == 444);
-        
-        // Fallback vital: Si el médico de Sevilla no tiene cabecera activa en TMTURNOSMEDICOS,
-        // lo agregamos manualmente para que pueda leer los slots libres directos del Visor (TME2).
-        if (turnos.length === 0) {
-            turnos.push({ TME_CODM: 444, TME_DUR_CITA: 20, TME_ESPECIALIDAD: especialidad?.ESP_COD || '999' });
+
+        // Solo médicos de la lista blanca de esta sede
+        if (!listaPermitidos.includes(Number(t.TME_CODM))) return false;
+
+        // Para Ebejico, respetar además el filtro de especialidad
+        if (sede !== 'Sevilla') {
+            return !especialidad || t.TME_ESPECIALIDAD == especialidad.ESP_COD;
         }
-    } else {
-        turnos = turnos.filter(t => !MEDICOS_EXCLUIDOS_BOT.includes(Number(t.TME_CODM)));
+        return true;
+    });
+
+    if (sede === 'Sevilla') {
+        // Fallback vital: Si los médicos de Sevilla no tienen cabecera activa en TMTURNOSMEDICOS,
+        // los agregamos manualmente para que puedan leer los slots libres directos del Visor (TME2).
+        if (turnos.length === 0) {
+            for (const codM of MEDICOS_PERMITIDOS_SEVILLA) {
+                turnos.push({ TME_CODM: codM, TME_DUR_CITA: 20, TME_ESPECIALIDAD: especialidad?.ESP_COD || '999' });
+            }
+        }
     }
 
-    // Log de exclusiones para trazabilidad
-    const excluidos = Object.values(turnosPorDoctor).filter(t => MEDICOS_EXCLUIDOS_BOT.includes(Number(t.TME_CODM)));
-    if (excluidos.length) {
-        logger.debug(`[DISPONIBILIDAD] ${excluidos.length} médico(s) excluido(s) del bot en sede ${sede}: ${excluidos.map(t => t.TME_CODM).join(', ')}`);
-    }
+    // Log de médicos permitidos para trazabilidad
+    logger.debug(`[DISPONIBILIDAD] Sede=${sede} | Lista blanca: [${listaPermitidos.join(', ')}] | Turnos coincidentes: ${turnos.length} | Médicos: ${turnos.map(t => t.TME_CODM).join(', ')}`);
 
     if (!turnos.length) return [];
 
