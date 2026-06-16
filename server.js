@@ -849,29 +849,59 @@ app.post('/api/cardiovascular/cita', async (req, res) => {
 
 // ─── VISOR DE AGENDA ────────────────────────────────────────────────────────
 
-// GET /api/visor/medicos — Lista de médicos con agenda activa
+// GET /api/visor/medicos — Lista de médicos (lista blanca por sede + todos los que tienen agenda activa)
 app.get('/api/visor/medicos', async (req, res) => {
     try {
+        // Médicos de la lista blanca: siempre aparecen aunque no tengan agenda cargada
+        const LISTA_BLANCA = [333, 123, 555, 444, 777];
+
+        // También incluir médicos reales con agenda reciente (últimos 30 días → 3 meses)
         const hoy = new Date();
         const hace30 = new Date(); hace30.setDate(hoy.getDate() - 30);
         const toDecimal = d => parseInt(`${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`);
         const desde = toDecimal(hace30);
         const hasta = toDecimal(new Date(hoy.getFullYear(), hoy.getMonth() + 3, 0));
 
-        const medicos = await medicalPrisma.$queryRaw`
-            SELECT cod, nombre FROM (
-                SELECT DISTINCT
-                    CAST(m.MED_COD AS BIGINT)           AS cod,
-                    LTRIM(RTRIM(m.MED_NOMBRE))          AS nombre
-                FROM TMMEDICOS m
-                INNER JOIN TMTURNOSMEDICOSDETALLE t ON t.TME2_CODM = m.MED_COD
-                WHERE t.TME2_FCH BETWEEN ${desde} AND ${hasta}
-                  AND m.MED_NOMBRE IS NOT NULL
-                  AND (m.MED_EST_ESTADO = 'A' OR m.MED_EST_ESTADO IS NULL OR LTRIM(RTRIM(m.MED_EST_ESTADO)) = '')
-            ) sub
-            ORDER BY nombre
+        // 1. Médicos de la lista blanca (siempre presentes)
+        const medicosBlanca = await medicalPrisma.$queryRaw`
+            SELECT
+                CAST(MED_COD AS BIGINT) AS cod,
+                LTRIM(RTRIM(MED_NOMBRE)) AS nombre,
+                1 AS prioridad
+            FROM TMMEDICOS
+            WHERE MED_COD IN (333, 123, 555, 444, 777)
+              AND MED_NOMBRE IS NOT NULL
         `;
-        res.json(medicos.map(m => ({ cod: Number(m.cod), nombre: m.nombre })));
+
+        // 2. Médicos reales con agenda activa (INNER JOIN con TME2)
+        const medicosAgenda = await medicalPrisma.$queryRaw`
+            SELECT DISTINCT
+                CAST(m.MED_COD AS BIGINT) AS cod,
+                LTRIM(RTRIM(m.MED_NOMBRE)) AS nombre,
+                2 AS prioridad
+            FROM TMMEDICOS m
+            INNER JOIN TMTURNOSMEDICOSDETALLE t ON t.TME2_CODM = m.MED_COD
+            WHERE t.TME2_FCH BETWEEN ${desde} AND ${hasta}
+              AND m.MED_NOMBRE IS NOT NULL
+              AND (m.MED_EST_ESTADO = 'A' OR m.MED_EST_ESTADO IS NULL OR LTRIM(RTRIM(m.MED_EST_ESTADO)) = '')
+        `;
+
+        // Combinar, deduplicar por código y ordenar (lista blanca primero, luego alfabético)
+        const vistos = new Set();
+        const todos = [];
+        for (const m of [...medicosBlanca, ...medicosAgenda]) {
+            const cod = Number(m.cod);
+            if (!vistos.has(cod)) {
+                vistos.add(cod);
+                todos.push({ cod, nombre: m.nombre, prioridad: Number(m.prioridad) });
+            }
+        }
+        todos.sort((a, b) => {
+            if (a.prioridad !== b.prioridad) return a.prioridad - b.prioridad;
+            return a.nombre.localeCompare(b.nombre, 'es');
+        });
+
+        res.json(todos.map(m => ({ cod: m.cod, nombre: m.nombre })));
     } catch (e) {
         console.error('[VISOR] Error /medicos:', e.message);
         res.status(500).json({ error: e.message });
