@@ -371,14 +371,65 @@ class ControlCVDService {
                     const dd   = record.fechaControl.substring(6, 8);
                     const fechaFormat = `${yyyy}-${mm}-${dd}`;
 
-                    // Buscar cupos en la agenda de P Y P MEDICOS (busca desde la fecha de control hacia adelante)
-                    // NOTA: firma correcta → getNextAvailableSlots(startDate, tipo, doctor, sede, isCVD)
-                    const availResult = await availabilityService.getNextAvailableSlots(
+                    // ── BÚSQUEDA BI-DIRECCIONAL DE CUPOS CVD ──────────────────────────────────────
+                    // 1. Busca desde la fecha objetivo → hacia adelante (máx 7 días)
+                    // 2. Simultáneamente busca hacia atrás (máx 7 días antes)
+                    // 3. Escoge la fecha con disponibilidad más cercana al objetivo
+                    // Restricciones CVD: Lunes–Sábado, hasta 12:40 PM
+                    // ─────────────────────────────────────────────────────────────────────────────
+
+                    const CVD_MAX_EXPAND = 7; // Días máximos de expansión en cada dirección
+
+                    // Búsqueda hacia ADELANTE (incluye la fecha exacta)
+                    const forwardResult = await availabilityService.getNextAvailableSlots(
                         fechaFormat, 'medicina general', 'p y p medicos', 'Ebejico', true
                     );
 
+                    // Búsqueda hacia ATRÁS: probar día a día desde fecha-1 hasta fecha-7
+                    let backwardResult = null;
+                    const baseDate = new Date(fechaFormat + 'T12:00:00');
+                    for (let i = 1; i <= CVD_MAX_EXPAND; i++) {
+                        const candidate = new Date(baseDate);
+                        candidate.setDate(baseDate.getDate() - i);
+                        const dow = candidate.getDay();
+                        if (dow === 0) continue; // Sin domingos
+                        const candidateStr = `${candidate.getFullYear()}-${String(candidate.getMonth()+1).padStart(2,'0')}-${String(candidate.getDate()).padStart(2,'0')}`;
+                        // Solo buscar si la fecha no es pasada
+                        const hoy = new Date(); hoy.setHours(0,0,0,0);
+                        if (candidate < hoy) break; // No buscar fechas ya pasadas
+                        try {
+                            const r = await availabilityService.getNextAvailableSlots(
+                                candidateStr, 'medicina general', 'p y p medicos', 'Ebejico', true
+                            );
+                            // Verificar que la fecha encontrada sea exactamente el candidato (no más adelante)
+                            if (r && r.date === candidateStr && r.slots && r.slots.length > 0) {
+                                backwardResult = r;
+                                break;
+                            }
+                        } catch (bErr) {
+                            logger.warn(`[Control CVD] Error buscando atrás ${candidateStr}: ${bErr.message}`);
+                        }
+                    }
+
+                    // Escoger el resultado más cercano al objetivo
+                    let availResult = null;
+                    if (forwardResult && forwardResult.slots?.length > 0 && backwardResult) {
+                        // Ambos encontraron disponibilidad: elegir el más cercano
+                        const fwdDate = new Date(forwardResult.date + 'T12:00:00');
+                        const bwdDate = new Date(backwardResult.date + 'T12:00:00');
+                        const fwdDiff = Math.abs(fwdDate - baseDate);
+                        const bwdDiff = Math.abs(bwdDate - baseDate);
+                        availResult = (bwdDiff <= fwdDiff) ? backwardResult : forwardResult;
+                        logger.info(`[Control CVD] Bi-directional: fwd=${forwardResult.date}(${fwdDiff/86400000}d) bwd=${backwardResult.date}(${bwdDiff/86400000}d) → eligiendo ${availResult.date}`);
+                    } else if (forwardResult && forwardResult.slots?.length > 0) {
+                        availResult = forwardResult;
+                    } else if (backwardResult) {
+                        availResult = backwardResult;
+                        logger.info(`[Control CVD] Sin cupo adelante para ${record.cedula}, usando fecha anterior: ${backwardResult.date}`);
+                    }
+
                     if (!availResult || !availResult.slots || availResult.slots.length === 0) {
-                        logger.warn(`[Control CVD] Sin horarios disponibles a partir del ${fechaFormat} para ${record.cedula}. Marcando BOOKING_FAILED_NO_SLOT.`);
+                        logger.warn(`[Control CVD] Sin horarios disponibles (±${CVD_MAX_EXPAND} días de ${fechaFormat}) para ${record.cedula}. Marcando BOOKING_FAILED_NO_SLOT.`);
                         
                         // Solo enviar el mensaje de WhatsApp si el paciente estaba PENDING.
                         // Si ya estaba en SIN_CUPO, no volver a enviarle el mensaje para no hacer spam.
