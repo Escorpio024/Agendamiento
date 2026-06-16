@@ -601,6 +601,14 @@ async function getAvailableSlots(fechaStr, tipo = 'medicina general', preferredD
         if (slotsVaciosDoctor && slotsVaciosDoctor.size > 0) {
             logger.debug(`[SLOTS-KC3] Dr.${medico.MED_NOMBRE?.trim()} | ${slotsVaciosDoctor.size} slots disponibles directo de KC3 (Visor de Agenda)`);
             for (const tMin of [...slotsVaciosDoctor].sort((a, b) => a - b)) {
+                
+                // ── REGLA CVD: Solo Lunes a Sábado, hasta las 12:40 PM ──
+                if (isCVD) {
+                    const localDateTemp = new Date(dateStr + 'T12:00:00');
+                    if (localDateTemp.getDay() === 0) continue; // Domingo no permitido
+                    if (tMin > (12 * 60 + 40)) continue; // Límite 12:40 PM
+                }
+
                 const currH = Math.floor(tMin / 60);
                 const currM = tMin % 60;
                 // Verificar que no esté ocupado por una cita real
