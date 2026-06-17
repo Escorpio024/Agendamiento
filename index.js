@@ -627,7 +627,9 @@ client.on('message', async (msg) => {
             const digits = cedula.replace(/\D/g, '');
             const padded = cedula.padStart(14, ' ');
             const digitsPadded = digits ? digits.padStart(14, ' ') : null;
-            return [...new Set([cedula, digits, padded, digitsPadded].filter(Boolean))];
+            // ⚠️ Clave para TI/RC/CE: en Xenco el KCN_COD se guarda con ceros → '00001031944266'
+            const zeroPadded = digits ? digits.padStart(14, '0') : null;
+            return [...new Set([cedula, digits, padded, digitsPadded, zeroPadded].filter(Boolean))];
         }
         function extractDocCode(rawText, tipoDoc) {
             const esNumerico = ['CC', 'TI', 'NUIP'].includes(tipoDoc);
