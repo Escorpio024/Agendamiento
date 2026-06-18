@@ -466,7 +466,10 @@ async function getAvailableSlots(fechaStr, tipo = 'medicina general', preferredD
     }
     
     // Ahora filtramos esos turnos "actuales" por sede (lista blanca) y especialidad
-    const listaPermitidos = sede === 'Sevilla' ? MEDICOS_PERMITIDOS_SEVILLA : MEDICOS_PERMITIDOS_EBEJICO;
+    const listaPermitidos = [...(sede === 'Sevilla' ? MEDICOS_PERMITIDOS_SEVILLA : MEDICOS_PERMITIDOS_EBEJICO)];
+    if (isCVD) {
+        listaPermitidos.push(111); // P Y P MEDICOS (Riesgo Cardiovascular)
+    }
 
     let turnos = Object.values(turnosPorDoctor).filter(t => {
         // El Visor de Agendas SI respeta TME_FCH_FIN. Si un médico se retiró, su FCH_FIN es menor a hoy,
