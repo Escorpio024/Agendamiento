@@ -2249,6 +2249,24 @@ if (process.env.NO_WHATSAPP === 'true') {
     // MODO PRODUCCIÓN: iniciar WhatsApp (necesita Puppeteer + Chrome)
     client.initialize().catch(e => {
         console.error('[WA] ❌ Error al iniciar el cliente:', e.message);
+        
+        // Auto-reparación: Si la sesión está corrupta (suele pasar tras updates de WhatsApp Web),
+        // borrar la carpeta para forzar un re-login y evitar que el bot se quede en loop de reinicios.
+        if (e.message.includes('Execution context was destroyed') || e.message.includes('Target closed') || e.message.includes('Session closed')) {
+            console.log('[WA] 🛠️ Intentando auto-reparar: Borrando sesión corrupta (.wwebjs_auth)...');
+            try {
+                const fs = require('fs');
+                const path = require('path');
+                const sessionPath = path.join(__dirname, '.wwebjs_auth');
+                if (fs.existsSync(sessionPath)) {
+                    fs.rmSync(sessionPath, { recursive: true, force: true });
+                    console.log('[WA] ✅ Carpeta de sesión borrada. En el próximo reinicio, pedirá escanear el QR de nuevo.');
+                }
+            } catch (err) {
+                console.error('[WA] ❌ Error al borrar sesión:', err.message);
+            }
+        }
+        
         process.exit(1);
     });
 }
