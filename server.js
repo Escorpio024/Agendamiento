@@ -233,6 +233,97 @@ app.post('/api/appointments/:id/remind', async (req, res) => {
 
 // ─── MÓDULO CARDIOVASCULAR ────────────────────────────────────────────────────
 
+// GET /api/cardiovascular/indicadores — Generar reporte de indicadores
+app.get('/api/cardiovascular/indicadores', async (req, res) => {
+    try {
+        const { year, month } = req.query;
+        if (!year || !month) return res.status(400).json({ error: 'year y month requeridos' });
+
+        const y = parseInt(year);
+        const m = parseInt(month);
+        
+        // Formato para Xenco: YYYYMMDD
+        const startOfMonth = parseInt(`${y}${String(m).padStart(2, '0')}01`);
+        const endOfMonth = parseInt(`${y}${String(m).padStart(2, '0')}31`);
+
+        const startOfQuarter = parseInt(`${y}${String(Math.floor((m - 1) / 3) * 3 + 1).padStart(2, '0')}01`);
+        const startOfYear = parseInt(`${y}0101`);
+
+        const getIndicadores = async (start, end) => {
+            const rows = await medicalPrisma.$queryRawUnsafe(`
+                SELECT 
+                    v.[TIENE HTA], v.[TIENE DM], v.[ESTADIO ERC],
+                    v.[HEMOGLOBINA GLI], v.[COLESTEROL LDL],
+                    v.[P. Sistolica] AS PSistolica, v.[P. Diastolica] AS PDiastolica,
+                    c.KC3_ENTIDAD, LTRIM(RTRIM(e.ENT_NOMBRE)) AS eps
+                FROM TMCITASUSUARIOS c
+                INNER JOIN VIQ_MOVIMIENTO_HC_ALTO_COSTO v ON c.KC3_COD = v.Codigo_KC AND c.KC3_FCH = v.[Fecha HC]
+                LEFT JOIN TMENTIDADES e ON e.ENT_COD = c.KC3_ENTIDAD
+                WHERE c.KC3_FCH >= ${start} AND c.KC3_FCH <= ${end}
+                  AND c.KC3_NUM > 0
+                  AND LTRIM(RTRIM(c.KC3_ARTIC)) IN ('890301-7','890301-8','890301-12','890301-13','890301-14','890301-15','890301-16')
+            `);
+
+            const total = rows.length;
+            let dmControl = 0, ercEstudio = 0, htaControl = 0, ldlControl = 0, paControl = 0;
+            const epsMap = {};
+
+            for (const r of rows) {
+                const hba1c = parseFloat(r['HEMOGLOBINA GLI']);
+                const ldl   = parseFloat(r['COLESTEROL LDL']);
+                const sys   = parseInt(r.PSistolica);
+                const dia   = parseInt(r.PDiastolica);
+
+                let dmOk = false, ercOk = false, htaOk = false, ldlOk = false, paOk = false;
+
+                if (r['TIENE DM'] === '1' && !isNaN(hba1c) && hba1c >= 4 && hba1c < 7)           { dmControl++;  dmOk  = true; }
+                if (r['ESTADIO ERC'] && !['','98'].includes(String(r['ESTADIO ERC']).trim()))      { ercEstudio++; ercOk = true; }
+                if (r['TIENE HTA'] === '1' && sys > 0 && sys < 150 && dia > 0 && dia < 90)       { htaControl++; htaOk = true; }
+                if (r['TIENE HTA'] === '1' && r['TIENE DM'] === '1' && !isNaN(ldl) && ldl >= 15 && ldl <= 100) { ldlControl++; ldlOk = true; }
+                if (sys > 0 && sys < 140 && dia > 0 && dia < 90)                                  { paControl++;  paOk  = true; }
+
+                if (r.KC3_ENTIDAD) {
+                    const epsName = r.eps || 'SIN EPS';
+                    if (!epsMap[epsName]) epsMap[epsName] = { atendidos: 0, dmControl: 0, paControl: 0, ercEstudio: 0 };
+                    epsMap[epsName].atendidos++;
+                    if (dmOk)  epsMap[epsName].dmControl++;
+                    if (paOk)  epsMap[epsName].paControl++;
+                    if (ercOk) epsMap[epsName].ercEstudio++;
+                }
+            }
+
+            const pct = (v) => total ? Math.round((v / total) * 1000) / 10 : 0;
+            return {
+                atendidos: total,
+                dmControl:  { valor: dmControl,  porcentaje: pct(dmControl) },
+                ercEstudio: { valor: ercEstudio, porcentaje: pct(ercEstudio) },
+                htaControl: { valor: htaControl, porcentaje: pct(htaControl) },
+                ldlControl: { valor: ldlControl, porcentaje: pct(ldlControl) },
+                paControl:  { valor: paControl,  porcentaje: pct(paControl) },
+                epsList: Object.entries(epsMap).map(([nombre, stats]) => ({ nombre, ...stats })).sort((a, b) => b.atendidos - a.atendidos)
+            };
+        };
+
+        const [resMes, resTrimestre, resAno] = await Promise.all([
+            getIndicadores(startOfMonth, endOfMonth),
+            getIndicadores(startOfQuarter, endOfMonth),
+            getIndicadores(startOfYear, endOfMonth)
+        ]);
+
+        const data = {
+            mes:       { ...resMes,       meta: { dm: 50, erc: 80, hta: 60, ldl: 50, pa: 60 } },
+            trimestre: resTrimestre,
+            ano:       resAno,
+            eps:       resMes.epsList
+        };
+
+        res.json(data);
+    } catch (error) {
+        console.error('Error generando indicadores CVD:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // GET /api/cardiovascular/sync — Forzar sincronización manual de pacientes CVD
 app.get('/api/cardiovascular/sync', async (req, res) => {
     try {
@@ -245,54 +336,22 @@ app.get('/api/cardiovascular/sync', async (req, res) => {
     }
 });
 
-// GET /api/cardiovascular/controles — Listar controles a 3 meses
+// GET /api/cardiovascular/controles — Listar controles registrados en bot.db
 app.get('/api/cardiovascular/controles', async (req, res) => {
     try {
         const controles = await botPrisma.controlReminder.findMany({
-            orderBy: { fechaControl: 'asc' }
+            orderBy: [{ createdAt: 'desc' }]
         });
-        
-        const enriched = [];
-        for (const c of controles) {
-            let telefono = await controlCVDService.getWhatsAppId(c.cedula);
-            if (telefono) {
-                telefono = telefono.replace('@c.us', '');
-            }
-            
-            // Si la cita ya está agendada, verificamos en tiempo real en Xenco si sigue activa o si el paciente la canceló.
-            let xencoEstado = null;
-            if (c.estado === 'BOOKED' || c.estado === 'BOOKED_AND_REMINDED') {
-                if (c.citaFch) {
-                    try {
-                        const cedula14 = c.cedula.padStart(14, '0');
-                        const cedulaSinCeros = c.cedula.replace(/^0+/, '');
-                        const sqlCita = `
-                            SELECT TOP 1 KC3_ESTADO 
-                            FROM TMCITASUSUARIOS 
-                            WHERE KC3_FCH = ${c.citaFch} 
-                              AND (KC3_COD = '${cedula14}' OR KC3_COD = '${cedulaSinCeros}' OR KC3_COD = '${c.cedula}')
-                              AND KC3_MEDICO = ${c.citaMedico || 0}
-                        `;
-                        const resCita = await medicalPrisma.$queryRawUnsafe(sqlCita);
-                        if (resCita && resCita.length > 0) {
-                            // En Xenco: C = Cancelada
-                            xencoEstado = String(resCita[0].KC3_ESTADO).trim();
-                        } else {
-                            // Si no se encontró la cita, asumimos que fue borrada/cancelada
-                            xencoEstado = 'C';
-                        }
-                    } catch (err) {
-                        logger.error('[CARDIOVASCULAR] Error consultando estado en Xenco:', err.message);
-                    }
-                }
-            }
 
-            enriched.push({ 
-                ...c, 
-                telefono: telefono || 'SIN TELÉFONO',
-                canceladaEnXenco: xencoEstado === 'C'
-            });
-        }
+        // Enriquecer con teléfono en paralelo (sin consultar Xenco por cada registro)
+        const enriched = await Promise.all(controles.map(async (c) => {
+            let telefono = null;
+            try {
+                const waId = await controlCVDService.getWhatsAppId(c.cedula);
+                telefono = waId ? waId.replace('@c.us', '') : null;
+            } catch (_) {}
+            return { ...c, telefono: telefono || 'SIN TELÉFONO', canceladaEnXenco: false };
+        }));
 
         res.json(enriched);
     } catch (error) {

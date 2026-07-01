@@ -9,7 +9,6 @@ datasource db {
   url      = env("BOT_DATABASE_URL")
 }
 
-
 model Conversation {
   id            String    @id
   name          String?
@@ -31,17 +30,17 @@ model Message {
 }
 
 model AppointmentLog {
-  id             String   @id @default(cuid())
-  patientName    String
+  id              String   @id @default(cuid())
+  patientName     String
   patientDocument String
-  doctorId       String?
-  doctorName     String?
+  doctorId        String?
+  doctorName      String?
   appointmentDate String
   appointmentTime String
-  serviceType    String?
-  whatsappId     String
-  patientPhone   String?
-  createdAt      DateTime @default(now())
+  serviceType     String?
+  whatsappId      String
+  patientPhone    String?
+  createdAt       DateTime @default(now())
 }
 
 model CvdProgramadoHistorial {
@@ -51,23 +50,23 @@ model CvdProgramadoHistorial {
   tipoExamen String
   fecha      String?
   doctor     String?
-  accion     String   // "ELIMINADO" | "PROGRAMADO"
+  accion     String
   motivo     String?
   creadoEn   DateTime @default(now())
 }
 
 model CvdCitaProgramada {
-  id          String   @id @default(cuid())
-  cedula      String
-  paciente    String
-  doctorId    String?
+  id           String   @id @default(cuid())
+  cedula       String
+  paciente     String
+  doctorId     String?
   doctorNombre String?
-  examCodigo  String
-  tipoExamen  String
-  fecha       String?
-  hora        String?
-  notas       String?
-  creadoEn    DateTime @default(now())
+  examCodigo   String
+  tipoExamen   String
+  fecha        String?
+  hora         String?
+  notas        String?
+  creadoEn     DateTime @default(now())
 }
 
 model ControlReminder {
@@ -81,7 +80,7 @@ model ControlReminder {
   fechaRecordatorio String
   estado            String   @default("PENDING")
   epsInfo           String?
-  entidadCod        Int?     // Código numérico ENT_COD de la EPS del paciente (para contratos en Xenco)
+  entidadCod        Int?
   citaMedico        String?
   citaFch           String?
   citaHh            String?
