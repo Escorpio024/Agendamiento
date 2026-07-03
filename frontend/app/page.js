@@ -199,11 +199,12 @@ export default function SelectorPage() {
                                 {mod.features.map((f) => (
                                     <span
                                         key={f}
-                                        className="text-[10px] px-2 py-0.5 rounded-full"
+                                        className="text-xs font-medium px-3 py-1.5 rounded-lg"
                                         style={{
-                                            background: `${mod.badgeColor}18`,
+                                            background: `${mod.badgeColor}20`,
                                             color: mod.badgeText,
-                                            border: `1px solid ${mod.badgeColor}30`,
+                                            border: `1px solid ${mod.badgeColor}40`,
+                                            letterSpacing: '0.01em',
                                         }}
                                     >
                                         {f}
@@ -213,19 +214,24 @@ export default function SelectorPage() {
 
                             {/* CTA */}
                             <div
-                                className="flex items-center gap-2 text-sm font-semibold transition-all duration-200"
-                                style={{
-                                    color: mod.available ? mod.accentColor : 'var(--text-muted)',
-                                    transform: isHovered && mod.available ? 'translateX(4px)' : 'translateX(0)',
-                                }}
+                                className="flex items-center justify-between pt-4 mt-auto"
+                                style={{ borderTop: `1px solid ${mod.badgeColor}25` }}
                             >
                                 {mod.available ? (
-                                    <>
-                                        <span>Ingresar</span>
-                                        <ArrowRight size={15} />
-                                    </>
+                                    <div
+                                        className="flex items-center gap-2 text-sm font-bold px-4 py-2 rounded-xl transition-all duration-200"
+                                        style={{
+                                            background: isHovered ? `${mod.badgeColor}22` : `${mod.badgeColor}10`,
+                                            color: mod.accentColor,
+                                            border: `1px solid ${mod.badgeColor}35`,
+                                            transform: isHovered ? 'translateX(3px)' : 'translateX(0)',
+                                        }}
+                                    >
+                                        <span>Ingresar al módulo</span>
+                                        <ArrowRight size={14} />
+                                    </div>
                                 ) : (
-                                    <span>En desarrollo</span>
+                                    <span className="text-xs text-gray-500 px-3 py-1.5 rounded-lg border border-gray-700/50 bg-gray-800/30">En desarrollo</span>
                                 )}
                             </div>
                         </button>

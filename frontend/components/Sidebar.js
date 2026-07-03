@@ -80,29 +80,29 @@ export default function Sidebar({ conversations, activeId, onSelect, filter, set
                         {/* Botón Visor */}
                         <button
                             onClick={onOpenVisor}
-                            className="flex-1 flex items-center justify-center gap-1.5 bg-[#2D283E] hover:bg-[#8263B1]/40 text-[#C4A7FF] px-2 py-1.5 rounded-lg text-xs font-semibold transition-all shadow-sm border border-[#8263B1]/20 hover:border-[#8263B1]/50"
+                            className="flex-1 flex items-center justify-center gap-2 bg-[#2D283E] hover:bg-[#8263B1]/40 text-[#C4A7FF] px-3 py-2.5 rounded-xl text-xs font-bold transition-all shadow-sm border border-[#8263B1]/25 hover:border-[#8263B1]/60"
                             title="Visor de agenda médica"
                         >
-                            <MonitorCheck size={12} />
+                            <MonitorCheck size={14} />
                             <span>Visor</span>
                         </button>
                         {/* Botón recordatorios */}
                         <button
                             onClick={handleSendReminders}
                             disabled={sendingReminders}
-                            className="flex-1 flex items-center justify-center gap-1.5 bg-[#2D283E] hover:bg-[#A1E3D8]/20 text-[#A1E3D8] px-2 py-1.5 rounded-lg text-xs font-semibold transition-all shadow-sm border border-[#A1E3D8]/20 hover:border-[#A1E3D8]/40 disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="flex-1 flex items-center justify-center gap-2 bg-[#2D283E] hover:bg-[#A1E3D8]/20 text-[#A1E3D8] px-3 py-2.5 rounded-xl text-xs font-bold transition-all shadow-sm border border-[#A1E3D8]/25 hover:border-[#A1E3D8]/50 disabled:opacity-50 disabled:cursor-not-allowed"
                             title="Enviar recordatorios de citas de mañana"
                         >
-                            <BellRing size={12} className={sendingReminders ? 'animate-pulse' : ''} />
+                            <BellRing size={14} className={sendingReminders ? 'animate-pulse' : ''} />
                             <span>{sendingReminders ? 'Enviando...' : 'Recordar'}</span>
                         </button>
                         {/* Botón Citas */}
                         <button
                             onClick={onOpenHistory}
-                            className="flex-1 flex items-center justify-center gap-1.5 bg-[#2D283E] hover:bg-[#8263B1]/40 text-[#F5F5F7] px-2 py-1.5 rounded-lg text-xs font-semibold transition-all shadow-sm border border-[#2D283E] hover:border-[#8263B1]/50"
+                            className="flex-1 flex items-center justify-center gap-2 bg-[#2D283E] hover:bg-[#8263B1]/30 text-[#F5F5F7] px-3 py-2.5 rounded-xl text-xs font-bold transition-all shadow-sm border border-[#2D283E] hover:border-[#8263B1]/50"
                             title="Ver historial de citas"
                         >
-                            <CalendarClock size={12} className="text-[#A1E3D8]" />
+                            <CalendarClock size={14} className="text-[#A1E3D8]" />
                             <span>Citas {appointmentsCount > 0 ? `(${appointmentsCount})` : ''}</span>
                         </button>
                     </div>
