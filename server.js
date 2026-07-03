@@ -11,6 +11,7 @@ const botPrisma = require('./dbBot');
 const medicalPrisma = require('./db');
 const logger = require('./logger');
 const controlCVDService = require('./control_cvd_service');
+const campaignService = require('./campaign_service');
 
 // ─── CORS: Configurable desde .env ────────────────────────────────────────────
 // En desarrollo: CORS_ORIGIN=* (permisivo)
@@ -413,6 +414,46 @@ app.post('/api/cardiovascular/controles/scan-presenciales', async (req, res) => 
     } catch (error) {
         logger.error('[CARDIOVASCULAR] Error iniciando escaneo masivo:', error.message);
         res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+
+// ==========================================
+// RUTAS DE CAMPAÑAS (CAMPAIGNS)
+// ==========================================
+
+app.get('/api/campaigns', async (req, res) => {
+    try {
+        const campaigns = await campaignService.getCampaigns();
+        res.json(campaigns);
+    } catch (error) {
+        logger.error('[API] Error listando campañas:', error.message);
+        res.status(500).json({ error: 'Error listando campañas' });
+    }
+});
+
+app.post('/api/campaigns', async (req, res) => {
+    try {
+        const { name, messageBody } = req.body;
+        if (!name || !messageBody) {
+            return res.status(400).json({ error: 'Falta name o messageBody' });
+        }
+        const campaign = await campaignService.createCampaign(name, messageBody);
+        res.json(campaign);
+    } catch (error) {
+        logger.error('[API] Error creando campaña:', error.message);
+        res.status(500).json({ error: 'Error creando campaña' });
+    }
+});
+
+app.post('/api/campaigns/:id/send', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const result = await campaignService.startCampaign(id);
+        res.json(result);
+    } catch (error) {
+        logger.error(`[API] Error iniciando campaña ${req.params.id}:`, error.message);
+        res.status(400).json({ error: error.message });
     }
 });
 

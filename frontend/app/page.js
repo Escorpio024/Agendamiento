@@ -39,6 +39,23 @@ const modules = [
         features: ['Cardiología', 'Seguimiento', 'Especialistas', 'Reportes'],
         available: true,
     },
+    {
+        id: 'campaigns',
+        title: 'Campañas',
+        subtitle: 'Difusión Masiva',
+        description: 'Envía campañas y mensajes masivos a los pacientes registrados por WhatsApp.',
+        icon: MessageCircle,
+        iconBg: 'linear-gradient(135deg, #10b981 0%, #047857 100%)',
+        accentColor: '#34d399',
+        badgeColor: '#10b981',
+        badgeBg: 'rgba(16,185,129,0.18)',
+        badgeBorder: 'rgba(16,185,129,0.35)',
+        badgeText: '#6ee7b7',
+        tag: 'Nuevo',
+        href: '/campaigns',
+        features: ['Masivos', 'Prevención', 'Jornadas', 'Registro'],
+        available: true,
+    },
 ];
 
 export default function SelectorPage() {

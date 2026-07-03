@@ -24,6 +24,7 @@ const { findPaciente, updateCelular, dateToDecimal, codigoToNombreServicio } = r
 const chatService = require('./chat_service');
 const reminderService = require('./reminder_service');
 const controlCvdService = require('./control_cvd_service');
+const campaignService = require('./campaign_service');
 const server = require('./server');
 const mediaHandler = require('./media_handler');
 
@@ -140,6 +141,7 @@ client.on('ready', async () => {
     server.start(client);
     reminderService.init(client);
     controlCvdService.init(client);
+    campaignService.init(client);
     await loadHistoricalMessages();
 });
 

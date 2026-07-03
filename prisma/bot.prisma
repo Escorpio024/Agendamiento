@@ -90,3 +90,24 @@ model ControlReminder {
   citaHora          String?
   createdAt         DateTime @default(now())
 }
+
+model Campaign {
+  id          String        @id @default(cuid())
+  name        String
+  messageBody String
+  status      String        @default("DRAFT") // DRAFT, SENDING, COMPLETED
+  sentCount   Int           @default(0)
+  totalCount  Int           @default(0)
+  createdAt   DateTime      @default(now())
+  logs        CampaignLog[]
+}
+
+model CampaignLog {
+  id           String   @id @default(cuid())
+  campaignId   String
+  patientPhone String
+  status       String   @default("SENT") // SENT, FAILED
+  error        String?
+  sentAt       DateTime @default(now())
+  campaign     Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+}
