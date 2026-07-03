@@ -457,6 +457,32 @@ app.post('/api/campaigns/:id/send', async (req, res) => {
     }
 });
 
+app.post('/api/campaigns/:id/pause', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const result = await campaignService.pauseCampaign(id);
+        res.json(result);
+    } catch (error) {
+        logger.error(`[API] Error pausando campaña ${req.params.id}:`, error.message);
+        res.status(400).json({ error: error.message });
+    }
+});
+
+app.post('/api/campaigns/:id/resume', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const result = await campaignService.resumeCampaign(id);
+        res.json(result);
+    } catch (error) {
+        logger.error(`[API] Error reanudando campaña ${req.params.id}:`, error.message);
+        res.status(400).json({ error: error.message });
+    }
+});
+
+app.get('/api/campaigns/status', async (req, res) => {
+    res.json(campaignService.getStatus());
+});
+
 
 // Códigos CUPS de exámenes cardiovasculares (exactos tal como aparecen en Xenco)
 const CVD_CODES = [
