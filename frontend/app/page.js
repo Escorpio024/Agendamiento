@@ -117,7 +117,7 @@ export default function SelectorPage() {
             </div>
 
             {/* ── Cards ── */}
-            <div className="relative z-10 flex flex-col sm:flex-row gap-6 px-6 w-full max-w-3xl">
+            <div className="relative z-10 flex flex-col sm:flex-row gap-5 px-6 w-full max-w-5xl">
                 {modules.map((mod) => {
                     const Icon = mod.icon;
                     const isHovered = hoveredId === mod.id;
@@ -129,7 +129,7 @@ export default function SelectorPage() {
                             onMouseEnter={() => setHoveredId(mod.id)}
                             onMouseLeave={() => setHoveredId(null)}
                             disabled={!mod.available}
-                            className="flex-1 text-left rounded-2xl p-6 border transition-all duration-300 group relative overflow-hidden"
+                            className="flex-1 flex flex-col text-left rounded-2xl p-7 border transition-all duration-300 group relative overflow-hidden"
                             style={{
                                 background: isHovered && mod.available
                                     ? 'rgba(45,40,62,0.8)'
@@ -195,16 +195,15 @@ export default function SelectorPage() {
                             </p>
 
                             {/* Features */}
-                            <div className="flex flex-wrap gap-2 mb-6">
+                            <div className="grid grid-cols-2 gap-2 mb-6 flex-1">
                                 {mod.features.map((f) => (
                                     <span
                                         key={f}
-                                        className="text-xs font-medium px-3 py-1.5 rounded-lg"
+                                        className="text-xs font-semibold px-3 py-2 rounded-lg text-center"
                                         style={{
-                                            background: `${mod.badgeColor}20`,
+                                            background: `${mod.badgeColor}18`,
                                             color: mod.badgeText,
-                                            border: `1px solid ${mod.badgeColor}40`,
-                                            letterSpacing: '0.01em',
+                                            border: `1px solid ${mod.badgeColor}35`,
                                         }}
                                     >
                                         {f}
@@ -214,24 +213,25 @@ export default function SelectorPage() {
 
                             {/* CTA */}
                             <div
-                                className="flex items-center justify-between pt-4 mt-auto"
-                                style={{ borderTop: `1px solid ${mod.badgeColor}25` }}
+                                className="flex items-center pt-5"
+                                style={{ borderTop: `1px solid ${mod.badgeColor}20` }}
                             >
                                 {mod.available ? (
                                     <div
-                                        className="flex items-center gap-2 text-sm font-bold px-4 py-2 rounded-xl transition-all duration-200"
+                                        className="w-full flex items-center justify-center gap-2 text-sm font-bold px-5 py-3 rounded-xl transition-all duration-200"
                                         style={{
-                                            background: isHovered ? `${mod.badgeColor}22` : `${mod.badgeColor}10`,
+                                            background: isHovered ? `${mod.badgeColor}25` : `${mod.badgeColor}12`,
                                             color: mod.accentColor,
-                                            border: `1px solid ${mod.badgeColor}35`,
+                                            border: `1px solid ${mod.badgeColor}40`,
                                             transform: isHovered ? 'translateX(3px)' : 'translateX(0)',
+                                            whiteSpace: 'nowrap',
                                         }}
                                     >
-                                        <span>Ingresar al módulo</span>
-                                        <ArrowRight size={14} />
+                                        <span>Ingresar</span>
+                                        <ArrowRight size={15} />
                                     </div>
                                 ) : (
-                                    <span className="text-xs text-gray-500 px-3 py-1.5 rounded-lg border border-gray-700/50 bg-gray-800/30">En desarrollo</span>
+                                    <span className="text-xs text-gray-500 px-3 py-2 rounded-lg border border-gray-700/40 bg-gray-800/30 w-full text-center">En desarrollo</span>
                                 )}
                             </div>
                         </button>
