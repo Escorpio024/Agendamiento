@@ -102,17 +102,16 @@ class CampaignService {
 
         const phoneSet = new Set();
 
-        // Agregar IDs de conversación (son los waId directamente: "573001234567@c.us")
+        // Agregar IDs de conversación (pueden ser @c.us o @lid en versiones modernas de WA)
         for (const conv of conversations) {
-            // Los IDs de conversación son el número de WhatsApp directamente
-            if (conv.id && conv.id.includes('@c.us')) {
+            if (conv.id && (conv.id.includes('@c.us') || conv.id.includes('@lid'))) {
                 phoneSet.add(conv.id);
             }
         }
 
         // Agregar whatsappIds de citas agendadas
         for (const appt of appointments) {
-            if (appt.whatsappId && appt.whatsappId.includes('@c.us')) {
+            if (appt.whatsappId && (appt.whatsappId.includes('@c.us') || appt.whatsappId.includes('@lid'))) {
                 phoneSet.add(appt.whatsappId);
             }
         }
