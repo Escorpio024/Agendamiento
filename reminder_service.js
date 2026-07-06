@@ -180,20 +180,8 @@ class ReminderService {
                     return appLog.whatsappId;
                 }
 
-                // 2. Buscar en conversaciones (por si solo charló y se autenticó)
-                const conv = await botPrisma.conversation.findFirst({
-                    where: { 
-                        patientDocument: { in: [pacCod14, codNoZeros, String(codigoPac).trim()] }
-                    },
-                    orderBy: { lastMessageAt: 'desc' }
-                });
-                
-                if (conv && conv.id) {
-                    logger.debug(`[Recordatorios] 📱 Teléfono recuperado de SQLite Conversation: ${conv.id}`);
-                    return conv.id;
-                }
             } catch (e) {
-                logger.warn('[Recordatorios] No se pudo consultar AppointmentLog/Conversation SQLite:', e.message);
+                logger.warn('[Recordatorios] No se pudo consultar AppointmentLog SQLite:', e.message);
             }
             return null; // Si definitivamente no existe, abortar.
         }
