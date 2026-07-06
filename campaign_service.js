@@ -157,11 +157,19 @@ class CampaignService {
 
             if (!exists) {
                 try {
-                    await this.client.sendMessage(waId, campaign.messageBody);
+                    // Obtener el LID/ID correcto para evitar el error "No LID for user"
+                    const cleanPhone = waId.replace('@c.us', '').replace('@s.whatsapp.net', '');
+                    const numberId = await this.client.getNumberId(cleanPhone);
+                    
+                    if (!numberId) {
+                        throw new Error(`WhatsApp no reconoce el número ${cleanPhone}`);
+                    }
+
+                    await this.client.sendMessage(numberId._serialized, campaign.messageBody);
                     await botPrisma.campaignLog.create({
                         data: {
                             campaignId: campaign.id,
-                            patientPhone: waId,
+                            patientPhone: numberId._serialized,
                             status: 'SENT'
                         }
                     });

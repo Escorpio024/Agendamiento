@@ -341,8 +341,17 @@ class ReminderService {
                 return false;
             }
 
-            await this.client.sendMessage(whatsappId, mensaje);
-            logger.info(`[Recordatorios] ✅ Enviado a ${primerNombre} (${whatsappId})`);
+            // Obtener el LID/ID correcto para evitar el error "No LID for user"
+            const cleanPhone = whatsappId.replace('@c.us', '').replace('@s.whatsapp.net', '');
+            const numberId = await this.client.getNumberId(cleanPhone);
+            
+            if (!numberId) {
+                logger.warn(`[Recordatorios] ❌ WhatsApp no reconoce el número ${cleanPhone}`);
+                return false;
+            }
+
+            await this.client.sendMessage(numberId._serialized, mensaje);
+            logger.info(`[Recordatorios] ✅ Enviado a ${primerNombre} (${numberId._serialized})`);
             return true;
         } catch (error) {
             logger.warn(`[Recordatorios] ❌ Error enviando a ${waId}: ${error.message}`);
