@@ -130,7 +130,10 @@ class ReminderService {
                 where: { OR: [{ KC2_COD: cod }, { KC2_OACOD_NUI: codSinCeros }] },
                 orderBy: { KC2_FCH_DIG: 'desc' }
             });
-            const tel2 = fact?.KC2_TEL_RESP?.trim();
+            let tel2 = fact?.KC2_TEL_RESP?.trim();
+            if (!tel2 || /^0+$/.test(tel2) || tel2.replace(/\D/g, '').length < 7) {
+                tel2 = fact?.KC2_TEL_ACOMP?.trim();
+            }
             if (tel2 && !/^0+$/.test(tel2) && tel2.replace(/\D/g, '').length >= 7) {
                 return tel2.replace(/\D/g, '');
             }
@@ -164,6 +167,7 @@ class ReminderService {
                 const pacCod14 = String(codigoPac).trim().padStart(14, '0');
                 const codNoZeros = String(codigoPac).trim().replace(/^0+/, '');
                 
+                // 1. Buscar en historial de agendamientos del bot
                 const appLog = await botPrisma.appointmentLog.findFirst({
                     where: { 
                         patientDocument: { in: [pacCod14, codNoZeros, String(codigoPac).trim()] }
@@ -175,8 +179,21 @@ class ReminderService {
                     logger.debug(`[Recordatorios] 📱 Teléfono recuperado de SQLite AppointmentLog: ${appLog.whatsappId}`);
                     return appLog.whatsappId;
                 }
+
+                // 2. Buscar en conversaciones (por si solo charló y se autenticó)
+                const conv = await botPrisma.conversation.findFirst({
+                    where: { 
+                        patientDocument: { in: [pacCod14, codNoZeros, String(codigoPac).trim()] }
+                    },
+                    orderBy: { lastMessageAt: 'desc' }
+                });
+                
+                if (conv && conv.id) {
+                    logger.debug(`[Recordatorios] 📱 Teléfono recuperado de SQLite Conversation: ${conv.id}`);
+                    return conv.id;
+                }
             } catch (e) {
-                logger.warn('[Recordatorios] No se pudo consultar AppointmentLog SQLite:', e.message);
+                logger.warn('[Recordatorios] No se pudo consultar AppointmentLog/Conversation SQLite:', e.message);
             }
             return null; // Si definitivamente no existe, abortar.
         }
