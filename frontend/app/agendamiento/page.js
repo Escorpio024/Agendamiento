@@ -22,6 +22,10 @@ function AppointmentsModal({ onClose, onCountSync }) {
     const [allAppointments, setAllAppointments] = useState([]);
     const [loading, setLoading] = useState(true);
     const [dateFilter, setDateFilter] = useState('mes');   // hoy | semana | mes | todas
+    const [selectedMonth, setSelectedMonth] = useState(() => {
+        const d = new Date();
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    });
     const [sendingId, setSendingId] = useState(null);
     const [toast, setToast] = useState(null);
 
@@ -48,19 +52,26 @@ function AppointmentsModal({ onClose, onCountSync }) {
         return () => socket.disconnect();
     }, [loadAppointments]);
 
+    // ── Lógica de fechas ──────────────────────────────────────────────
+    const now = new Date();
+    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const startOfWeek = new Date(startOfDay); 
+    startOfWeek.setDate(startOfDay.getDate() - startOfDay.getDay());
+    
+    const [yearStr, monthStr] = selectedMonth.split('-');
+    const reportYear = parseInt(yearStr, 10);
+    const reportMonth = parseInt(monthStr, 10) - 1;
+    const startOfSelectedMonth = new Date(reportYear, reportMonth, 1);
+    const endOfSelectedMonth = new Date(reportYear, reportMonth + 1, 0, 23, 59, 59, 999);
+
     // ── Filtrado por fecha ──────────────────────────────────────────────
     const filterAppointments = (list) => {
-        const now = new Date();
-        const startOfDay   = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        const startOfWeek  = new Date(startOfDay); startOfWeek.setDate(startOfDay.getDate() - startOfDay.getDay());
-        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-
         return list.filter(a => {
             if (dateFilter === 'todas') return true;
             const created = new Date(a.createdAt);
             if (dateFilter === 'hoy')   return created >= startOfDay;
             if (dateFilter === 'semana') return created >= startOfWeek;
-            if (dateFilter === 'mes')   return created >= startOfMonth;
+            if (dateFilter === 'mes')   return created >= startOfSelectedMonth && created <= endOfSelectedMonth;
             return true;
         });
     };
@@ -68,13 +79,14 @@ function AppointmentsModal({ onClose, onCountSync }) {
     const appointments = filterAppointments(allAppointments);
 
     // ── Estadísticas del mes ────────────────────────────────────────────
-    const now = new Date();
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-    const mesLabel = now.toLocaleDateString('es-CO', { month: 'long', year: 'numeric' });
-    const citasMes = allAppointments.filter(a => new Date(a.createdAt) >= startOfMonth);
+    const mesLabel = startOfSelectedMonth.toLocaleDateString('es-CO', { month: 'long', year: 'numeric' });
+    const citasMes = allAppointments.filter(a => {
+        const d = new Date(a.createdAt);
+        return d >= startOfSelectedMonth && d <= endOfSelectedMonth;
+    });
     const citasHoy = allAppointments.filter(a => {
         const d = new Date(a.createdAt);
-        return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+        return d >= startOfDay;
     });
 
     // ── Generador de informe mensual PDF ────────────────────────────────
@@ -252,7 +264,26 @@ footer { margin-top:28px; padding-top:12px; border-top:2px solid #e8e3f5; displa
                             <span className="text-[#F5F5F7]/70">Total:</span>
                             <span className="font-bold text-[#F5F5F7]/60 text-lg leading-none">{allAppointments.length}</span>
                         </div>
-                        <div className="ml-auto">
+                        <div className="ml-auto flex items-center gap-2">
+                            <input
+                                type="month"
+                                value={selectedMonth}
+                                onChange={(e) => {
+                                    if(e.target.value) {
+                                        setSelectedMonth(e.target.value);
+                                        setDateFilter('mes');
+                                    }
+                                }}
+                                className="px-2 py-1.5 rounded-lg text-xs font-medium outline-none transition-all"
+                                style={{
+                                    background: 'rgba(45,40,62,0.6)',
+                                    color: '#F5F5F7',
+                                    border: '1px solid rgba(130,99,177,0.3)',
+                                    colorScheme: 'dark'
+                                }}
+                                onFocus={e => e.currentTarget.style.border = '1px solid rgba(130,99,177,0.8)'}
+                                onBlur={e => e.currentTarget.style.border = '1px solid rgba(130,99,177,0.3)'}
+                            />
                             <button onClick={generarInformeMensual}
                                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all"
                                 style={{ background: 'linear-gradient(135deg,rgba(130,99,177,0.4),rgba(90,68,144,0.4))', color: '#C4AFED', border: '1px solid rgba(130,99,177,0.5)' }}

@@ -2201,6 +2201,36 @@ client.on('message', async (msg) => {
     }); // cierra el con-lock
     } catch (err) {
         console.error('[CRITICAL] Uncaught exception in message handler:', err);
+
+        // ── Detectar errores de conexión a base de datos ──
+        const isDbConnectionError = 
+            err?.constructor?.name === 'PrismaClientInitializationError' ||
+            err?.message?.includes("Can't reach database server") ||
+            err?.message?.includes('connect ECONNREFUSED') ||
+            err?.message?.includes('Connection refused') ||
+            err?.message?.includes('ETIMEDOUT') ||
+            err?.errorCode === 'P1001';
+
+        try {
+            const senderForError = msg.from;
+            if (isDbConnectionError) {
+                console.error(`[CRITICAL] Error de conexión a BD para ${senderForError}. El servidor de BD no está disponible.`);
+                await client.sendMessage(
+                    senderForError,
+                    '⚠️ Estamos experimentando una falla técnica temporal con nuestros sistemas.\n\n' +
+                    'Por favor intenta nuevamente en unos minutos. Si el problema persiste, comunícate con nosotros directamente.\n\n' +
+                    '¡Disculpa los inconvenientes! 🙏'
+                );
+            } else {
+                // Error genérico desconocido
+                await client.sendMessage(
+                    senderForError,
+                    '😕 Ocurrió un error inesperado. Por favor intenta de nuevo en un momento.'
+                );
+            }
+        } catch (sendErr) {
+            console.error('[CRITICAL] No se pudo enviar mensaje de error al usuario:', sendErr?.message);
+        }
     }
 });
 
