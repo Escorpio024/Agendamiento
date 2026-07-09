@@ -446,6 +446,12 @@ app.post('/api/campaigns', async (req, res) => {
     }
 });
 
+// ⚠️ IMPORTANTE: esta ruta debe ir ANTES de las rutas con :id para que Express no interprete
+// la palabra "status" como un id de campaña
+app.get('/api/campaigns/status', async (req, res) => {
+    res.json(campaignService.getStatus());
+});
+
 app.post('/api/campaigns/:id/send', async (req, res) => {
     try {
         const { id } = req.params;
@@ -479,9 +485,6 @@ app.post('/api/campaigns/:id/resume', async (req, res) => {
     }
 });
 
-app.get('/api/campaigns/status', async (req, res) => {
-    res.json(campaignService.getStatus());
-});
 
 
 // Códigos CUPS de exámenes cardiovasculares (exactos tal como aparecen en Xenco)
