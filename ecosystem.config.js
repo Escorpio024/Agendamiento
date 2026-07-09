@@ -4,8 +4,9 @@ module.exports = {
       name: 'aurora-bot',
       script: 'index.js',
       watch: false,
-      max_memory_restart: '1G',
+      max_memory_restart: '1500M',
       restart_delay: 5000,
+      kill_timeout: 10000,
       // Sin límite de reinicios — PM2 siempre debe mantener el bot activo
       max_restarts: 0,
       // Retardo exponencial entre reinicios (evita bucles rápidos)

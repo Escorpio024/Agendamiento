@@ -142,6 +142,8 @@ client.on('ready', async () => {
     reminderService.init(client);
     controlCvdService.init(client);
     campaignService.init(client);
+    // ── Recuperar campañas huérfanas que quedaron en SENDING antes de reinicio ──
+    await campaignService.recoverOnStartup();
     await loadHistoricalMessages();
 });
 

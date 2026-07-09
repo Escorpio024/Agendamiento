@@ -12,6 +12,31 @@ class CampaignService {
         this.client = client;
     }
 
+    /**
+     * Llama esto al arrancar el bot.
+     * Si quedó alguna campaña en estado SENDING (por un reinicio inesperado),
+     * la mueve a PAUSED para que el operador la reanude manualmente.
+     */
+    async recoverOnStartup() {
+        try {
+            const orphans = await botPrisma.campaign.findMany({
+                where: { status: 'SENDING' }
+            });
+
+            if (orphans.length === 0) return;
+
+            for (const camp of orphans) {
+                await botPrisma.campaign.update({
+                    where: { id: camp.id },
+                    data: { status: 'PAUSED' }
+                });
+                console.log(`[CAMPAIGN] ⚠️ Campaña "${camp.name}" encontrada en estado SENDING tras reinicio → movida a PAUSED. Reanúdala manualmente desde el panel.`);
+            }
+        } catch (e) {
+            console.error('[CAMPAIGN] Error en recoverOnStartup:', e.message);
+        }
+    }
+
     async getCampaigns() {
         return await botPrisma.campaign.findMany({
             orderBy: { createdAt: 'desc' }
@@ -205,6 +230,19 @@ class CampaignService {
                             throw new Error(`WhatsApp no reconoce el número ${cleanPhone}`);
                         }
                         finalId = numberId._serialized;
+                    }
+
+                    // ── Verificar conexión WA antes de enviar ──
+                    const waState = await this.client.getState().catch(() => null);
+                    if (waState !== 'CONNECTED') {
+                        console.warn(`[CAMPAIGN] ⚠️ WhatsApp desconectado (${waState}). Pausando campaña para evitar pérdida de mensajes...`);
+                        await botPrisma.campaign.update({
+                            where: { id: campaign.id },
+                            data: { status: 'PAUSED', sentCount }
+                        });
+                        this.isSending = false;
+                        this.currentCampaignId = null;
+                        return;
                     }
 
                     await this.client.sendMessage(finalId, campaign.messageBody);
