@@ -21,10 +21,13 @@ const API_BASE = `${PROTOCOL}//${SERVER_HOST}:3001`;
 function AppointmentsModal({ onClose, onCountSync }) {
     const [allAppointments, setAllAppointments] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [dateFilter, setDateFilter] = useState('mes');   // hoy | semana | mes | todas
-    const [selectedMonth, setSelectedMonth] = useState(() => {
-        const d = new Date();
-        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    const getLocalYYYYMMDD = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const [dateFilter, setDateFilter] = useState('rango'); // hoy | semana | rango | todas
+    const [startDate, setStartDate] = useState(() => {
+        const d = new Date(); return getLocalYYYYMMDD(new Date(d.getFullYear(), d.getMonth(), 1));
+    });
+    const [endDate, setEndDate] = useState(() => {
+        const d = new Date(); return getLocalYYYYMMDD(new Date(d.getFullYear(), d.getMonth() + 1, 0));
     });
     const [sendingId, setSendingId] = useState(null);
     const [toast, setToast] = useState(null);
@@ -58,38 +61,42 @@ function AppointmentsModal({ onClose, onCountSync }) {
     const startOfWeek = new Date(startOfDay); 
     startOfWeek.setDate(startOfDay.getDate() - startOfDay.getDay());
     
-    const [yearStr, monthStr] = selectedMonth.split('-');
-    const reportYear = parseInt(yearStr, 10);
-    const reportMonth = parseInt(monthStr, 10) - 1;
-    const startOfSelectedMonth = new Date(reportYear, reportMonth, 1);
-    const endOfSelectedMonth = new Date(reportYear, reportMonth + 1, 0, 23, 59, 59, 999);
+    const [sYear, sMonth, sDay] = startDate.split('-');
+    const rangeStart = new Date(parseInt(sYear, 10), parseInt(sMonth, 10) - 1, parseInt(sDay, 10));
+    const [eYear, eMonth, eDay] = endDate.split('-');
+    const rangeEnd = new Date(parseInt(eYear, 10), parseInt(eMonth, 10) - 1, parseInt(eDay, 10), 23, 59, 59, 999);
+
+    const parseApptDate = (a) => {
+        if (a.appointmentDate) {
+            const parts = a.appointmentDate.split('-');
+            if (parts.length === 3) return new Date(parseInt(parts[0], 10), parseInt(parts[1], 10)-1, parseInt(parts[2], 10));
+        }
+        return new Date(a.createdAt);
+    };
 
     // ── Filtrado por fecha ──────────────────────────────────────────────
     const filterAppointments = (list) => {
         return list.filter(a => {
             if (dateFilter === 'todas') return true;
-            const created = new Date(a.createdAt);
-            if (dateFilter === 'hoy')   return created >= startOfDay;
-            if (dateFilter === 'semana') return created >= startOfWeek;
-            if (dateFilter === 'mes')   return created >= startOfSelectedMonth && created <= endOfSelectedMonth;
+            const targetDate = parseApptDate(a);
+            if (dateFilter === 'hoy')   return targetDate >= startOfDay && targetDate < new Date(startOfDay.getTime() + 86400000);
+            if (dateFilter === 'semana') return targetDate >= startOfWeek;
+            if (dateFilter === 'rango')  return targetDate >= rangeStart && targetDate <= rangeEnd;
             return true;
         });
     };
 
     const appointments = filterAppointments(allAppointments);
 
-    // ── Estadísticas del mes ────────────────────────────────────────────
-    const mesLabel = startOfSelectedMonth.toLocaleDateString('es-CO', { month: 'long', year: 'numeric' });
-    const citasMes = allAppointments.filter(a => {
-        const d = new Date(a.createdAt);
-        return d >= startOfSelectedMonth && d <= endOfSelectedMonth;
-    });
+    // ── Estadísticas del rango ────────────────────────────────────────────
+    const rangoLabel = `${rangeStart.toLocaleDateString('es-CO', { day:'2-digit', month:'short' })} al ${rangeEnd.toLocaleDateString('es-CO', { day:'2-digit', month:'short', year:'numeric' })}`;
+    const citasMes = appointments; // appointments ya está filtrado por el rango seleccionado
     const citasHoy = allAppointments.filter(a => {
-        const d = new Date(a.createdAt);
-        return d >= startOfDay;
+        const d = parseApptDate(a);
+        return d >= startOfDay && d < new Date(startOfDay.getTime() + 86400000);
     });
 
-    // ── Generador de informe mensual PDF ────────────────────────────────
+    // ── Generador de informe PDF ────────────────────────────────
     const generarInformeMensual = () => {
         const fechaInforme = now.toLocaleDateString('es-CO', { day: '2-digit', month: 'long', year: 'numeric' });
         const doctoresMap = {};
@@ -119,7 +126,7 @@ function AppointmentsModal({ onClose, onCountSync }) {
 
         const html = `<!DOCTYPE html>
 <html lang="es"><head><meta charset="UTF-8"/>
-<title>Informe Mensual de Citas — ${mesLabel}</title>
+<title>Informe de Citas — ${rangoLabel}</title>
 <style>
 * { margin:0; padding:0; box-sizing:border-box; }
 body { font-family:'Segoe UI',Arial,sans-serif; font-size:12px; color:#1a1a2e; background:#fff; padding:32px; }
@@ -147,19 +154,19 @@ footer { margin-top:28px; padding-top:12px; border-top:2px solid #e8e3f5; displa
     <div class="logo">
         <div class="icon">🤖</div>
         <div>
-            <div style="font-size:10px;color:#8263B1;font-weight:700;text-transform:uppercase;letter-spacing:.15em;">Informe Mensual</div>
+            <div style="font-size:10px;color:#8263B1;font-weight:700;text-transform:uppercase;letter-spacing:.15em;">Informe de Citas</div>
             <h1>Citas <span>Agendadas</span></h1>
         </div>
     </div>
     <div class="meta">
-        <strong>${mesLabel}</strong>
+        <strong>${rangoLabel}</strong>
         <p>Generado: ${fechaInforme}</p>
         <p>Auro Bot · Sistema de Agendamiento</p>
     </div>
 </header>
 
 <div class="stats-grid">
-    <div class="stat-card"><div class="num">${citasMes.length}</div><div class="lbl">Total del mes</div></div>
+    <div class="stat-card"><div class="num">${citasMes.length}</div><div class="lbl">Total del rango</div></div>
     <div class="stat-card"><div class="num">${citasHoy.length}</div><div class="lbl">Agendadas hoy</div></div>
     <div class="stat-card"><div class="num">${Object.keys(doctoresMap).length}</div><div class="lbl">Médicos con citas</div></div>
 </div>
@@ -173,7 +180,7 @@ footer { margin-top:28px; padding-top:12px; border-top:2px solid #e8e3f5; displa
 </section>
 
 <section>
-    <h3>Detalle de Citas del Mes</h3>
+    <h3>Detalle de Citas en el Rango</h3>
     <table>
         <thead><tr><th>#</th><th>Paciente</th><th>Cédula</th><th>Fecha / Hora</th><th>Médico</th><th>Registrada</th></tr></thead>
         <tbody>${citasRows}</tbody>
@@ -211,7 +218,7 @@ footer { margin-top:28px; padding-top:12px; border-top:2px solid #e8e3f5; displa
     const FILTERS = [
         { key: 'hoy',    label: 'Hoy' },
         { key: 'semana', label: 'Semana' },
-        { key: 'mes',    label: 'Este mes' },
+        { key: 'rango',  label: 'Rango fechas' },
         { key: 'todas',  label: 'Todas' },
     ];
 
@@ -251,7 +258,7 @@ footer { margin-top:28px; padding-top:12px; border-top:2px solid #e8e3f5; displa
                     <div className="flex items-center gap-3 px-6 py-3 bg-[#8263B1]/10 border-b border-[#2D283E] flex-shrink-0 flex-wrap">
                         <div className="flex items-center gap-2 text-sm">
                             <span className="w-2 h-2 rounded-full bg-[#A1E3D8] pulse-dot" />
-                            <span className="text-[#F5F5F7]/70">Mes:</span>
+                            <span className="text-[#F5F5F7]/70">Rango:</span>
                             <span className="font-bold text-[#A1E3D8] text-lg leading-none">{citasMes.length}</span>
                         </div>
                         <div className="h-4 w-px bg-[#2D283E]" />
@@ -265,22 +272,27 @@ footer { margin-top:28px; padding-top:12px; border-top:2px solid #e8e3f5; displa
                             <span className="font-bold text-[#F5F5F7]/60 text-lg leading-none">{allAppointments.length}</span>
                         </div>
                         <div className="ml-auto flex items-center gap-2">
+                            <span className="text-[#F5F5F7]/50 text-xs">Desde:</span>
                             <input
-                                type="month"
-                                value={selectedMonth}
+                                type="date"
+                                value={startDate}
                                 onChange={(e) => {
-                                    if(e.target.value) {
-                                        setSelectedMonth(e.target.value);
-                                        setDateFilter('mes');
-                                    }
+                                    if(e.target.value) { setStartDate(e.target.value); setDateFilter('rango'); }
                                 }}
                                 className="px-2 py-1.5 rounded-lg text-xs font-medium outline-none transition-all"
-                                style={{
-                                    background: 'rgba(45,40,62,0.6)',
-                                    color: '#F5F5F7',
-                                    border: '1px solid rgba(130,99,177,0.3)',
-                                    colorScheme: 'dark'
+                                style={{ background: 'rgba(45,40,62,0.6)', color: '#F5F5F7', border: '1px solid rgba(130,99,177,0.3)', colorScheme: 'dark' }}
+                                onFocus={e => e.currentTarget.style.border = '1px solid rgba(130,99,177,0.8)'}
+                                onBlur={e => e.currentTarget.style.border = '1px solid rgba(130,99,177,0.3)'}
+                            />
+                            <span className="text-[#F5F5F7]/50 text-xs">Hasta:</span>
+                            <input
+                                type="date"
+                                value={endDate}
+                                onChange={(e) => {
+                                    if(e.target.value) { setEndDate(e.target.value); setDateFilter('rango'); }
                                 }}
+                                className="px-2 py-1.5 rounded-lg text-xs font-medium outline-none transition-all"
+                                style={{ background: 'rgba(45,40,62,0.6)', color: '#F5F5F7', border: '1px solid rgba(130,99,177,0.3)', colorScheme: 'dark' }}
                                 onFocus={e => e.currentTarget.style.border = '1px solid rgba(130,99,177,0.8)'}
                                 onBlur={e => e.currentTarget.style.border = '1px solid rgba(130,99,177,0.3)'}
                             />
@@ -290,7 +302,7 @@ footer { margin-top:28px; padding-top:12px; border-top:2px solid #e8e3f5; displa
                                 onMouseEnter={e => e.currentTarget.style.background = 'linear-gradient(135deg,rgba(130,99,177,0.7),rgba(90,68,144,0.7))'}
                                 onMouseLeave={e => e.currentTarget.style.background = 'linear-gradient(135deg,rgba(130,99,177,0.4),rgba(90,68,144,0.4))'}>
                                 <FileText size={11} />
-                                Informe del mes
+                                Informe de rango
                             </button>
                         </div>
                     </div>
