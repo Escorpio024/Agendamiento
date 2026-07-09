@@ -83,8 +83,8 @@ class ReminderService {
         // ── Cada hora en punto (solo de 7 AM a 8 PM) — verifica citas de mañana ──
         // Así evitamos enviar mensajes en la madrugada (ej. 2 AM, 4 AM)
         cron.schedule('0 7-20 * * *', async () => {
-            logger.info('🔔 [Recordatorios] Envío horario de verificación iniciado...');
-            await this.sendReminders();
+            logger.info('🔔 [Recordatorios] CRON DESACTIVADO MANUALMENTE PARA EVITAR SPAM EN WHATSAPP. Solo envío manual permitido.');
+            // await this.sendReminders();
         });
 
         // ── Medianoche — limpiar deduplicación ──

@@ -30,22 +30,22 @@ class ControlCVDService {
         // Fase 1 — Detección: Todos los días a las 8:00 PM
         // Detecta citas CVD finalizadas hoy y las registra para agendar mañana.
         cron.schedule('0 20 * * 1-6', async () => {
-            logger.info('🔍 [Control CVD] Fase 1: Detección nocturna de citas CVD...');
-            await this.detectFinishedAppointments();
+            logger.info('🔍 [Control CVD] CRON DESACTIVADO PARA EVITAR SPAM EN WHATSAPP.');
+            // await this.detectFinishedAppointments();
         });
 
         // Fase 2 — Agendamiento Inmediato: Todos los días a las 7:30 AM
         // Agenda la cita futura HOY mismo y le avisa al paciente.
         cron.schedule('30 7 * * 1-6', async () => {
-            logger.info('📅 [Control CVD] Fase 2: Agendamiento inmediato de controles PENDIENTES...');
-            await this.executeImmediateBooking();
+            logger.info('📅 [Control CVD] CRON DESACTIVADO PARA EVITAR SPAM EN WHATSAPP.');
+            // await this.executeImmediateBooking();
         });
 
         // Fase 3 — Recordatorio: 8 días antes del control
         // Envía recordatorio de laboratorios al paciente.
         cron.schedule('0 10 * * 1-6', async () => {
-            logger.info('🔔 [Control CVD] Fase 3: Recordatorio de laboratorios 8 días antes...');
-            await this.executeLaboratoryReminder();
+            logger.info('🔔 [Control CVD] CRON DESACTIVADO PARA EVITAR SPAM EN WHATSAPP.');
+            // await this.executeLaboratoryReminder();
         });
 
         this.isRunning = true;

@@ -8,10 +8,15 @@ const logger = require('./logger');
 // correspondiente a su sede. Cualquier otro médico es ignorado.
 //
 // Sede Ebejico (bot general): Medico 1 (333), Medico 2 (123), Medico 3 (555)
-// Sede Sevilla:               Medico Sevilla (444), Medico Sevilla 1 (777)
+// Sede Sevilla (Medicina General): Medico Sevilla (444), Medico Sevilla 1 (777)
+// Sede Sevilla (Odontología):      Profesional Odontología 1 (999), Profesional Odontología 2 (1000)
 // =========================================
 const MEDICOS_PERMITIDOS_EBEJICO = [333, 123, 555];
 const MEDICOS_PERMITIDOS_SEVILLA = [444, 777];
+const MEDICOS_ODONTOLOGIA_SEVILLA = [999, 1000]; // Odontología Sevilla (solo mié/sáb 7AM-1PM)
+
+// Días permitidos para Odontología Sevilla (0=Dom, 1=Lun, 2=Mar, 3=Mié, 4=Jue, 5=Vie, 6=Sáb)
+const DIAS_ODONTOLOGIA_SEVILLA = [3, 6]; // Solo miércoles y sábado
 
 // =========================================
 // CACHE EN MEMORIA (datos semi-estáticos)
@@ -449,6 +454,19 @@ async function getAvailableSlots(fechaStr, tipo = 'medicina general', preferredD
     const dateStr = parseRelativeDate(fechaStr);
     const dateDecimal = dateToDecimal(new Date(dateStr + 'T12:00:00'));
 
+    // Detectar si es odontología (para aplicar reglas especiales en Sevilla)
+    const esOdontologia = tipo && (String(tipo).toLowerCase().includes('odont') || String(tipo).includes('461'));
+
+    // ── REGLA SEVILLA ODONTOLOGÍA: solo miércoles y sábado ──
+    if (sede === 'Sevilla' && esOdontologia) {
+        const localDate = new Date(dateStr + 'T12:00:00');
+        const dayOfWeek = localDate.getDay();
+        if (!DIAS_ODONTOLOGIA_SEVILLA.includes(dayOfWeek)) {
+            logger.debug(`[DISPONIBILIDAD] Odontología Sevilla: ${dateStr} es día ${dayOfWeek} (${['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'][dayOfWeek]}), no permitido. Solo miércoles/sábado.`);
+            return []; // Día no permitido para odontología en Sevilla
+        }
+    }
+
     // 1. Especialidad — cacheada 60 min (muy estática)
     const espCod = normalizeTipoCita(tipo);
     const especialidad = await _getEspecialidadCache(espCod, tipo);
@@ -470,6 +488,12 @@ async function getAvailableSlots(fechaStr, tipo = 'medicina general', preferredD
     if (isCVD) {
         listaPermitidos.push(111); // P Y P MEDICOS (Riesgo Cardiovascular)
     }
+    // Odontología en Sevilla: agregar médicos de odontología a la lista permitida
+    if (sede === 'Sevilla' && esOdontologia) {
+        for (const codM of MEDICOS_ODONTOLOGIA_SEVILLA) {
+            if (!listaPermitidos.includes(codM)) listaPermitidos.push(codM);
+        }
+    }
 
     let turnos = Object.values(turnosPorDoctor).filter(t => {
         // El Visor de Agendas SI respeta TME_FCH_FIN. Si un médico se retiró, su FCH_FIN es menor a hoy,
@@ -483,6 +507,10 @@ async function getAvailableSlots(fechaStr, tipo = 'medicina general', preferredD
         if (sede !== 'Sevilla') {
             return !especialidad || t.TME_ESPECIALIDAD == especialidad.ESP_COD;
         }
+        // En Sevilla: si es odontología, solo mostrar médicos de odontología; si es medicina, solo médicos de medicina
+        if (esOdontologia) {
+            return MEDICOS_ODONTOLOGIA_SEVILLA.includes(Number(t.TME_CODM));
+        }
         return true;
     });
 
@@ -490,8 +518,14 @@ async function getAvailableSlots(fechaStr, tipo = 'medicina general', preferredD
         // Fallback vital: Si los médicos de Sevilla no tienen cabecera activa en TMTURNOSMEDICOS,
         // los agregamos manualmente para que puedan leer los slots libres directos del Visor (TME2).
         if (turnos.length === 0) {
-            for (const codM of MEDICOS_PERMITIDOS_SEVILLA) {
-                turnos.push({ TME_CODM: codM, TME_DUR_CITA: 20, TME_ESPECIALIDAD: especialidad?.ESP_COD || '999' });
+            if (esOdontologia) {
+                for (const codM of MEDICOS_ODONTOLOGIA_SEVILLA) {
+                    turnos.push({ TME_CODM: codM, TME_DUR_CITA: 20, TME_ESPECIALIDAD: '461' });
+                }
+            } else {
+                for (const codM of MEDICOS_PERMITIDOS_SEVILLA) {
+                    turnos.push({ TME_CODM: codM, TME_DUR_CITA: 20, TME_ESPECIALIDAD: especialidad?.ESP_COD || '999' });
+                }
             }
         }
     }
@@ -603,13 +637,23 @@ async function getAvailableSlots(fechaStr, tipo = 'medicina general', preferredD
         const slotsVaciosDoctor = slotsVaciosPorDoctor[doctorKey];
         if (slotsVaciosDoctor && slotsVaciosDoctor.size > 0) {
             logger.debug(`[SLOTS-KC3] Dr.${medico.MED_NOMBRE?.trim()} | ${slotsVaciosDoctor.size} slots disponibles directo de KC3 (Visor de Agenda)`);
+            const localDateForSlots = new Date(dateStr + 'T12:00:00');
+            const dayOfWeekForSlots = localDateForSlots.getDay();
             for (const tMin of [...slotsVaciosDoctor].sort((a, b) => a - b)) {
                 
                 // ── REGLA CVD: Solo Lunes a Sábado, hasta las 12:40 PM ──
                 if (isCVD) {
-                    const localDateTemp = new Date(dateStr + 'T12:00:00');
-                    if (localDateTemp.getDay() === 0) continue; // Domingo no permitido
+                    if (dayOfWeekForSlots === 0) continue; // Domingo no permitido
                     if (tMin > (12 * 60 + 40)) continue; // Límite 12:40 PM
+                }
+
+                // ── REGLA SEVILLA: Miércoles corte a las 12:40 PM (toda cita) ──
+                if (sede === 'Sevilla' && dayOfWeekForSlots === 3 && tMin > (12 * 60 + 40)) continue;
+
+                // ── REGLA ODONTOLOGÍA SEVILLA: Solo 7 AM – 1 PM ──
+                if (sede === 'Sevilla' && esOdontologia) {
+                    if (tMin < 7 * 60) continue;   // Antes de 7 AM
+                    if (tMin >= 13 * 60) continue;  // Desde la 1 PM en adelante
                 }
 
                 const currH = Math.floor(tMin / 60);
@@ -680,7 +724,15 @@ function getFieldsByEspecialidad(espCod) {
     const cod = parts[0];
     const subCodigo = parts[1];
 
-    // Odontología: ESP_COD 461
+    // Odontología Sevilla: ESP_COD 461|SEVILLA → CUPS *890203
+    if (cod === '461' && subCodigo === 'SEVILLA') return {
+        KC3_TIPO:           'VOS',  // Visita Odontología
+        KC3_TIPO_SERVICIO:  211,
+        KC3_GRUPO_ATENCION: 'O',
+        KC3_ARTIC:          '*890203',  // CUPS Odontología Sevilla
+        KC3_C_COSTO:        '7312',
+    };
+    // Odontología general: ESP_COD 461
     if (cod === '461') return {
         KC3_TIPO:           'VOS',  // Visita Odontología
         KC3_TIPO_SERVICIO:  211,
@@ -780,8 +832,19 @@ async function reserveSlot(fechaStr, hora, userId, tipo = 'medicina general', me
         // Campos nativos según especialidad
         const espCod = slot.especialidadCod || null;
         
-        // Usar 'tipo' si viene formateado para un artículo específico (ej. PYP_CARDIO|...), o si es PYP_CARDIO, de lo contrario el espCod del slot
-        const tipoArticulo = (tipo && (tipo.includes('|') || tipo === 'PYP_CARDIO')) ? tipo : espCod;
+        // Determinar el artículo correcto:
+        // - Odontología en Sevilla → '461|SEVILLA' (usa CUPS *890203)
+        // - PYP_CARDIO con código específico → 'PYP_CARDIO|...'
+        // - Resto → espCod del slot
+        const esOdontologiaReserva = tipo && (String(tipo).toLowerCase().includes('odont') || String(tipo).includes('461'));
+        let tipoArticulo;
+        if (esOdontologiaReserva && sede === 'Sevilla') {
+            tipoArticulo = '461|SEVILLA';
+        } else if (tipo && (tipo.includes('|') || tipo === 'PYP_CARDIO')) {
+            tipoArticulo = tipo;
+        } else {
+            tipoArticulo = espCod;
+        }
         const fieldsEsp = getFieldsByEspecialidad(tipoArticulo);
 
         const citaData = {
