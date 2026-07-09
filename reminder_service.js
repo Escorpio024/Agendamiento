@@ -80,11 +80,10 @@ class ReminderService {
         const tzOffset = new Date().toLocaleTimeString('es-CO', { timeZoneName: 'short' });
         logger.info(`[Recordatorios] Cron activo. Hora del servidor: ${tzOffset}`);
 
-        // ── Cada hora en punto (solo de 7 AM a 8 PM) — verifica citas de mañana ──
-        // Así evitamos enviar mensajes en la madrugada (ej. 2 AM, 4 AM)
-        cron.schedule('0 7-20 * * *', async () => {
-            logger.info('🔔 [Recordatorios] CRON DESACTIVADO MANUALMENTE PARA EVITAR SPAM EN WHATSAPP. Solo envío manual permitido.');
-            // await this.sendReminders();
+        // ── 8 AM diariamente — enviar recordatorios del día siguiente ──
+        cron.schedule('0 8 * * *', async () => {
+            logger.info('🔔 [Recordatorios] Envío automático diario a las 8 AM...');
+            await this.sendReminders();
         });
 
         // ── Medianoche — limpiar deduplicación ──
@@ -285,10 +284,23 @@ class ReminderService {
                     this.sentToday.add(clave);
                     this.saveSentReminders();
                     sent++;
-                }
 
-                // Pausa entre mensajes para no saturar WhatsApp
-                await new Promise(r => setTimeout(r, 2500));
+                    // ── ANTI-BAN: Pausas escalonadas para no ser detectado como spam ──
+                    // Pausa mediana cada 20 mensajes: 5-8 minutos
+                    if (sent > 0 && sent % 20 === 0) {
+                        const pausaMin = Math.floor(Math.random() * 3 + 5); // 5-8 min
+                        logger.info(`[Recordatorios] 🧘 Pausa anti-ban (20 enviados): ${pausaMin} minutos...`);
+                        await new Promise(r => setTimeout(r, pausaMin * 60 * 1000));
+                    } else {
+                        // Delay variable entre mensajes: 30-60 segundos
+                        const delaySeg = Math.floor(Math.random() * 30 + 30);
+                        logger.debug(`[Recordatorios] ⏳ Esperando ${delaySeg}s...`);
+                        await new Promise(r => setTimeout(r, delaySeg * 1000));
+                    }
+                } else {
+                    // Si no se envió (ej. número no reconocido), pausa corta
+                    await new Promise(r => setTimeout(r, 3000));
+                }
             }
 
         } catch (error) {
