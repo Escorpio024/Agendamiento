@@ -132,12 +132,12 @@ class CampaignService {
         });
 
         let sentCount = campaign.sentCount;
+        let sentThisSession = 0; // Contador de mensajes enviados en la sesión actual
 
         for (let i = 0; i < total; i++) {
             // --- VERIFICAR PAUSA ---
             if (this.isPaused) {
                 console.log(`[CAMPAIGN] ⏸️ Campaña "${campaign.name}" pausada en mensaje ${i}/${total}.`);
-                // Guardar progreso final antes de salir
                 await botPrisma.campaign.update({
                     where: { id: campaign.id },
                     data: { sentCount }
@@ -147,9 +147,48 @@ class CampaignService {
                 return;
             }
 
+            // --- RESTRICCIÓN HORARIA: Solo entre 8 AM y 7 PM Colombia ---
+            const horaActual = new Date().toLocaleString('es-CO', { 
+                timeZone: 'America/Bogota', hour: 'numeric', hour12: false 
+            });
+            const hora = parseInt(horaActual);
+            if (hora < 8 || hora >= 19) {
+                const minutosHastaLas8 = this._minutesUntilHour(8);
+                console.log(`[CAMPAIGN] 🌙 Son las ${hora}h. Esperando hasta las 8 AM Colombia (${minutosHastaLas8} min)...`);
+                await botPrisma.campaign.update({
+                    where: { id: campaign.id },
+                    data: { sentCount, status: 'PAUSED' }
+                });
+                // Esperar hasta las 8 AM y luego continuar
+                await new Promise(r => setTimeout(r, minutosHastaLas8 * 60 * 1000));
+                await botPrisma.campaign.update({
+                    where: { id: campaign.id },
+                    data: { status: 'SENDING' }
+                });
+                sentThisSession = 0; // Reiniciar contador de sesión al nuevo día
+                if (this.isPaused) return;
+            }
+
+            // --- LÍMITE DIARIO: Máximo 200 mensajes por día ---
+            if (sentThisSession >= 200) {
+                const minutosHastaLas8 = this._minutesUntilHour(8);
+                console.log(`[CAMPAIGN] 📅 Límite diario de 200 mensajes alcanzado. Reanudando mañana a las 8 AM (${minutosHastaLas8} min)...`);
+                await botPrisma.campaign.update({
+                    where: { id: campaign.id },
+                    data: { sentCount, status: 'PAUSED' }
+                });
+                await new Promise(r => setTimeout(r, minutosHastaLas8 * 60 * 1000));
+                await botPrisma.campaign.update({
+                    where: { id: campaign.id },
+                    data: { status: 'SENDING' }
+                });
+                sentThisSession = 0;
+                if (this.isPaused) return;
+            }
+
             const waId = targetPhones[i];
 
-            // --- EVITAR DUPLICADOS: Si ya se envió a este número en esta campaña, saltar ---
+            // --- EVITAR DUPLICADOS ---
             const exists = await botPrisma.campaignLog.findFirst({
                 where: { campaignId: campaign.id, patientPhone: waId }
             });
@@ -157,12 +196,11 @@ class CampaignService {
             if (!exists) {
                 try {
                     let finalId = waId;
-                    
-                    // Solo intentar obtener el LID/ID si es un número tradicional (@c.us o sin sufijo)
+
+                    // Solo intentar obtener el LID/ID si es un número tradicional (@c.us)
                     if (!waId.includes('@lid')) {
                         const cleanPhone = waId.replace('@c.us', '').replace('@s.whatsapp.net', '');
                         const numberId = await this.client.getNumberId(cleanPhone);
-                        
                         if (!numberId) {
                             throw new Error(`WhatsApp no reconoce el número ${cleanPhone}`);
                         }
@@ -178,6 +216,7 @@ class CampaignService {
                         }
                     });
                     sentCount++;
+                    sentThisSession++;
 
                     // Actualizar contador en BD cada 5 mensajes
                     if (sentCount % 5 === 0) {
@@ -187,11 +226,39 @@ class CampaignService {
                         });
                     }
 
-                    console.log(`[CAMPAIGN] ✅ (${sentCount}/${total}) Enviado a ${waId}`);
+                    console.log(`[CAMPAIGN] ✅ (${sentCount}/${total}, hoy: ${sentThisSession}) Enviado a ${finalId}`);
 
-                    // ⚠️ ANTI-BAN: Retraso aleatorio de 7 a 15 segundos entre mensajes
-                    const delay = Math.floor(Math.random() * (15000 - 7000 + 1)) + 7000;
-                    await new Promise(r => setTimeout(r, delay));
+                    // ═══════════════════════════════════════════════════════════
+                    // ⚠️  ANTI-BAN: Pausas escalonadas para imitar comportamiento humano
+                    // ═══════════════════════════════════════════════════════════
+
+                    // PAUSA GRANDE cada 100 mensajes: 30-40 minutos
+                    if (sentThisSession > 0 && sentThisSession % 100 === 0) {
+                        const pausaMin = Math.floor(Math.random() * 10 + 30); // 30-40 min
+                        console.log(`[CAMPAIGN] ☕ Pausa grande (100 msgs): ${pausaMin} minutos...`);
+                        await new Promise(r => setTimeout(r, pausaMin * 60 * 1000));
+
+                    // PAUSA MEDIANA cada 25 mensajes: 8-15 minutos
+                    } else if (sentThisSession > 0 && sentThisSession % 25 === 0) {
+                        const pausaMin = Math.floor(Math.random() * 7 + 8); // 8-15 min
+                        console.log(`[CAMPAIGN] 🧘 Pausa mediana (25 msgs): ${pausaMin} minutos...`);
+                        await new Promise(r => setTimeout(r, pausaMin * 60 * 1000));
+
+                    // DELAY NORMAL entre mensajes: 45-120 segundos (aleatorio, no uniforme)
+                    } else {
+                        // Patrón irregular: mezcla de delays cortos y largos para variar
+                        const roll = Math.random();
+                        let delaySeg;
+                        if (roll < 0.15) {
+                            delaySeg = Math.floor(Math.random() * 30 + 90); // 15% de las veces: 90-120 seg
+                        } else if (roll < 0.40) {
+                            delaySeg = Math.floor(Math.random() * 20 + 60); // 25% de las veces: 60-80 seg
+                        } else {
+                            delaySeg = Math.floor(Math.random() * 15 + 45); // 60% de las veces: 45-60 seg
+                        }
+                        console.log(`[CAMPAIGN]   ⏳ Esperando ${delaySeg}s antes del siguiente...`);
+                        await new Promise(r => setTimeout(r, delaySeg * 1000));
+                    }
 
                 } catch (err) {
                     console.error(`[CAMPAIGN] ❌ Error enviando a ${waId}:`, err.message);
@@ -203,8 +270,8 @@ class CampaignService {
                             error: err.message?.substring(0, 200)
                         }
                     });
-                    // Esperar igual después de un error para no saturar
-                    await new Promise(r => setTimeout(r, 5000));
+                    // Esperar un poco más después de un error
+                    await new Promise(r => setTimeout(r, 30000));
                 }
             }
         }
@@ -218,6 +285,19 @@ class CampaignService {
         console.log(`[CAMPAIGN] 🏁 Campaña "${campaign.name}" completada. Enviados: ${sentCount}/${total}.`);
         this.isSending = false;
         this.currentCampaignId = null;
+    }
+
+    /** Calcula los minutos que faltan hasta la hora indicada (en America/Bogota) */
+    _minutesUntilHour(targetHour) {
+        const now = new Date();
+        const nowBogota = new Date(now.toLocaleString('en-US', { timeZone: 'America/Bogota' }));
+        const target = new Date(nowBogota);
+        target.setHours(targetHour, 0, 0, 0);
+        // Si ya pasó la hora objetivo de hoy, apuntar al día siguiente
+        if (target <= nowBogota) {
+            target.setDate(target.getDate() + 1);
+        }
+        return Math.ceil((target - nowBogota) / 60000);
     }
 
     getStatus() {
