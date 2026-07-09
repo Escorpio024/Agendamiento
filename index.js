@@ -1969,16 +1969,27 @@ client.on('message', async (msg) => {
                 // Buscar el primer día con disponibilidad (timeout a 60s porque SQL Server por VPN puede ser lento)
                 const firstAvail = await withTimeout(
                     availabilityService.getNextAvailableSlots(todayStr, session.tipoCita, session.doctorPreferido, session.sede),
-                    60000, null
+                    60000, 'TIMEOUT' // <-- Cambiado de null a 'TIMEOUT' para diferenciar
                 );
 
-                if (firstAvail === null) {
-                    // Timeout — el HIS está lento. Resetear sesión y pedir reintento.
-                    console.warn('[BOT] ⏱️ getNextAvailableSlots tardó más de 60s — solicitando reintento al usuario');
-                    session.step = 'WELCOME'; // Resetear para que el próximo mensaje vuelva a buscar fechas
+                if (firstAvail === 'TIMEOUT') {
+                    // Timeout real — el HIS está lento
+                    console.warn('[BOT] ⏱️ getNextAvailableSlots superó el timeout — solicitando reintento al usuario');
+                    session.step = 'WELCOME'; // Resetear
                     await replyFn(
                         '⚠️ El sistema está un poco lento en este momento al cargar los horarios disponibles.\n\n' +
                         'Por favor escríbeme de nuevo *\'quiero una cita\'* en unos segundos para intentarlo otra vez. 😊'
+                    );
+                    return;
+                }
+
+                if (firstAvail === null) {
+                    // Búsqueda rápida y exitosa, pero NO HAY DISPONIBILIDAD en los próximos 30 días
+                    console.log(`[BOT] No se encontraron citas disponibles para ${session.tipoCita} en sede ${session.sede}`);
+                    session.step = 'WELCOME';
+                    await replyFn(
+                        'Lo siento mucho 😔, en este momento *no encuentro horarios disponibles* para los próximos días.\n\n' +
+                        'Por favor, intenta nuevamente mañana o comunícate directamente con la institución. ¿Te puedo ayudar con algo más?'
                     );
                     return;
                 }
