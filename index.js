@@ -450,7 +450,7 @@ client.on('message', async (msg) => {
         // Palabras que solo son exit si estamos dentro de un proceso de agendamiento
         const bookingOnlyExitWords = ['cancelar'];
 
-        const bookingSteps = ['AI_ASKING_TYPE', 'AI_ASKING_DATE', 'AI_SELECT_DAY', 'AI_SELECT_TIME', 'AI_CONFIRM_PHONE', 'AI_ENTER_PHONE', 'CONSULTAR_OTRO_CEDULA', 'ASK_TIPO_CITA_SEVILLA'];
+        const bookingSteps = ['AI_ASKING_TYPE', 'AI_ASKING_DATE', 'AI_SELECT_DAY', 'AI_SELECT_TIME', 'AI_CONFIRM_PHONE', 'AI_ENTER_PHONE', 'CONSULTAR_OTRO_CEDULA', 'ASK_TIPO_CITA'];
         const isBookingStep = bookingSteps.includes(session.step);
 
         const isGlobalExit    = globalExitWords.some(w => cleanExitMsg.includes(w));
@@ -895,11 +895,16 @@ client.on('message', async (msg) => {
             const txt = text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
             if (txt.includes('ebejico') || txt === '1' || txt === 'uno') {
                 session.sede = 'Ebejico';
-                session.step = 'WELCOME';
-                await reply("¡Perfecto! Has seleccionado *Sede Ebejico*.\n\n¿Te gustaría agendar, cancelar o consultar una cita médica hoy?");
+                session.step = 'ASK_TIPO_CITA';
+                await reply(
+                    "¡Perfecto! Has seleccionado *Sede Ebejico*.\n\n" +
+                    "¿Qué tipo de cita deseas agendar?\n\n" +
+                    "1️⃣ *Medicina General*\n" +
+                    "2️⃣ *Odontología*"
+                );
             } else if (txt.includes('sevilla') || txt === '2' || txt === 'dos') {
                 session.sede = 'Sevilla';
-                session.step = 'ASK_TIPO_CITA_SEVILLA';
+                session.step = 'ASK_TIPO_CITA';
                 await reply(
                     "¡Perfecto! Has seleccionado *Sede Sevilla*. 🏥\n\n" +
                     "¿Qué tipo de cita deseas agendar?\n\n" +
@@ -912,29 +917,44 @@ client.on('message', async (msg) => {
             return;
         }
 
-        // --- FLUJO DE SELECCIÓN DE TIPO DE CITA EN SEVILLA ---
-        if (session.step === 'ASK_TIPO_CITA_SEVILLA') {
+        // --- FLUJO DE SELECCIÓN DE TIPO DE CITA ---
+        if (session.step === 'ASK_TIPO_CITA') {
             const txt = text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
             if (txt === '1' || txt.includes('medicina') || txt.includes('general') || txt.includes('medic')) {
                 session.tipoCita = 'medicina general';
                 session.step = 'WELCOME';
-                await reply("¡Perfecto! Bienvenido a *Sede Sevilla — Medicina General*. 🩺\n\n¿Te gustaría agendar, cancelar o consultar una cita?");
+                await reply(`¡Perfecto! Bienvenido a *Sede ${session.sede} — Medicina General*. 🩺\n\n¿Te gustaría agendar, cancelar o consultar una cita?`);
             } else if (txt === '2' || txt.includes('odont') || txt.includes('dental') || txt.includes('dent')) {
                 session.tipoCita = 'odontologia';
                 session.step = 'WELCOME';
-                await reply(
-                    "¡Perfecto! Has seleccionado *Odontología* en Sede Sevilla. 🦷\n\n" +
-                    "Recuerda que las citas de odontología son:\n" +
-                    "📅 *Días:* Miércoles y Sábados\n" +
-                    "🕐 *Horario:* 7:00 AM – 1:00 PM\n\n" +
-                    "¿Deseas agendar, cancelar o consultar una cita de odontología?"
-                );
+                if (session.sede === 'Sevilla') {
+                    await reply(
+                        "¡Perfecto! Has seleccionado *Odontología* en Sede Sevilla. 🦷\n\n" +
+                        "Recuerda que las citas de odontología son:\n" +
+                        "📅 *Días:* Miércoles y Sábados\n" +
+                        "🕐 *Horario:* 7:00 AM – 1:00 PM\n\n" +
+                        "¿Deseas agendar, cancelar o consultar una cita de odontología?"
+                    );
+                } else {
+                    await reply(
+                        "¡Perfecto! Has seleccionado *Odontología* en Sede Ebejico. 🦷\n\n" +
+                        "¿Deseas agendar, cancelar o consultar una cita de odontología?"
+                    );
+                }
             } else {
-                await reply(
-                    "⚠️ Por favor selecciona una opción válida:\n\n" +
-                    "1️⃣ *Medicina General*\n" +
-                    "2️⃣ *Odontología* _(miércoles y sábados, 7 AM – 1 PM)_"
-                );
+                if (session.sede === 'Sevilla') {
+                    await reply(
+                        "⚠️ Por favor selecciona una opción válida:\n\n" +
+                        "1️⃣ *Medicina General*\n" +
+                        "2️⃣ *Odontología* _(miércoles y sábados, 7 AM – 1 PM)_"
+                    );
+                } else {
+                    await reply(
+                        "⚠️ Por favor selecciona una opción válida:\n\n" +
+                        "1️⃣ *Medicina General*\n" +
+                        "2️⃣ *Odontología*"
+                    );
+                }
             }
             return;
         }
@@ -1026,7 +1046,7 @@ client.on('message', async (msg) => {
                 if (!session.tipoCita || session.tipoCita === 'medicina general') {
                     session.tipoCita = 'medicina general';
                 }
-                // Si la sesión tiene tipoCita='odontologia' (elegido en ASK_TIPO_CITA_SEVILLA), preservarlo
+                // Si la sesión tiene tipoCita='odontologia' (elegido en ASK_TIPO_CITA), preservarlo
                 session.step = null;
                 try {
                     await processWithAI(sender, text, session, reply);
@@ -1565,11 +1585,9 @@ client.on('message', async (msg) => {
                     'vacun', 'inyecc',
                     'ciruj', 'operat'
                 ];
-                // Si la sede no es Sevilla, bloquear odontología también
+                // Odontología ya está disponible para ambas sedes
                 const odontologiaKeywords = ['odont', 'dental', 'dent', 'carie', 'muela'];
-                const SERVICIOS_NO_DISPONIBLES = session.sede === 'Sevilla' 
-                    ? baseNoDisponibles 
-                    : [...baseNoDisponibles, ...odontologiaKeywords];
+                const SERVICIOS_NO_DISPONIBLES = baseNoDisponibles;
 
                 const tipoRaw = (entities.tipo_cita || '').toLowerCase();
                 const msgLower = message.toLowerCase();
@@ -1577,9 +1595,7 @@ client.on('message', async (msg) => {
                     || SERVICIOS_NO_DISPONIBLES.some(k => msgLower.includes(k));
 
                 if (esServicioNoDisponible) {
-                    const extraMsg = session.sede === 'Sevilla' 
-                        ? 'Para otros servicios debes comunicarte directamente con la institución. ¿Te puedo ayudar a agendar una cita de *Medicina General* u *Odontología*? 🩺🦷'
-                        : 'Para otros servicios (odontología, exámenes, laboratorios, especialidades, etc.) debes comunicarte directamente con la institución. ¿Te puedo ayudar a agendar una cita de *Medicina General*? 🩺';
+                    const extraMsg = 'Para otros servicios debes comunicarte directamente con la institución. ¿Te puedo ayudar a agendar una cita de *Medicina General* u *Odontología*? 🩺🦷';
                     await replyFn(
                         `Lo siento 😔, en este momento no puedo agendar ese tipo de cita por este medio.\n\n${extraMsg}`
                     );
@@ -1588,9 +1604,9 @@ client.on('message', async (msg) => {
 
                 if (entities.tipo_cita) {
                     const _tipoVal = availabilityService.normalizeTipoCita(entities.tipo_cita);
-                    // Solo asignar si es medicina general u odontologia en sevilla
+                    // Solo asignar si es medicina general u odontologia
                     if (_tipoVal === '999') session.tipoCita = 'medicina general';
-                    else if (_tipoVal === '461' && session.sede === 'Sevilla') session.tipoCita = 'odontologia';
+                    else if (_tipoVal === '461') session.tipoCita = 'odontologia';
                     else session.tipoCita = 'medicina general';
                 } else if (!session.tipoCita) {
                     session.tipoCita = 'medicina general'; // Default si no hay nada
@@ -1740,7 +1756,7 @@ client.on('message', async (msg) => {
             });
 
             if (futuras.length === 0) {
-                const tipoLbl = session.sede === 'Sevilla' ? '*Medicina General* u *Odontología*' : '*Medicina General*';
+                const tipoLbl = '*Medicina General* u *Odontología*';
                 await replyFn(`No tienes citas de ${tipoLbl} programadas que puedas cancelar por aquí.\n\n_(Nota: Si necesitas cancelar otra especialidad, por favor comunícate directamente con la clínica)_.`);
                 return;
             }
@@ -1775,7 +1791,7 @@ client.on('message', async (msg) => {
             });
 
             if (futuras.length === 0) {
-                const tipoLbl = session.sede === 'Sevilla' ? '*Medicina General* u *Odontología*' : '*Medicina General*';
+                const tipoLbl = '*Medicina General* u *Odontología*';
                 await replyFn(`No tienes citas de ${tipoLbl} futuras para modificar.\n\n_(Nota: Si necesitas cambiar otra especialidad, por favor comunícate directamente con la clínica)_.`);
                 return;
             }
@@ -1821,7 +1837,7 @@ client.on('message', async (msg) => {
             }
 
             if (KEYWORDS_NO_DISPONIBLES.some(k => msgCheck.includes(k))) {
-                const tipoLbl = session.sede === 'Sevilla' ? '*Medicina General* u *Odontología*' : '*Medicina General*';
+                const tipoLbl = '*Medicina General* u *Odontología*';
                 await replyFn(
                     `Lo siento 😔, en este momento solo puedo agendar citas de ${tipoLbl}.\n\n` +
                     `Para otros servicios, por favor comunícate directamente con la institución. ¿Te agendo una cita? 🩺`
@@ -1830,7 +1846,7 @@ client.on('message', async (msg) => {
             }
 
             // Asignar el tipo de cita correcto
-            if (session.sede === 'Sevilla' && esOdontologiaReq) {
+            if (esOdontologiaReq) {
                 session.tipoCita = 'odontologia';
             } else if (!session.tipoCita || session.tipoCita !== 'odontologia') {
                 session.tipoCita = 'medicina general';
