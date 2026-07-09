@@ -193,6 +193,8 @@ if (process.env.NO_WHATSAPP !== 'true') {
                 keepaliveReconnecting = true;
                 keepaliveFailCount = 0;
                 try {
+                    console.warn('[KEEPALIVE] Destruyendo instancia de WhatsApp (Puppeteer) para limpiar el Detached Frame...');
+                    await client.destroy().catch(() => {});
                     await client.initialize();
                     console.log('[KEEPALIVE] ✅ Reconexión exitosa.');
                 } catch (reinitErr) {
@@ -1964,15 +1966,15 @@ client.on('message', async (msg) => {
                         new Promise(r => setTimeout(() => r(fallback), ms))
                     ]);
 
-                // Buscar el primer día con disponibilidad
+                // Buscar el primer día con disponibilidad (timeout a 60s porque SQL Server por VPN puede ser lento)
                 const firstAvail = await withTimeout(
                     availabilityService.getNextAvailableSlots(todayStr, session.tipoCita, session.doctorPreferido, session.sede),
-                    45000, null
+                    60000, null
                 );
 
                 if (firstAvail === null) {
                     // Timeout — el HIS está lento. Resetear sesión y pedir reintento.
-                    console.warn('[BOT] ⏱️ getNextAvailableSlots tardó más de 45s — solicitando reintento al usuario');
+                    console.warn('[BOT] ⏱️ getNextAvailableSlots tardó más de 60s — solicitando reintento al usuario');
                     session.step = 'WELCOME'; // Resetear para que el próximo mensaje vuelva a buscar fechas
                     await replyFn(
                         '⚠️ El sistema está un poco lento en este momento al cargar los horarios disponibles.\n\n' +
