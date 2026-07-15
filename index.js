@@ -211,7 +211,13 @@ if (process.env.NO_WHATSAPP !== 'true') {
 
 client.on('message_create', async (msg) => {
     if (msg.fromMe) {
-        const chat = await msg.getChat();
+        let chat;
+        try {
+            chat = await msg.getChat();
+        } catch (e) {
+            console.warn('[WA] No se pudo obtener el chat en message_create:', e.message);
+            return;
+        }
         const chatId = chat.id._serialized;
         let mediaUrl = null;
         if (msg.hasMedia) {
@@ -275,7 +281,13 @@ client.on('message', async (msg) => {
         processedMessages.add(msg.id._serialized);
         if (processedMessages.size > 2000) processedMessages.clear();
 
-        const chat = await msg.getChat();
+        let chat;
+        try {
+            chat = await msg.getChat();
+        } catch (e) {
+            console.warn('[WA] No se pudo obtener el chat en message:', e.message);
+            return;
+        }
 
         // Serializar mensajes del mismo sender para evitar race conditions
         await withSenderLock(sender, async () => {
@@ -2335,7 +2347,13 @@ client.on('message', async (msg) => {
 async function loadHistoricalMessages() {
     try {
         console.log('📥 Sincronizando chats de WhatsApp...');
-        const chats = await client.getChats();
+        let chats = [];
+        try {
+            chats = await client.getChats();
+        } catch (e) {
+            console.warn('⚠️ No se pudieron cargar los chats históricos (contexto destruido o no disponible).');
+            return;
+        }
         const recentChats = chats.slice(0, 10);
 
         for (const chat of recentChats) {
