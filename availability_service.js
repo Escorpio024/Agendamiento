@@ -929,22 +929,7 @@ async function reserveSlot(fechaStr, hora, userId, tipo = 'medicina general', me
         let slotAActualizar = slotExistente;
         let medicoActualizar = slot.doctorId;
 
-        if (!debeActualizar) {
-            // MODO FALLBACK: buscar cualquier slot vacío o cancelado en esa hora
-            const slotVacioAlternativo = await prisma.cita.findFirst({
-                where: {
-                    KC3_FCH: dateDecimal,
-                    KC3_HH:  hh,
-                    KC3_MM:  mm
-                }
-            });
-
-            if (slotVacioAlternativo && esSlotVacioFn(slotVacioAlternativo.KC3_COD, slotVacioAlternativo.KC3_ESTADO)) {
-                slotAActualizar = slotVacioAlternativo;
-                medicoActualizar = slotVacioAlternativo.KC3_MEDICO;
-                logger.info(`[HABEJICO] 🔄 Slot vacío alternativo encontrado para médico=${medicoActualizar} ${hh}:${mm} (el slot real de Xenco)`);
-            }
-        }
+        // Fallback inseguro eliminado: Si no debe actualizar, pasará al else y creará el slot para el médico correcto.
 
         const debeActualizarFinal = slotAActualizar && esSlotVacioFn(slotAActualizar.KC3_COD, slotAActualizar.KC3_ESTADO);
 
