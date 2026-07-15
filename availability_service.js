@@ -7,11 +7,13 @@ const logger = require('./logger');
 // El bot SOLO ofrecerá citas con los médicos que estén en la lista
 // correspondiente a su sede. Cualquier otro médico es ignorado.
 //
-// Sede Ebejico (bot general): Medico 1 (333), Medico 2 (123), Medico 3 (555)
+// Sede Ebejico (Medicina General): Medico 1 (333), Medico 2 (123), Medico 3 (555)
+// Sede Ebejico (Odontología):      Profesional Odontología 1 (999), Lasso Alvarez Maria Isabel (1037636224), Bedoya Lujan Daniela Maria (1039886829)
 // Sede Sevilla (Medicina General): Medico Sevilla (444), Medico Sevilla 1 (777)
 // Sede Sevilla (Odontología):      Profesional Odontología 1 (999), Profesional Odontología 2 (1000)
 // =========================================
 const MEDICOS_PERMITIDOS_EBEJICO = [333, 123, 555];
+const MEDICOS_ODONTOLOGIA_EBEJICO = [999, 1037636224, 1039886829]; // Odontología Ebejico
 const MEDICOS_PERMITIDOS_SEVILLA = [444, 777];
 const MEDICOS_ODONTOLOGIA_SEVILLA = [999, 1000]; // Odontología Sevilla (solo mié/sáb 7AM-1PM)
 
@@ -488,6 +490,12 @@ async function getAvailableSlots(fechaStr, tipo = 'medicina general', preferredD
     if (isCVD) {
         listaPermitidos.push(111); // P Y P MEDICOS (Riesgo Cardiovascular)
     }
+    // Odontología en Ebejico: agregar médicos de odontología de Ebejico a la lista permitida
+    if (sede !== 'Sevilla' && esOdontologia) {
+        for (const codM of MEDICOS_ODONTOLOGIA_EBEJICO) {
+            if (!listaPermitidos.includes(codM)) listaPermitidos.push(codM);
+        }
+    }
     // Odontología en Sevilla: agregar médicos de odontología a la lista permitida
     if (sede === 'Sevilla' && esOdontologia) {
         for (const codM of MEDICOS_ODONTOLOGIA_SEVILLA) {
@@ -503,8 +511,11 @@ async function getAvailableSlots(fechaStr, tipo = 'medicina general', preferredD
         // Solo médicos de la lista blanca de esta sede
         if (!listaPermitidos.includes(Number(t.TME_CODM))) return false;
 
-        // Para Ebejico, respetar además el filtro de especialidad
+        // Para Ebejico: si es odontología, solo mostrar odontólogos; si es medicina, solo médicos
         if (sede !== 'Sevilla') {
+            if (esOdontologia) {
+                return MEDICOS_ODONTOLOGIA_EBEJICO.includes(Number(t.TME_CODM));
+            }
             return !especialidad || t.TME_ESPECIALIDAD == especialidad.ESP_COD;
         }
         // En Sevilla: si es odontología, solo mostrar médicos de odontología; si es medicina, solo médicos de medicina
@@ -514,10 +525,10 @@ async function getAvailableSlots(fechaStr, tipo = 'medicina general', preferredD
         return true;
     });
 
-    if (sede === 'Sevilla') {
-        // Fallback vital: Si los médicos de Sevilla no tienen cabecera activa en TMTURNOSMEDICOS,
-        // los agregamos manualmente para que puedan leer los slots libres directos del Visor (TME2).
-        if (turnos.length === 0) {
+    // Fallback vital: Si los médicos no tienen cabecera activa en TMTURNOSMEDICOS,
+    // los agregamos manualmente para que puedan leer los slots libres directos del Visor (TME2).
+    if (turnos.length === 0) {
+        if (sede === 'Sevilla') {
             if (esOdontologia) {
                 for (const codM of MEDICOS_ODONTOLOGIA_SEVILLA) {
                     turnos.push({ TME_CODM: codM, TME_DUR_CITA: 20, TME_ESPECIALIDAD: '461' });
@@ -525,6 +536,13 @@ async function getAvailableSlots(fechaStr, tipo = 'medicina general', preferredD
             } else {
                 for (const codM of MEDICOS_PERMITIDOS_SEVILLA) {
                     turnos.push({ TME_CODM: codM, TME_DUR_CITA: 20, TME_ESPECIALIDAD: especialidad?.ESP_COD || '999' });
+                }
+            }
+        } else {
+            // Fallback para Ebejico
+            if (esOdontologia) {
+                for (const codM of MEDICOS_ODONTOLOGIA_EBEJICO) {
+                    turnos.push({ TME_CODM: codM, TME_DUR_CITA: 20, TME_ESPECIALIDAD: '461' });
                 }
             }
         }
