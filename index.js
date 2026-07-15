@@ -216,9 +216,9 @@ client.on('message_create', async (msg) => {
             chat = await msg.getChat();
         } catch (e) {
             console.warn('[WA] No se pudo obtener el chat en message_create:', e.message);
-            return;
+            // Ya no hacemos return, continuamos sin chat object
         }
-        const chatId = chat.id._serialized;
+        const chatId = chat ? chat.id._serialized : msg.to; // msg.to es el destinatario si es fromMe
         let mediaUrl = null;
         if (msg.hasMedia) {
             mediaUrl = await mediaHandler.saveMedia(msg);
@@ -286,7 +286,8 @@ client.on('message', async (msg) => {
             chat = await msg.getChat();
         } catch (e) {
             console.warn('[WA] No se pudo obtener el chat en message:', e.message);
-            return;
+            // No hacemos return; permitimos que el flujo continúe.
+            // "chat" quedará undefined, y lo chequearemos antes de usarlo.
         }
 
         // Serializar mensajes del mismo sender para evitar race conditions
@@ -304,7 +305,7 @@ client.on('message', async (msg) => {
 
                 // Si es un audio y se guardó como MP3, lo transcribimos
                 if (isAudio) {
-                    chat.sendStateRecording();
+                    if (chat) chat.sendStateRecording().catch(() => {});
 
                     if (mediaUrl) {
                         const audioFilePath = path.join(__dirname, 'public', mediaUrl);
@@ -384,7 +385,7 @@ client.on('message', async (msg) => {
                 if (sess.history.length > 20) sess.history.shift();
             }
             console.log(`[BOT] 💬 Enviando respuesta (${txt.length} chars): "${txt.substring(0,80)}..."`);
-            chat.sendStateTyping();
+            if (chat) chat.sendStateTyping().catch(() => {});
             const delay = Math.min(Math.max(txt.length * 22, 900), 3000);
             await new Promise(r => setTimeout(r, delay));
             await client.sendMessage(sender, txt);
@@ -1587,7 +1588,7 @@ client.on('message', async (msg) => {
                 }
 
                 // ── FREE-FORM MESSAGE (no active context) ────────────────────
-                chat.sendStateTyping();
+                if (chat) chat.sendStateTyping();
                 const extracted = await aiService.extractAll(message, historyStr);
                 const intent = extracted.intent;
                 const entities = extracted.entities || {};
@@ -1658,6 +1659,7 @@ client.on('message', async (msg) => {
         }
 
         async function routeIntent(userId, message, intent, entities, session, replyFn, historyStr) {
+            console.log(`[BOT] RouteIntent -> intent=${intent}`);
             switch (intent) {
                 case 'AGENDAR_CITA':
                     await handleAgendarCita(userId, message, session, replyFn, entities, historyStr);
