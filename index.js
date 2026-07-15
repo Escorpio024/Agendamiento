@@ -207,7 +207,18 @@ if (process.env.NO_WHATSAPP !== 'true') {
     }, 4 * 60 * 1000);
 }
 
-
+// ── HELPER PARA OBTENER ID DEL MENSAJE ──
+// Si el contexto de Puppeteer falla, los objetos pueden perder su prototipo
+// y msg.id._serialized (que es un getter) será undefined.
+function getMsgId(msg) {
+    if (!msg || !msg.id) return `fallback_${Date.now()}_${Math.random()}`;
+    if (msg.id._serialized) return msg.id._serialized;
+    if (typeof msg.id === 'string') return msg.id;
+    if (msg.id.id) {
+        return `${msg.id.fromMe ? 'true' : 'false'}_${msg.id.remote || msg.from || msg.to}_${msg.id.id}`;
+    }
+    return JSON.stringify(msg.id);
+}
 
 client.on('message_create', async (msg) => {
     if (msg.fromMe) {
@@ -224,7 +235,7 @@ client.on('message_create', async (msg) => {
             mediaUrl = await mediaHandler.saveMedia(msg);
         }
         const saved = await chatService.saveMessage(chatId, {
-            id: msg.id._serialized,
+            id: getMsgId(msg),
             body: msg.body,
             fromMe: true,
             type: msg.type,
@@ -233,7 +244,7 @@ client.on('message_create', async (msg) => {
         });
         // Emitir el objeto completo guardado en BD (incluye el id para deduplicación en el frontend)
         server.emitMessage(saved || {
-            id: msg.id._serialized,
+            id: getMsgId(msg),
             conversationId: chatId,
             fromMe: true,
             body: msg.body,
@@ -277,8 +288,9 @@ client.on('message', async (msg) => {
         console.log(`======================================================\n`);
 
         // Prevent double-processing if WhatsApp Web fires the event twice
-        if (processedMessages.has(msg.id._serialized)) return;
-        processedMessages.add(msg.id._serialized);
+        const safeMsgId = getMsgId(msg);
+        if (processedMessages.has(safeMsgId)) return;
+        processedMessages.add(safeMsgId);
         if (processedMessages.size > 2000) processedMessages.clear();
 
         let chat;
@@ -341,7 +353,7 @@ client.on('message', async (msg) => {
         const cleanText = text.toLowerCase();
 
         const savedMsg = await chatService.saveMessage(sender, {
-            id: msg.id._serialized,
+            id: getMsgId(msg),
             body: text, // Guardamos la transcripción en la base de datos como si fuera texto
             fromMe: false,
             type: msg.type,
@@ -2370,7 +2382,7 @@ async function loadHistoricalMessages() {
                 for (const msg of messages) {
                     try {
                         await chatService.saveMessage(chatId, {
-                            id: msg.id._serialized,
+                            id: getMsgId(msg),
                             body: msg.body || '',
                             fromMe: msg.fromMe,
                             type: msg.type,
