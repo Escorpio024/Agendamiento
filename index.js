@@ -226,8 +226,7 @@ client.on('message_create', async (msg) => {
         try {
             chat = await msg.getChat();
         } catch (e) {
-            console.warn('[WA] No se pudo obtener el chat en message_create:', e.message);
-            // Ya no hacemos return, continuamos sin chat object
+            // Silenciar: ocurre frecuentemente durante reconexión de Puppeteer.
         }
         const chatId = chat ? chat.id._serialized : msg.to; // msg.to es el destinatario si es fromMe
         let mediaUrl = null;
@@ -297,9 +296,8 @@ client.on('message', async (msg) => {
         try {
             chat = await msg.getChat();
         } catch (e) {
-            console.warn('[WA] No se pudo obtener el chat en message:', e.message);
-            // No hacemos return; permitimos que el flujo continúe.
-            // "chat" quedará undefined, y lo chequearemos antes de usarlo.
+            // Silenciar: ocurre frecuentemente durante reconexión de Puppeteer.
+            // El bot continúa sin el objeto chat (los indicadores de "escribiendo" se omiten).
         }
 
         // Serializar mensajes del mismo sender para evitar race conditions
@@ -2365,7 +2363,8 @@ async function loadHistoricalMessages() {
         try {
             chats = await client.getChats();
         } catch (e) {
-            console.warn('⚠️ No se pudieron cargar los chats históricos (contexto destruido o no disponible).');
+            // Normal al arrancar: Puppeteer aún no está completamente listo.
+            // Se sincronizará automáticamente al recibir el siguiente mensaje.
             return;
         }
         const recentChats = chats.slice(0, 10);
