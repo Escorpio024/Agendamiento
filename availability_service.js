@@ -8,12 +8,13 @@ const logger = require('./logger');
 // correspondiente a su sede. Cualquier otro médico es ignorado.
 //
 // Sede Ebejico (Medicina General): Medico 1 (333), Medico 2 (123), Medico 3 (555)
-// Sede Ebejico (Odontología):      Profesional Odontología 1 (999), Lasso Alvarez Maria Isabel (1037636224), Bedoya Lujan Daniela Maria (1039886829)
+// Sede Ebejico (Medicina General): Medico 1 (333), Medico 2 (123), Medico 3 (555)
+// Sede Ebejico (Odontología):      Profesional Odontología 1 (999), Profesional Odontología 2 (1000)
 // Sede Sevilla (Medicina General): Medico Sevilla (444), Medico Sevilla 1 (777)
 // Sede Sevilla (Odontología):      Profesional Odontología 1 (999), Profesional Odontología 2 (1000)
 // =========================================
 const MEDICOS_PERMITIDOS_EBEJICO = [333, 123, 555];
-const MEDICOS_ODONTOLOGIA_EBEJICO = [999, 1037636224, 1039886829]; // Odontología Ebejico
+const MEDICOS_ODONTOLOGIA_EBEJICO = [999, 1000]; // Odontología Ebejico — SOLO Profesional 1 y 2
 const MEDICOS_PERMITIDOS_SEVILLA = [444, 777];
 const MEDICOS_ODONTOLOGIA_SEVILLA = [999, 1000]; // Odontología Sevilla (solo mié/sáb 7AM-1PM)
 
