@@ -27,7 +27,18 @@ async function saveMedia(msg) {
     if (!msg.hasMedia) return null;
 
     try {
-        const media = await msg.downloadMedia();
+        let media;
+        try {
+            media = await msg.downloadMedia();
+        } catch (e) {
+            // Silenciar errores comunes de desconexión del contexto de Puppeteer
+            const msgError = e.message || String(e);
+            if (msgError.includes('Execution context was destroyed') || msgError === 'r') {
+                return null;
+            }
+            throw e;
+        }
+        
         if (!media) return null;
 
         // Generate filename
