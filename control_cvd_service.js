@@ -235,8 +235,9 @@ class ControlCVDService {
                 );
                 const examenFueSabado = examenDate.getDay() === 6; // 6 = sábado
 
-                // Calcular fecha objetivo del control
-                const dControl = new Date();
+                // Calcular fecha objetivo del control a partir de la fecha REAL del examen
+                // (NO desde new Date() para que el cron pueda correr en cualquier momento)
+                const dControl = new Date(examenDate);
                 dControl.setMonth(dControl.getMonth() + monthsToAdd);
 
                 // Si el examen fue en sábado, ajustar la fecha de control al sábado más cercano

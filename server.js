@@ -417,6 +417,111 @@ app.post('/api/cardiovascular/controles/scan-presenciales', async (req, res) => 
     }
 });
 
+// POST /api/cardiovascular/controles/recalcular-fechas
+// Corrección masiva de registros PENDING/FAILED cuya fechaControl fue calculada
+// con new Date() en vez de la fecha real del examen (fechaCitaOriginal).
+// Aplica las mismas reglas: NUEVA EPS=2 meses, resto=3 meses. Ajusta sábados.
+app.post('/api/cardiovascular/controles/recalcular-fechas', async (req, res) => {
+    try {
+        const registros = await botPrisma.controlReminder.findMany({
+            where: {
+                estado: { in: ['PENDING', 'BOOKING_FAILED_NO_SLOT', 'BOOKING_FAILED_XENCO', 'FAILED_NO_PHONE'] },
+                fechaCitaOriginal: { not: null }
+            }
+        });
+
+        if (registros.length === 0) {
+            return res.json({ success: true, message: 'No hay registros pendientes para recalcular.', actualizados: 0 });
+        }
+
+        let actualizados = 0;
+        const cambios = [];
+
+        for (const r of registros) {
+            try {
+                const fechaExamenRaw = String(r.fechaCitaOriginal);
+                if (fechaExamenRaw.length !== 8) continue;
+
+                const examenDate = new Date(
+                    parseInt(fechaExamenRaw.substring(0, 4)),
+                    parseInt(fechaExamenRaw.substring(4, 6)) - 1,
+                    parseInt(fechaExamenRaw.substring(6, 8))
+                );
+                if (isNaN(examenDate.getTime())) continue;
+
+                // Determinar meses según EPS info guardada
+                const epsInfo = String(r.epsInfo || '').toUpperCase();
+                const monthsToAdd = epsInfo.includes('NUEVA EPS') ? 2 : 3;
+
+                // Calcular fecha correcta desde la fecha del EXAMEN
+                const dControl = new Date(examenDate);
+                dControl.setMonth(dControl.getMonth() + monthsToAdd);
+
+                // Ajuste de sábados
+                const examenFueSabado = examenDate.getDay() === 6;
+                if (examenFueSabado) {
+                    const diaSemana = dControl.getDay();
+                    if (diaSemana !== 6) {
+                        const diasHastaSabAnterior = diaSemana === 0 ? 1 : diaSemana + 1;
+                        const diasHastaSabSiguiente = 6 - diaSemana;
+                        const sabAnterior = new Date(dControl);
+                        sabAnterior.setDate(dControl.getDate() - diasHastaSabAnterior);
+                        const sabSiguiente = new Date(dControl);
+                        sabSiguiente.setDate(dControl.getDate() + diasHastaSabSiguiente);
+                        if (diasHastaSabSiguiente <= diasHastaSabAnterior) {
+                            dControl.setTime(sabSiguiente.getTime());
+                        } else {
+                            dControl.setTime(sabAnterior.getTime());
+                        }
+                    }
+                } else {
+                    if (dControl.getDay() === 0) dControl.setDate(dControl.getDate() + 1);
+                }
+
+                const y = dControl.getFullYear();
+                const m = String(dControl.getMonth() + 1).padStart(2, '0');
+                const d = String(dControl.getDate()).padStart(2, '0');
+                const nuevaFechaControl = `${y}${m}${d}`;
+
+                // Calcular nuevo recordatorio (8 días antes)
+                const dRemind = new Date(dControl);
+                dRemind.setDate(dRemind.getDate() - 8);
+                if (dRemind.getDay() === 0) dRemind.setDate(dRemind.getDate() + 1);
+                const yr = dRemind.getFullYear();
+                const mr = String(dRemind.getMonth() + 1).padStart(2, '0');
+                const dr = String(dRemind.getDate()).padStart(2, '0');
+                const nuevaFechaRecordatorio = `${yr}${mr}${dr}`;
+
+                if (r.fechaControl !== nuevaFechaControl) {
+                    cambios.push({ cedula: r.cedula, antes: r.fechaControl, despues: nuevaFechaControl, eps: epsInfo });
+                    await botPrisma.controlReminder.update({
+                        where: { id: r.id },
+                        data: {
+                            fechaControl: nuevaFechaControl,
+                            fechaRecordatorio: nuevaFechaRecordatorio
+                        }
+                    });
+                    actualizados++;
+                }
+            } catch (innerErr) {
+                logger.warn(`[CVD Recalcular] Error procesando ${r.cedula}: ${innerErr.message}`);
+            }
+        }
+
+        logger.info(`[CVD Recalcular] ${actualizados} fechas corregidas de ${registros.length} revisadas.`);
+        res.json({
+            success: true,
+            message: `Se recalcularon ${actualizados} fechas de control de ${registros.length} registros revisados.`,
+            actualizados,
+            total: registros.length,
+            cambios
+        });
+    } catch (error) {
+        logger.error('[CARDIOVASCULAR] Error recalculando fechas:', error.message);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
 
 // ==========================================
 // RUTAS DE CAMPAÑAS (CAMPAIGNS)

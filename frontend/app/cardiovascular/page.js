@@ -1119,6 +1119,8 @@ function ControlesViewerModal({ onClose }) {
     const [procesMsg, setProcesMsg] = useState('');
     const [escaneando, setEscaneando] = useState(false);
     const [scanMsg, setScanMsg] = useState('');
+    const [recalculando, setRecalculando] = useState(false);
+    const [recalcMsg, setRecalcMsg] = useState('');
 
     const handleProcesarPendientes = async () => {
         if (!confirm('¿Deseas iniciar el agendamiento automático para todos los controles PENDIENTES ahora mismo?\n\nCada paciente recibirá un WhatsApp confirmando su cita.')) return;
@@ -1147,6 +1149,21 @@ function ControlesViewerModal({ onClose }) {
         } catch (e) {
             setScanMsg('Error de red. Intenta de nuevo.');
             setEscaneando(false);
+        }
+    };
+
+    const handleRecalcularFechas = async () => {
+        if (!confirm('¿Deseas recalcular las fechas de control de los pacientes PENDIENTES?\n\nEsto corrige los registros cuya fecha fue calculada incorrectamente (usaba la fecha de HOY en vez de la fecha del examen).\n\nSe aplicarán las reglas: NUEVA EPS=2 meses, resto=3 meses.')) return;
+        setRecalculando(true);
+        setRecalcMsg('');
+        try {
+            const res = await fetch(`${API_BASE}/api/cardiovascular/controles/recalcular-fechas`, { method: 'POST' });
+            const data = await res.json();
+            setRecalcMsg(data.message || 'Recalculado');
+            setTimeout(() => { loadControles(); setRecalculando(false); setRecalcMsg(''); }, 5000);
+        } catch (e) {
+            setRecalcMsg('Error de red. Intenta de nuevo.');
+            setRecalculando(false);
         }
     };
 
@@ -1228,14 +1245,22 @@ function ControlesViewerModal({ onClose }) {
                     </button>
                     <button
                         onClick={handleProcesarPendientes}
-                        disabled={procesando || escaneando}
+                        disabled={procesando || escaneando || recalculando}
                         className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all"
                         style={{ background: procesando ? 'rgba(130,99,177,0.2)' : 'rgba(130,99,177,0.35)', color: '#C4AFED', border: '1px solid rgba(130,99,177,0.4)' }}>
                         {procesando ? <Loader2 size={13} className="animate-spin" /> : <CalendarCheck2 size={13} />}
                         {procesando ? 'Procesando y enviando WhatsApp...' : '📲 Agendar Pendientes y Avisar Ahora'}
                     </button>
-                    {(procesMsg || scanMsg) && (
-                        <span className="text-xs" style={{ color: '#A1E3D8' }}>✔ {procesMsg || scanMsg}</span>
+                    <button
+                        onClick={handleRecalcularFechas}
+                        disabled={recalculando || procesando || escaneando}
+                        className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all"
+                        style={{ background: recalculando ? 'rgba(251,146,60,0.1)' : 'rgba(251,146,60,0.2)', color: '#FED7AA', border: '1px solid rgba(251,146,60,0.4)' }}>
+                        {recalculando ? <Loader2 size={13} className="animate-spin" /> : <span>📐</span>}
+                        {recalculando ? 'Recalculando fechas...' : 'Corregir Fechas Pendientes'}
+                    </button>
+                    {(procesMsg || scanMsg || recalcMsg) && (
+                        <span className="text-xs" style={{ color: '#A1E3D8' }}>✔ {procesMsg || scanMsg || recalcMsg}</span>
                     )}
                 </div>
 
