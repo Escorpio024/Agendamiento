@@ -235,7 +235,7 @@ class ReminderService {
                   AND KC3_COD IS NOT NULL
                   AND LEN(LTRIM(RTRIM(KC3_COD))) = 14
                   AND KC3_COD <> '00000000000000'
-                  AND CAST(KC3_COD AS BIGINT) > 0
+                  AND TRY_CAST(KC3_COD AS BIGINT) > 0
             `;
 
             logger.info(`📅 [Recordatorios] ${citas.length} cita(s) encontradas para mañana`);
