@@ -150,66 +150,48 @@ class ReminderService {
         return null;
     }
 
-    /**
-     * Obtener el WhatsApp ID real del paciente.
-     * Prioridad:
-     *   1. Conversación existente en SQLite del bot (WhatsApp ID exacto, soporta @lid)
-     *   2. Teléfono de Xenco formateado como @c.us
-     */
     async getWhatsAppId(codigoPac) {
-        let rawPhone = await this.getPhoneForPatient(codigoPac);
-
-        // Si no está en Xenco, buscar en el historial de agendamientos del bot (SQLite)
-        // por si el paciente lo digitó manualmente
-        if (!rawPhone) {
-            try {
-                const pacCod14 = String(codigoPac).trim().padStart(14, '0');
-                const codNoZeros = String(codigoPac).trim().replace(/^0+/, '');
-                
-                // 1. Buscar en historial de agendamientos del bot
-                const appLog = await botPrisma.appointmentLog.findFirst({
-                    where: { 
-                        patientDocument: { in: [pacCod14, codNoZeros, String(codigoPac).trim()] }
-                    },
-                    orderBy: { createdAt: 'desc' }
-                });
-                
-                if (appLog && appLog.whatsappId) {
-                    logger.debug(`[Recordatorios] 📱 Teléfono recuperado de SQLite AppointmentLog: ${appLog.whatsappId}`);
-                    return appLog.whatsappId;
-                }
-
-            } catch (e) {
-                logger.warn('[Recordatorios] No se pudo consultar AppointmentLog SQLite:', e.message);
-            }
-            return null; // Si definitivamente no existe, abortar.
-        }
-
-        // Buscar en SQLite si este número ya habló con el bot
+        // 1. SIEMPRE buscar primero en el historial de agendamientos del bot (SQLite).
+        // Si el paciente agendó recientemente por el bot, tenemos su ID exacto (incluso si es @lid).
         try {
-            const phone10 = rawPhone.slice(-10);
-            const phone7  = rawPhone.slice(-7);
-            const convs = await botPrisma.conversation.findMany({
-                where: {
-                    OR: [
-                        { id: { contains: phone10 } },
-                        { id: { contains: phone7  } }
-                    ]
+            const pacCod14 = String(codigoPac).trim().padStart(14, '0');
+            const codNoZeros = String(codigoPac).trim().replace(/^0+/, '');
+            
+            const appLog = await botPrisma.appointmentLog.findFirst({
+                where: { 
+                    patientDocument: { in: [pacCod14, codNoZeros, String(codigoPac).trim()] }
                 },
-                orderBy: { lastMessageAt: 'desc' },
-                take: 1
+                orderBy: { createdAt: 'desc' }
             });
-            if (convs.length > 0) {
-                logger.debug(`[Recordatorios] 📱 WA ID del bot: ${convs[0].id} (paciente ${codigoPac})`);
-                return convs[0].id;
+            
+            if (appLog && appLog.whatsappId) {
+                logger.debug(`[Recordatorios] 📱 WA ID desde AppointmentLog: ${appLog.whatsappId} (paciente ${codigoPac})`);
+                return appLog.whatsappId;
             }
         } catch (e) {
-            logger.warn('[Recordatorios] No se pudo consultar SQLite:', e.message);
+            logger.warn('[Recordatorios] No se pudo consultar AppointmentLog SQLite:', e.message);
         }
 
-        // Fallback: construir @c.us desde el teléfono de Xenco
-        const phone = rawPhone.length === 10 ? `57${rawPhone}` : rawPhone;
-        return `${phone}@c.us`;
+        // 2. Si no agendó por el bot, buscar su teléfono en Xenco
+        let rawPhone = await this.getPhoneForPatient(codigoPac);
+        if (!rawPhone) {
+            return null;
+        }
+
+        // 3. Formatear el teléfono de Xenco de manera estricta
+        // Si es celular (10 dígitos en Colombia), agregar el 57. 
+        // Si es otro número, dejarlo tal cual pero probablemente falle si es fijo.
+        let phone;
+        const phone10 = rawPhone.slice(-10);
+        if (rawPhone.length >= 10) {
+            phone = `57${phone10}`;
+        } else {
+            phone = rawPhone;
+        }
+        
+        const finalWaId = `${phone}@c.us`;
+        logger.debug(`[Recordatorios] 📱 WA ID desde Xenco: ${finalWaId} (paciente ${codigoPac})`);
+        return finalWaId;
     }
 
     /** Buscar nombre del paciente */
