@@ -810,11 +810,45 @@ async function reserveSlot(fechaStr, hora, userId, tipo = 'medicina general', me
         }
         logger.debug(`[HABEJICO] reserveSlot: paciente.KC0_COD="${paciente.KC0_COD}" zona="${paciente.zona}" sede="${sede}"`);
 
-        // Validar slot disponible
+        // Validar slot disponible — buscar directamente en TME2 para ese médico y hora
+        // Esto es más fiable que re-llamar getAvailableSlots que puede filtrar el doctor si su cabecera venció
         const slots = await getAvailableSlots(dateStr, tipo, null, true, sede, isCVD);
         let slot = medicoId
             ? slots.find(s => s.doctorId === Number(medicoId) && s.hh === hh && s.mm === mm)
             : slots.find(s => s.hh === hh && s.mm === mm);
+
+        // Fallback: si el slot no está en el array de disponibilidad (ej: médico con cabecera vencida pero
+        // con slots en TME2), verificar directamente en TMTURNOSMEDICOSDETALLE
+        if (!slot && medicoId) {
+            const tme2Direct = await prisma.$queryRaw`
+                SELECT TME2_CODM, TME2_HH, TME2_MM, TME2_ZONA, TME2_ESPECIALIDAD
+                FROM TMTURNOSMEDICOSDETALLE
+                WHERE TME2_CODM = ${Number(medicoId)}
+                  AND TME2_FCH  = ${dateDecimal}
+                  AND TME2_HH   = ${hh}
+                  AND TME2_MM   = ${mm}
+                  AND (
+                      TME2_COD IS NULL
+                      OR LTRIM(RTRIM(TME2_COD)) = ''
+                      OR TME2_COD = '00000000000000'
+                      OR TRY_CAST(LTRIM(RTRIM(TME2_COD)) AS BIGINT) = 0
+                  )
+            `.catch(() => []);
+
+            if (tme2Direct.length > 0) {
+                const r = tme2Direct[0];
+                slot = {
+                    doctorId:       Number(medicoId),
+                    hh,
+                    mm,
+                    especialidadCod: r.TME2_ESPECIALIDAD || null,
+                    consultorio:    null,
+                    zona:           r.TME2_ZONA || null
+                };
+                logger.info(`[HABEJICO] ℹ️ Slot encontrado directamente en TME2 (médico con cabecera expirada): Dr.${medicoId} ${hh}:${mm}`);
+            }
+        }
+
         if (!slot) {
             console.error('[HABEJICO] reserveSlot falló: Slot no encontrado en array de disponibilidad para', { hh, mm, medicoId, tipo, slotsCount: slots.length });
             return false;

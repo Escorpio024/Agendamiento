@@ -340,7 +340,15 @@ class ReminderService {
                 return false;
             }
 
-            // Obtener el LID/ID correcto para evitar el error "No LID for user"
+            // Los IDs tipo @lid ya son IDs válidos de WhatsApp — enviar directamente.
+            // getNumberId() sólo funciona con números de teléfono (@c.us), no con @lid.
+            if (whatsappId.includes('@lid')) {
+                await this.client.sendMessage(whatsappId, mensaje);
+                logger.info(`[Recordatorios] ✅ Enviado vía @lid a ${primerNombre} (${whatsappId})`);
+                return true;
+            }
+
+            // Para @c.us: verificar que el número exista en WhatsApp antes de enviar
             const cleanPhone = whatsappId.replace('@c.us', '').replace('@s.whatsapp.net', '');
             const numberId = await this.client.getNumberId(cleanPhone);
             
