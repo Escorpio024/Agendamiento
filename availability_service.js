@@ -10,13 +10,17 @@ const logger = require('./logger');
 // Sede Ebejico (Medicina General): Medico 1 (333), Medico 2 (123), Medico 3 (555)
 // Sede Ebejico (Medicina General): Medico 1 (333), Medico 2 (123), Medico 3 (555)
 // Sede Ebejico (Odontología):      Profesional Odontología 1 (999), Profesional Odontología 2 (1000)
+// Sede Ebejico (PYP CVD):          P Y P MEDICOS (111)
 // Sede Sevilla (Medicina General): Medico Sevilla (444), Medico Sevilla 1 (777)
 // Sede Sevilla (Odontología):      Profesional Odontología 1 (999), Profesional Odontología 2 (1000)
+// Sede Sevilla (PYP CVD):          PYP MEDICO SEVILLA (888)
 // =========================================
 const MEDICOS_PERMITIDOS_EBEJICO = [333, 123, 555];
 const MEDICOS_ODONTOLOGIA_EBEJICO = [999, 1000]; // Odontología Ebejico — SOLO Profesional 1 y 2
 const MEDICOS_PERMITIDOS_SEVILLA = [444, 777];
 const MEDICOS_ODONTOLOGIA_SEVILLA = [999, 1000]; // Odontología Sevilla (solo mié/sáb 7AM-1PM)
+const MEDICO_CVD_EBEJICO  = 111;   // P Y P MEDICOS — solo bot cardiovascular Ebejico
+const MEDICO_CVD_SEVILLA  = 888;   // PYP MEDICO SEVILLA — solo bot cardiovascular Sevilla
 
 // Días permitidos para Odontología Sevilla (0=Dom, 1=Lun, 2=Mar, 3=Mié, 4=Jue, 5=Vie, 6=Sáb)
 const DIAS_ODONTOLOGIA_SEVILLA = [3, 6]; // Solo miércoles y sábado
@@ -489,7 +493,9 @@ async function getAvailableSlots(fechaStr, tipo = 'medicina general', preferredD
     // Ahora filtramos esos turnos "actuales" por sede (lista blanca) y especialidad
     const listaPermitidos = [...(sede === 'Sevilla' ? MEDICOS_PERMITIDOS_SEVILLA : MEDICOS_PERMITIDOS_EBEJICO)];
     if (isCVD) {
-        listaPermitidos.push(111); // P Y P MEDICOS (Riesgo Cardiovascular)
+        // CVD Ebejico → médico 111 | CVD Sevilla → médico 888
+        const medicoCVD = sede === 'Sevilla' ? MEDICO_CVD_SEVILLA : MEDICO_CVD_EBEJICO;
+        if (!listaPermitidos.includes(medicoCVD)) listaPermitidos.push(medicoCVD);
     }
     // Odontología en Ebejico: agregar médicos de odontología de Ebejico a la lista permitida
     if (sede !== 'Sevilla' && esOdontologia) {
@@ -571,7 +577,7 @@ async function getAvailableSlots(fechaStr, tipo = 'medicina general', preferredD
 
     // 4.5. Filtrar doctores exclusivos de PYP/CVD si no es el bot cardiovascular
     if (!isCVD) {
-        const bloqueadosNormal = ['pypmedicos', 'pypenfermeria', 'medicoprueba'];
+        const bloqueadosNormal = ['pypmedicos', 'pypenfermeria', 'medicoprueba', 'pypmedico'];
         filteredTurnos = filteredTurnos.filter(t => {
             const m = medicoMap[Number(t.TME_CODM)];
             if (!m) return true;
