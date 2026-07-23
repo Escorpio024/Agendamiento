@@ -28,24 +28,24 @@ class ControlCVDService {
         if (this.isRunning) return;
 
         // Fase 1 — Detección: Todos los días a las 8:00 PM
-        // Detecta citas CVD finalizadas hoy y las registra para agendar mañana.
+        // Detecta citas CVD finalizadas hoy y las registra para agendar mañana. (No envía WhatsApp)
         cron.schedule('0 20 * * 1-6', async () => {
-            logger.info('🔍 [Control CVD] CRON DESACTIVADO PARA EVITAR SPAM EN WHATSAPP.');
-            // await this.detectFinishedAppointments();
+            logger.info('🔍 [Control CVD] CRON ACTIVO: Ejecutando detección de citas finalizadas.');
+            await this.detectFinishedAppointments();
         });
 
-        // Fase 2 — Agendamiento Inmediato: Todos los días a las 7:30 AM
+        // Fase 2 — Agendamiento Inmediato: De 8:30 AM a 5:30 PM (por lotes para evitar spam)
         // Agenda la cita futura HOY mismo y le avisa al paciente.
-        cron.schedule('30 7 * * 1-6', async () => {
-            logger.info('📅 [Control CVD] CRON DESACTIVADO PARA EVITAR SPAM EN WHATSAPP.');
-            // await this.executeImmediateBooking();
+        cron.schedule('30 8-17 * * 1-6', async () => {
+            logger.info('📅 [Control CVD] CRON ACTIVO: Ejecutando agendamiento inmediato (Lote).');
+            await this.executeImmediateBooking();
         });
 
-        // Fase 3 — Recordatorio: 8 días antes del control
+        // Fase 3 — Recordatorio: De 9:00 AM a 4:00 PM (por lotes para evitar spam)
         // Envía recordatorio de laboratorios al paciente.
-        cron.schedule('0 10 * * 1-6', async () => {
-            logger.info('🔔 [Control CVD] CRON DESACTIVADO PARA EVITAR SPAM EN WHATSAPP.');
-            // await this.executeLaboratoryReminder();
+        cron.schedule('0 9-16 * * 1-6', async () => {
+            logger.info('🔔 [Control CVD] CRON ACTIVO: Ejecutando recordatorio de laboratorios (Lote).');
+            await this.executeLaboratoryReminder();
         });
 
         this.isRunning = true;
@@ -330,8 +330,10 @@ class ControlCVDService {
     async executeImmediateBooking() {
         try {
             // Buscar controles PENDING, SIN_CUPO o ERROR_XENCO (para reintento)
+            // Límite de 15 por ciclo para no disparar alertas de SPAM en WhatsApp.
             const pending = await botPrisma.controlReminder.findMany({
-                where: { estado: { in: ['PENDING', 'BOOKING_FAILED_NO_SLOT', 'BOOKING_FAILED_XENCO'] } }
+                where: { estado: { in: ['PENDING', 'BOOKING_FAILED_NO_SLOT', 'BOOKING_FAILED_XENCO'] } },
+                take: 15
             });
 
             logger.info(`[Control CVD] Agendamiento inmediato: ${pending.length} controles pendientes.`);
@@ -588,8 +590,9 @@ class ControlCVDService {
                         }
                     }
 
-                    // Pausa entre pacientes para no saturar WhatsApp
-                    await new Promise(r => setTimeout(r, 1500));
+                    // Pausa entre pacientes aleatoria (15s a 25s) para no saturar WhatsApp y evadir filtros Anti-Spam
+                    const randomDelay = Math.floor(Math.random() * (25000 - 15000 + 1)) + 15000;
+                    await new Promise(r => setTimeout(r, randomDelay));
 
                 } catch (patientErr) {
                     logger.error(`[Control CVD] Error procesando paciente ${record.cedula}: ${patientErr.message}`);
@@ -614,7 +617,8 @@ class ControlCVDService {
                 where: {
                     fechaRecordatorio: todayStr,
                     estado: 'BOOKED'
-                }
+                },
+                take: 15
             });
 
             logger.info(`[Control CVD] Recordatorio: ${booked.length} pacientes reciben aviso de laboratorios hoy.`);
@@ -663,6 +667,10 @@ class ControlCVDService {
                 });
 
                 logger.info(`[Control CVD] Recordatorio enviado a ${record.cedula} para control el ${record.fechaControl}`);
+
+                // Pausa entre recordatorios aleatoria (15s a 25s) para evitar spam
+                const randomDelay = Math.floor(Math.random() * (25000 - 15000 + 1)) + 15000;
+                await new Promise(r => setTimeout(r, randomDelay));
             }
         } catch (e) {
             logger.error('[Control CVD] Error en recordatorio de laboratorios:', e.message);
