@@ -350,16 +350,30 @@ class ReminderService {
 
             // Para @c.us: verificar que el número exista en WhatsApp antes de enviar
             const cleanPhone = whatsappId.replace('@c.us', '').replace('@s.whatsapp.net', '');
-            const numberId = await this.client.getNumberId(cleanPhone);
+            const numberId = await this.client.getNumberId(cleanPhone).catch(() => null);
             
-            if (!numberId) {
-                logger.warn(`[Recordatorios] ❌ WhatsApp no reconoce el número ${cleanPhone}`);
-                return false;
+            if (numberId) {
+                // getNumberId encontró el número — usar su ID serializado (puede ser @lid o @c.us)
+                await this.client.sendMessage(numberId._serialized, mensaje);
+                logger.info(`[Recordatorios] ✅ Enviado a ${primerNombre} (${numberId._serialized})`);
+                return true;
             }
 
-            await this.client.sendMessage(numberId._serialized, mensaje);
-            logger.info(`[Recordatorios] ✅ Enviado a ${primerNombre} (${numberId._serialized})`);
-            return true;
+            // getNumberId devolvió null — puede ocurrir con cuentas @lid en versiones nuevas de WhatsApp.
+            // Si el número tiene formato válido de celular colombiano (57 + 10 dígitos empezando con 3),
+            // intentar enviar directamente. WhatsApp enruta correctamente aunque use @lid internamente.
+            const localNum = cleanPhone.startsWith('57') ? cleanPhone.slice(2) : cleanPhone;
+            const esMovilColombia = localNum.length === 10 && localNum.startsWith('3');
+
+            if (esMovilColombia) {
+                logger.debug(`[Recordatorios] ⚠️ getNumberId null para ${cleanPhone} — intentando envío directo @c.us`);
+                await this.client.sendMessage(`${cleanPhone}@c.us`, mensaje);
+                logger.info(`[Recordatorios] ✅ Enviado (directo) a ${primerNombre} (${cleanPhone}@c.us)`);
+                return true;
+            }
+
+            logger.warn(`[Recordatorios] ❌ WhatsApp no reconoce el número ${cleanPhone} y no es un celular colombiano válido — omitiendo`);
+            return false;
         } catch (error) {
             logger.warn(`[Recordatorios] ❌ Error enviando a ${waId}: ${error.message}`);
             return false;
