@@ -150,10 +150,14 @@ client.on('ready', async () => {
 // ── RECONEXIÓN AUTOMÁTICA ─────────────────────────────────────────────────
 // WhatsApp Web desconecta periódicamente (cada ~1h si hay inactividad).
 // Sin estos handlers el bot queda muerto hasta reinicio manual.
-client.on('disconnected', (reason) => {
+client.on('disconnected', async (reason) => {
     console.warn(`[WA] ⚠️ Desconectado: ${reason}. Reconectando en 15s...`);
     activeSessions.clear(); // Limpiar sesiones en RAM para empezar limpio
-    setTimeout(() => {
+    setTimeout(async () => {
+        try {
+            console.warn('[WA] Destruyendo cliente antes de reconectar...');
+            await client.destroy().catch(() => {});
+        } catch (e) {}
         client.initialize().catch(e => {
             console.error('[WA] ❌ Error al reconectar:', e.message);
         });
@@ -162,7 +166,10 @@ client.on('disconnected', (reason) => {
 
 client.on('auth_failure', (msg) => {
     console.error(`[WA] ❌ Error de autenticación: ${msg}. Reintentando en 20s...`);
-    setTimeout(() => {
+    setTimeout(async () => {
+        try {
+            await client.destroy().catch(() => {});
+        } catch (e) {}
         client.initialize().catch(e => {
             console.error('[WA] ❌ Error al reiniciar tras auth_failure:', e.message);
         });
