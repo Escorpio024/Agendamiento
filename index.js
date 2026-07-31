@@ -2,7 +2,10 @@ require('dotenv').config();
 
 process.on('unhandledRejection', (reason, promise) => {
     console.error('[CRITICAL] Unhandled Rejection at:', promise, 'reason:', reason);
-    // Evitar que el proceso de Node crashee
+    if (reason && reason.message && reason.message.includes('Execution context was destroyed')) {
+        console.warn('[FATAL] Execution context destruido en Puppeteer. Saliendo para que PM2 reinicie el proceso limpio...');
+        process.exit(1);
+    }
 });
 
 process.on('uncaughtException', (error) => {
