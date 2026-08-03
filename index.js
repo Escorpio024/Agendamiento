@@ -2,10 +2,6 @@ require('dotenv').config();
 
 process.on('unhandledRejection', (reason, promise) => {
     console.error('[CRITICAL] Unhandled Rejection at:', promise, 'reason:', reason);
-    if (reason && reason.message && reason.message.includes('Execution context was destroyed')) {
-        console.warn('[FATAL] Execution context destruido en Puppeteer. Saliendo para que PM2 reinicie el proceso limpio...');
-        process.exit(1);
-    }
 });
 
 process.on('uncaughtException', (error) => {
@@ -14,11 +10,10 @@ process.on('uncaughtException', (error) => {
 });
 const audioService = require('./audio_service');
 
-const { Client, LocalAuth } = require('whatsapp-web.js');
-const qrcode = require('qrcode-terminal');
-const prisma = require('./db');
-const botPrisma = require('./dbBot');
-const path = require('path'); // Added path module
+const metaClient  = require('./meta_wa_client');
+const prisma      = require('./db');
+const botPrisma   = require('./dbBot');
+const path        = require('path');
 
 // Servicios de IA y horarios
 const aiService = require('./ollama_service');
@@ -58,22 +53,8 @@ function cleanPhone(phone) {
     return cleaned;
 }
 
-// --- CLIENTE WHATSAPP ---
-const puppeteerConfig = {
-    headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
-};
-
-if (process.env.PUPPETEER_EXECUTABLE_PATH) {
-    puppeteerConfig.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
-}
-
-const client = new Client({
-    authStrategy: new LocalAuth({
-        clientId: process.env.CLIENT_ID || 'session'  // LOCAL: CLIENT_ID=local → session-local/
-    }),
-    puppeteer: puppeteerConfig
-});
+// --- CLIENTE META WHATSAPP (reemplaza whatsapp-web.js/Puppeteer) ---
+// metaClient usa la API oficial de Meta — sin QR, sin Chrome, sin desconexiones
 
 // SESIÓN ACTIVA (RAM)
 const activeSessions = new Map();
@@ -91,10 +72,7 @@ setInterval(async () => {
             // y solo si WhatsApp sigue conectado (evita error "detached Frame")
             if (session.step && session.step !== 'WELCOME') {
                 try {
-                    const waState = await client.getState().catch(() => null);
-                    if (waState === 'CONNECTED') {
-                        await client.sendMessage(sender, "⚠️ Por tu seguridad, he cerrado esta sesión por inactividad ya que pasaron más de 10 minutos.\n\nSi deseas continuar agendando tu cita, por favor escríbeme de nuevo.");
-                    }
+                    await metaClient.sendMessage(sender, "⚠️ Por tu seguridad, he cerrado esta sesión por inactividad ya que pasaron más de 10 minutos.\n\nSi deseas continuar agendando tu cita, por favor escríbeme de nuevo.");
                 } catch (error) {
                     // Silenciar — ocurre durante reconexión de WhatsApp, no es un error real
                     console.warn('[SESSION] No se pudo enviar mensaje de expiración (WA desconectado):', error.message?.substring(0, 60));
@@ -138,84 +116,6 @@ function clearSessionData(session, sender) {
     }
 }
 
-client.on('qr', (qr) => qrcode.generate(qr, { small: true }));
-client.on('ready', async () => {
-    console.log('✅ Bot médico con IA listo.');
-    server.start(client);
-    reminderService.init(client);
-    controlCvdService.init(client);
-    campaignService.init(client);
-    // ── Recuperar campañas huérfanas que quedaron en SENDING antes de reinicio ──
-    await campaignService.recoverOnStartup();
-    await loadHistoricalMessages();
-});
-
-// ── RECONEXIÓN AUTOMÁTICA ─────────────────────────────────────────────────
-// WhatsApp Web desconecta periódicamente (cada ~1h si hay inactividad).
-// Sin estos handlers el bot queda muerto hasta reinicio manual.
-client.on('disconnected', async (reason) => {
-    console.warn(`[WA] ⚠️ Desconectado: ${reason}. Reconectando en 15s...`);
-    activeSessions.clear(); // Limpiar sesiones en RAM para empezar limpio
-    setTimeout(async () => {
-        try {
-            console.warn('[WA] Destruyendo cliente antes de reconectar...');
-            await client.destroy().catch(() => {});
-        } catch (e) {}
-        client.initialize().catch(e => {
-            console.error('[WA] ❌ Error al reconectar:', e.message);
-        });
-    }, 15000);
-});
-
-client.on('auth_failure', (msg) => {
-    console.error(`[WA] ❌ Error de autenticación: ${msg}. Reintentando en 20s...`);
-    setTimeout(async () => {
-        try {
-            await client.destroy().catch(() => {});
-        } catch (e) {}
-        client.initialize().catch(e => {
-            console.error('[WA] ❌ Error al reiniciar tras auth_failure:', e.message);
-        });
-    }, 20000);
-});
-
-// ── KEEPALIVE ─────────────────────────────────────────────────────────────
-// Solo activo si WhatsApp está habilitado
-if (process.env.NO_WHATSAPP !== 'true') {
-    let keepaliveFailCount = 0;
-    let keepaliveReconnecting = false;
-    setInterval(async () => {
-        if (keepaliveReconnecting) return; // Ya está reconectando, no volver a entrar
-        try {
-            const state = await client.getState();
-            keepaliveFailCount = 0; // Reset en éxito
-            if (state !== 'CONNECTED') {
-                console.warn('[KEEPALIVE] ⚠️ No conectado, intentando reconectar...');
-                client.initialize().catch(() => {});
-            }
-        } catch (e) {
-            keepaliveFailCount++;
-            console.warn(`[KEEPALIVE] Error #${keepaliveFailCount} comprobando estado:`, e.message?.substring(0, 80));
-            // Solo intentar reconectar suave — NUNCA matar el proceso.
-            // Matar el proceso (process.exit) cortaba las conversaciones activas.
-            if (keepaliveFailCount >= 5) {
-                console.warn('[KEEPALIVE] 5 fallos consecutivos — intentando reiniciar WA sin matar el proceso...');
-                keepaliveReconnecting = true;
-                keepaliveFailCount = 0;
-                try {
-                    console.warn('[KEEPALIVE] Destruyendo instancia de WhatsApp (Puppeteer) para limpiar el Detached Frame...');
-                    await client.destroy().catch(() => {});
-                    await client.initialize();
-                    console.log('[KEEPALIVE] ✅ Reconexión exitosa.');
-                } catch (reinitErr) {
-                    console.error('[KEEPALIVE] ❌ Reconexión fallida:', reinitErr.message?.substring(0, 80));
-                } finally {
-                    keepaliveReconnecting = false;
-                }
-            }
-        }
-    }, 4 * 60 * 1000);
-}
 
 // ── HELPER PARA OBTENER ID DEL MENSAJE ──
 // Si el contexto de Puppeteer falla, los objetos pueden perder su prototipo
@@ -230,39 +130,9 @@ function getMsgId(msg) {
     return JSON.stringify(msg.id);
 }
 
-client.on('message_create', async (msg) => {
-    if (msg.fromMe) {
-        let chat;
-        try {
-            chat = await msg.getChat();
-        } catch (e) {
-            // Silenciar: ocurre frecuentemente durante reconexión de Puppeteer.
-        }
-        const chatId = chat ? chat.id._serialized : msg.to; // msg.to es el destinatario si es fromMe
-        let mediaUrl = null;
-        if (msg.hasMedia) {
-            mediaUrl = await mediaHandler.saveMedia(msg);
-        }
-        const saved = await chatService.saveMessage(chatId, {
-            id: getMsgId(msg),
-            body: msg.body,
-            fromMe: true,
-            type: msg.type,
-            mediaUrl: mediaUrl,
-            timestamp: new Date(msg.timestamp * 1000)
-        });
-        // Emitir el objeto completo guardado en BD (incluye el id para deduplicación en el frontend)
-        server.emitMessage(saved || {
-            id: getMsgId(msg),
-            conversationId: chatId,
-            fromMe: true,
-            body: msg.body,
-            mediaUrl: mediaUrl,
-            timestamp: new Date(msg.timestamp * 1000)
-        });
-    }
-});
-
+// ── EVENTO: MENSAJE SALIENTE (fromMe) ──────────────────────────────────────
+// Con Meta API los mensajes enviados por el bot no tienen evento separado.
+// Se registran directamente en el reply() helper a continuación.
 
 const processedMessages = new Set();
 // Lock por sender para evitar race conditions (doble confirmación de cita)
@@ -288,68 +158,63 @@ async function withSenderLock(sender, fn) {
     }
 }
 
-client.on('message', async (msg) => {
+// ── PROCESADOR DE MENSAJES ENTRANTES ────────────────────────────────────────
+// Esta función es llamada por el webhook de Meta (server.js) cuando llega un mensaje.
+async function processIncomingMessage({ from, msgId, text: rawText, type, mediaId, timestamp, profileName }) {
     try {
-        const sender = msg.from;
-        const textBody = msg.body ? msg.body.trim() : "";
+        const sender = from; // ej: '573054321098'
+        const textBody = rawText ? rawText.trim() : '';
         console.log(`\n======================================================`);
         console.log(`[INBOX LOG MAESTRO] Entrante de ${sender}: "${textBody}"`);
         console.log(`======================================================\n`);
 
-        // Prevent double-processing if WhatsApp Web fires the event twice
-        const safeMsgId = getMsgId(msg);
-        if (processedMessages.has(safeMsgId)) return;
-        processedMessages.add(safeMsgId);
+        // Deduplicación por msgId
+        if (processedMessages.has(msgId)) return;
+        processedMessages.add(msgId);
         if (processedMessages.size > 2000) processedMessages.clear();
 
-        let chat;
-        try {
-            chat = await msg.getChat();
-        } catch (e) {
-            // Silenciar: ocurre frecuentemente durante reconexión de Puppeteer.
-            // El bot continúa sin el objeto chat (los indicadores de "escribiendo" se omiten).
-        }
+        // Marcar como leído (los dos ✓✓ azules)
+        metaClient.markAsRead(msgId).catch(() => {});
 
         // Serializar mensajes del mismo sender para evitar race conditions
         await withSenderLock(sender, async () => {
 
-        // Identificamos si es nota de voz (ptt = push to talk) o audio normal
-        const isAudio = msg.type === 'ptt' || msg.type === 'audio';
+        // Identificamos tipo de media
+        const isAudio = type === 'audio' || type === 'voice';
 
-        let text = msg.body ? msg.body.trim() : "";
+        let text = rawText ? rawText.trim() : '';
         let mediaUrl = null;
 
-        if (msg.hasMedia) {
+        if (mediaId) {
             try {
-                mediaUrl = await mediaHandler.saveMedia(msg);
+                // Descargar media desde Meta y guardarlo localmente
+                const buffer = await metaClient.downloadMedia(mediaId);
+                if (buffer) {
+                    const ext = isAudio ? 'ogg' : (type === 'image' ? 'jpg' : 'bin');
+                    const filename = `media/${Date.now()}_${msgId.slice(-8)}.${ext}`;
+                    const fullPath = path.join(__dirname, 'public', filename);
+                    require('fs').writeFileSync(fullPath, buffer);
+                    mediaUrl = filename;
 
-                // Si es un audio y se guardó como MP3, lo transcribimos
-                if (isAudio) {
-                    if (chat) chat.sendStateRecording().catch(() => {});
-
-                    if (mediaUrl) {
-                        const audioFilePath = path.join(__dirname, 'public', mediaUrl);
-                        const transcription = await audioService.transcribeAudio(audioFilePath);
-
+                    // Si es audio, transcribir con Whisper
+                    if (isAudio) {
+                        const transcription = await audioService.transcribeAudio(fullPath);
                         if (transcription) {
                             text = transcription;
                             console.log(`[Audio] Transcripción exitosa: "${text}"`);
                         } else {
-                            // Whisper falló (sin API key o error de red) → pedir texto
-                            await client.sendMessage(sender, "Lo siento, no pude procesar tu nota de voz 😔. ¿Podrías escribirme lo que necesitas, por favor? 📝");
+                            await metaClient.sendMessage(sender, "Lo siento, no pude procesar tu nota de voz 😔. ¿Podrías escribirme lo que necesitas, por favor? 📝");
                             return;
                         }
-                    } else {
-                        // saveMedia devolvió null (error en conversión ffmpeg, etc.)
-                        await client.sendMessage(sender, "Lo siento, no pude procesar tu audio 🎙️. Por favor escríbeme tu solicitud 📝.");
-                        return;
                     }
+                } else if (isAudio) {
+                    await metaClient.sendMessage(sender, "Lo siento, no pude descargar tu audio 🎤. Por favor escríbeme tu solicitud 📝.");
+                    return;
                 }
             } catch (error) {
-                console.error('[Media] Error guardando o transcribiendo:', error.message || error);
+                console.error('[Media] Error descargando o transcribiendo:', error.message || error);
                 if (isAudio) {
-                    // Siempre dar feedback al usuario cuando falla el audio
-                    await client.sendMessage(sender, "Lo siento, tuve un problema procesando tu nota de voz 😔. Por favor escríbeme lo que necesitas 📝.");
+                    await metaClient.sendMessage(sender, "Lo siento, tuve un problema procesando tu nota de voz 😔. Por favor escríbeme lo que necesitas 📝.");
                     return;
                 }
             }
@@ -392,7 +257,7 @@ client.on('message', async (msg) => {
         if (cleanText.match(/\b(quiero un humano|hablar con humano|agente humano|hablar con agente|hablar con asesor|quiero un asesor|comunicarme con un agente)\b/)) {
             await chatService.updateStatus(sender, 'pending');
             server.emitConversationUpdate({ id: sender, status: 'pending' });
-            await client.sendMessage(sender, "Entendido, te voy a transferir con un agente humano. Espere un momento...");
+            await metaClient.sendMessage(sender, "Entendido, te voy a transferir con un agente humano. Espere un momento...");
             return;
         }
 
@@ -405,10 +270,22 @@ client.on('message', async (msg) => {
                 if (sess.history.length > 20) sess.history.shift();
             }
             console.log(`[BOT] 💬 Enviando respuesta (${txt.length} chars): "${txt.substring(0,80)}..."`);
-            if (chat) chat.sendStateTyping().catch(() => {});
-            const delay = Math.min(Math.max(txt.length * 22, 900), 3000);
+            // Meta API no tiene typing indicator, pero añadimos un pequeño delay natural
+            const delay = Math.min(Math.max(txt.length * 15, 500), 2500);
             await new Promise(r => setTimeout(r, delay));
-            await client.sendMessage(sender, txt);
+            const sent = await metaClient.sendMessage(sender, txt);
+            if (sent) {
+                // Guardar mensaje saliente en BD para el inbox del frontend
+                const savedOut = await chatService.saveMessage(sender, {
+                    id: `bot_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+                    body: txt,
+                    fromMe: true,
+                    type: 'chat',
+                    mediaUrl: null,
+                    timestamp: new Date()
+                }).catch(() => null);
+                if (savedOut) server.emitMessage(savedOut);
+            }
         };
 
         // --- INICIALIZACIÓN DE SESIÓN ---
@@ -2330,7 +2207,7 @@ client.on('message', async (msg) => {
             userData.doctorNameSeleccionado = null;
             userData.step = 'POST_CONFIRM';
         }
-    }); // cierra el con-lock
+    }); // cierra el withSenderLock
     } catch (err) {
         console.error('[CRITICAL] Uncaught exception in message handler:', err);
 
@@ -2344,18 +2221,17 @@ client.on('message', async (msg) => {
             err?.errorCode === 'P1001';
 
         try {
-            const senderForError = msg.from;
+            const senderForError = from; // 'from' viene del parámetro de processIncomingMessage
             if (isDbConnectionError) {
                 console.error(`[CRITICAL] Error de conexión a BD para ${senderForError}. El servidor de BD no está disponible.`);
-                await client.sendMessage(
+                await metaClient.sendMessage(
                     senderForError,
                     '⚠️ Estamos experimentando una falla técnica temporal con nuestros sistemas.\n\n' +
                     'Por favor intenta nuevamente en unos minutos. Si el problema persiste, comunícate con nosotros directamente.\n\n' +
                     '¡Disculpa los inconvenientes! 🙏'
                 );
             } else {
-                // Error genérico desconocido
-                await client.sendMessage(
+                await metaClient.sendMessage(
                     senderForError,
                     '😕 Ocurrió un error inesperado. Por favor intenta de nuevo en un momento.'
                 );
@@ -2364,80 +2240,35 @@ client.on('message', async (msg) => {
             console.error('[CRITICAL] No se pudo enviar mensaje de error al usuario:', sendErr?.message);
         }
     }
-});
+} // cierra processIncomingMessage
 
-async function loadHistoricalMessages() {
-    try {
-        console.log('📥 Sincronizando chats de WhatsApp...');
-        let chats = [];
-        try {
-            chats = await client.getChats();
-        } catch (e) {
-            // Normal al arrancar: Puppeteer aún no está completamente listo.
-            // Se sincronizará automáticamente al recibir el siguiente mensaje.
-            return;
-        }
-        const recentChats = chats.slice(0, 10);
 
-        for (const chat of recentChats) {
-            try {
-                const contact = await chat.getContact();
-                const chatId = chat.id._serialized;
-                const contactName = contact.pushname || contact.name || chatId;
+// loadHistoricalMessages era específico de Puppeteer — ya no aplica con Meta API.
+// Los mensajes llegan en tiempo real via webhook.
 
-                await chatService.getOrCreateConversation(chatId, contactName);
-                const messages = await chat.fetchMessages({ limit: 50 });
+// ─── INICIO ────────────────────────────────────────────────────────────────────
+(async () => {
+    console.log('🚀 Iniciando Aurora Bot con Meta WhatsApp Cloud API...');
+    console.log('ℹ️  Sin Puppeteer. Sin QR. Sin desconexiones.');
 
-                for (const msg of messages) {
-                    try {
-                        await chatService.saveMessage(chatId, {
-                            id: getMsgId(msg),
-                            body: msg.body || '',
-                            fromMe: msg.fromMe,
-                            type: msg.type,
-                            mediaUrl: null,
-                            timestamp: new Date(msg.timestamp * 1000),
-                            senderName: contactName
-                        });
-                    } catch (e) { }
-                }
-                await new Promise(r => setTimeout(r, 100));
-            } catch (chatError) { }
-        }
-        console.log(`✅ Sincronización completa.`);
-    } catch (error) {
-        console.error('❌ Error general en carga histórica:', error);
-    }
-}
+    // Arrancar servidor Express + Socket.IO + Webhook /webhook
+    server.start(null);
 
-// ─── INICIO ───────────────────────────────────────────────────────────────────
-if (process.env.NO_WHATSAPP === 'true') {
-    // MODO LOCAL: iniciar el servidor sin WhatsApp (solo API + frontend)
-    console.log('⚠️  [MODO LOCAL] NO_WHATSAPP=true — WhatsApp deshabilitado');
-    console.log('📡  El servidor API arrancará directamente en puerto 3001...');
-    server.start(null); // null = sin cliente WA, las funciones WA retornarán 503
-} else {
-    // MODO PRODUCCIÓN: iniciar WhatsApp (necesita Puppeteer + Chrome)
-    client.initialize().catch(e => {
-        console.error('[WA] ❌ Error al iniciar el cliente:', e.message);
-        
-        // Auto-reparación: Si la sesión está corrupta (suele pasar tras updates de WhatsApp Web),
-        // borrar la carpeta para forzar un re-login y evitar que el bot se quede en loop de reinicios.
-        if (e.message.includes('Execution context was destroyed') || e.message.includes('Target closed') || e.message.includes('Session closed')) {
-            console.log('[WA] 🛠️ Intentando auto-reparar: Borrando sesión corrupta (.wwebjs_auth)...');
-            try {
-                const fs = require('fs');
-                const path = require('path');
-                const sessionPath = path.join(__dirname, '.wwebjs_auth');
-                if (fs.existsSync(sessionPath)) {
-                    fs.rmSync(sessionPath, { recursive: true, force: true });
-                    console.log('[WA] ✅ Carpeta de sesión borrada. En el próximo reinicio, pedirá escanear el QR de nuevo.');
-                }
-            } catch (err) {
-                console.error('[WA] ❌ Error al borrar sesión:', err.message);
-            }
-        }
-        
-        process.exit(1);
-    });
-}
+    // Registrar handler de mensajes entrantes en el webhook
+    server.setMessageHandler(processIncomingMessage);
+
+    // Inicializar servicios con metaClient
+    reminderService.init(metaClient);
+    controlCvdService.init(metaClient);
+    campaignService.init(metaClient);
+
+    // Recuperar campañas huérfanas
+    await campaignService.recoverOnStartup().catch(e =>
+        console.warn('[STARTUP] recoverOnStartup error:', e.message)
+    );
+
+    console.log('✅ Aurora lista. Esperando mensajes vía webhook en /webhook...');
+    console.log(`📋 Webhook verify token: ${process.env.WEBHOOK_VERIFY_TOKEN || 'aurora_webhook_2026'}`);
+})();
+
+

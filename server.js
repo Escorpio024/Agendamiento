@@ -3,7 +3,6 @@ const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const chatService = require('./chat_service');
-const { MessageMedia } = require('whatsapp-web.js');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
@@ -69,6 +68,98 @@ const upload = multer({
 });
 
 let whatsappClient = null;
+
+// ─── META WHATSAPP WEBHOOK ─────────────────────────────────────────────────────
+// Callback que index.js registra para procesar mensajes entrantes
+let _incomingMessageHandler = null;
+function setMessageHandler(fn) { _incomingMessageHandler = fn; }
+
+const WEBHOOK_VERIFY_TOKEN = process.env.WEBHOOK_VERIFY_TOKEN || 'aurora_webhook_2026';
+
+// GET /webhook — verificación inicial de Meta (solo necesaria una vez al configurar)
+app.get('/webhook', (req, res) => {
+    const mode      = req.query['hub.mode'];
+    const token     = req.query['hub.verify_token'];
+    const challenge = req.query['hub.challenge'];
+
+    if (mode === 'subscribe' && token === WEBHOOK_VERIFY_TOKEN) {
+        logger.info('[META WEBHOOK] ✅ Webhook verificado por Meta.');
+        res.status(200).send(challenge);
+    } else {
+        logger.warn('[META WEBHOOK] ❌ Token de verificación incorrecto.');
+        res.sendStatus(403);
+    }
+});
+
+// POST /webhook — recepción de mensajes entrantes desde Meta
+app.post('/webhook', express.json(), async (req, res) => {
+    // Responder 200 inmediatamente — Meta requiere respuesta en < 5 segundos
+    res.sendStatus(200);
+
+    try {
+        const body = req.body;
+        if (body.object !== 'whatsapp_business_account') return;
+
+        for (const entry of (body.entry || [])) {
+            for (const change of (entry.changes || [])) {
+                const value = change.value;
+                if (!value) continue;
+
+                // ── Mensajes entrantes ──────────────────────────────────────────
+                for (const msg of (value.messages || [])) {
+                    const from      = msg.from;          // ej: '573054321098'
+                    const msgId     = msg.id;
+                    const timestamp = new Date(Number(msg.timestamp) * 1000);
+                    const msgType   = msg.type;          // text, audio, image, document, etc.
+
+                    let text    = '';
+                    let mediaId = null;
+
+                    if (msgType === 'text') {
+                        text = msg.text?.body || '';
+                    } else if (['audio', 'voice'].includes(msgType)) {
+                        mediaId = msg.audio?.id || msg.voice?.id || null;
+                    } else if (msgType === 'image') {
+                        mediaId = msg.image?.id || null;
+                        text = msg.image?.caption || '';
+                    } else if (msgType === 'document') {
+                        mediaId = msg.document?.id || null;
+                        text = msg.document?.caption || msg.document?.filename || '';
+                    } else if (msgType === 'sticker') {
+                        text = '[sticker]';
+                    } else if (msgType === 'location') {
+                        text = `[ubicación: ${msg.location?.latitude},${msg.location?.longitude}]`;
+                    }
+
+                    // Obtener nombre del perfil si viene
+                    const profileName = value.contacts?.[0]?.profile?.name || from;
+
+                    logger.info(`[META WEBHOOK] 📨 Mensaje de ${from} (${msgType}): "${text.substring(0, 80)}"`);
+
+                    if (_incomingMessageHandler) {
+                        await _incomingMessageHandler({
+                            from,
+                            msgId,
+                            text,
+                            type: msgType,
+                            mediaId,
+                            timestamp,
+                            profileName
+                        }).catch(e => logger.error('[META WEBHOOK] Error en handler:', e.message));
+                    }
+                }
+
+                // ── Actualizaciones de estado de mensajes (read/delivered) ──────
+                for (const status of (value.statuses || [])) {
+                    // Solo loguear a nivel debug — no son errores
+                    logger.debug(`[META WEBHOOK] Status ${status.status} para msg ${status.id}`);
+                }
+            }
+        }
+    } catch (e) {
+        logger.error('[META WEBHOOK] Error procesando payload:', e.message);
+    }
+});
 
 // --- API ROUTES ---
 
@@ -1281,5 +1372,7 @@ module.exports = {
     start,
     emitMessage,
     emitConversationUpdate,
-    emitAppointmentCreated
+    emitAppointmentCreated,
+    setMessageHandler
 };
+
