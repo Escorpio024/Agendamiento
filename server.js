@@ -231,7 +231,7 @@ app.post('/api/messages/send', upload.single('file'), async (req, res) => {
 
         // Save to DB immediately so the UI reflects the sent message in real-time.
         // The 'message_create' event in index.js will try to upsert and skip the duplicate.
-        const msgId = sentMsg.id._serialized;
+        const msgId = sentMsg?.id?._serialized || `meta_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
         const timestamp = new Date();
         let savedMsg;
         try {

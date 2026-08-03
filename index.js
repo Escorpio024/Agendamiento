@@ -226,12 +226,12 @@ async function processIncomingMessage({ from, msgId, text: rawText, type, mediaI
         const cleanText = text.toLowerCase();
 
         const savedMsg = await chatService.saveMessage(sender, {
-            id: getMsgId(msg),
+            id: msgId,
             body: text, // Guardamos la transcripción en la base de datos como si fuera texto
             fromMe: false,
-            type: msg.type,
+            type: type || 'chat',
             mediaUrl: mediaUrl,
-            timestamp: new Date(msg.timestamp * 1000)
+            timestamp: timestamp || new Date()
         });
 
         server.emitMessage(savedMsg);
@@ -2252,7 +2252,7 @@ async function processIncomingMessage({ from, msgId, text: rawText, type, mediaI
     console.log('ℹ️  Sin Puppeteer. Sin QR. Sin desconexiones.');
 
     // Arrancar servidor Express + Socket.IO + Webhook /webhook
-    server.start(null);
+    server.start(metaClient);
 
     // Registrar handler de mensajes entrantes en el webhook
     server.setMessageHandler(processIncomingMessage);
