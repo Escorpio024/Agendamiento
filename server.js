@@ -163,6 +163,10 @@ app.post('/webhook', express.json(), async (req, res) => {
 
 // --- API ROUTES ---
 
+// ── API Móvil Flutter ─────────────────────────────────────────────────────────
+const mobileRouter = require('./routes/mobile');
+app.use('/api/mobile', mobileRouter);
+
 // Get Conversations (filter by status)
 app.get('/api/conversations', async (req, res) => {
     try {
