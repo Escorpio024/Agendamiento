@@ -1,4 +1,4 @@
-﻿/**
+/**
  * routes/mobile.js
  * ─────────────────────────────────────────────────────────────────────────────
  * API REST para la app móvil Flutter de Aurora.
@@ -18,6 +18,7 @@
 const express = require('express');
 const router  = express.Router();
 const medicalPrisma = require('../db');
+const availability_service = require('../availability_service');
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -96,23 +97,43 @@ async function authMiddleware(req, res, next) {
     }
 
     try {
-        const paciente = await medicalPrisma.paciente.findFirst({
-            where: { KC0_COD: token },
-            select: {
-                KC0_COD: true, KC0_TIPO_DOCTO: true, KC0_NOM: true,
-                KC0_PNOMBRE: true, KC0_SNOMBRE: true,
-                KC0_PAPELLIDO: true, KC0_SAPELLIDO: true,
-                KC0_SEXO: true, KC0_FCH_NACE: true,
-                KC0_RES_TEL: true, KC0_RES_DIR: true, KC0_ESTADO: true,
-            }
-        });
+        const cedulaPadded = token.padStart(14, '0');
+        const rows = await medicalPrisma.$queryRawUnsafe(`
+            SELECT TOP 1
+                KC2_COD         AS cod,
+                KC2_OACOD_NUI   AS nui,
+                KC2_PNOMBRE     AS primer_nombre,
+                KC2_SNOMBRE     AS segundo_nombre,
+                KC2_PAPELLIDO   AS primer_apellido,
+                KC2_SAPELLIDO   AS segundo_apellido,
+                KC2_TEL_RESP    AS telefono,
+                KC2_TIPO_DOCTO  AS tipo_doc,
+                KC2_SEXO        AS sexo,
+                KC2_EDAD        AS edad
+            FROM TMUSUARIOSFACTURACION
+            WHERE KC2_OACOD_NUI = '${token}'
+               OR KC2_COD = '${cedulaPadded}'
+        `);
 
-        if (!paciente) {
+        if (!rows || rows.length === 0) {
             return res.status(401).json({ error: 'Cédula no encontrada. Verifica el número e intenta de nuevo.' });
         }
 
-        req.cedula   = token;
-        req.paciente = paciente;
+        const p = rows[0];
+        req.cedula   = token; // <- token is cedulaClean here
+        req.paciente = {
+            cedula: p.nui || p.cod?.replace(/^0+/, ''),
+            tipo_doc: p.tipo_doc?.trim() || null,
+            nombre_completo: [p.primer_nombre, p.segundo_nombre, p.primer_apellido, p.segundo_apellido].filter(Boolean).join(' '),
+            primer_nombre: p.primer_nombre?.trim() || null,
+            segundo_nombre: p.segundo_nombre?.trim() || null,
+            primer_apellido: p.primer_apellido?.trim() || null,
+            segundo_apellido: p.segundo_apellido?.trim() || null,
+            sexo: p.sexo?.trim() || null,
+            edad: p.edad ? Number(p.edad) : null,
+            telefono: p.telefono?.trim() || null,
+            estado: 'Activo'
+        };
         next();
     } catch (err) {
         console.error('[AUTH MOBILE] Error:', err.message);
@@ -128,9 +149,9 @@ router.post('/auth/login', async (req, res) => {
         return res.status(503).json({ error: 'Base de datos no disponible.' });
     }
 
-    const { cedula } = req.body;
+    const { cedula } = req.body || {};
     if (!cedula || typeof cedula !== 'string') {
-        return res.status(400).json({ error: 'El campo "cedula" es requerido.' });
+        return res.status(400).json({ error: 'El campo "cedula" es requerido. Envía JSON con Content-Type: application/json' });
     }
 
     const cedulaClean = cedula.trim();
@@ -139,27 +160,49 @@ router.post('/auth/login', async (req, res) => {
     }
 
     try {
-        const paciente = await medicalPrisma.paciente.findFirst({
-            where: { KC0_COD: cedulaClean },
-            select: {
-                KC0_COD: true, KC0_TIPO_DOCTO: true, KC0_NOM: true,
-                KC0_PNOMBRE: true, KC0_SNOMBRE: true,
-                KC0_PAPELLIDO: true, KC0_SAPELLIDO: true,
-                KC0_SEXO: true, KC0_FCH_NACE: true,
-                KC0_RES_TEL: true, KC0_RES_DIR: true, KC0_ESTADO: true,
-            }
-        });
+        const cedulaPadded = cedulaClean.padStart(14, '0');
+        const rows = await medicalPrisma.$queryRawUnsafe(`
+            SELECT TOP 1
+                KC2_COD         AS cod,
+                KC2_OACOD_NUI   AS nui,
+                KC2_PNOMBRE     AS primer_nombre,
+                KC2_SNOMBRE     AS segundo_nombre,
+                KC2_PAPELLIDO   AS primer_apellido,
+                KC2_SAPELLIDO   AS segundo_apellido,
+                KC2_TEL_RESP    AS telefono,
+                KC2_TIPO_DOCTO  AS tipo_doc,
+                KC2_SEXO        AS sexo,
+                KC2_EDAD        AS edad
+            FROM TMUSUARIOSFACTURACION
+            WHERE KC2_OACOD_NUI = '${cedulaClean}'
+               OR KC2_COD = '${cedulaPadded}'
+        `);
 
-        if (!paciente) {
+        if (!rows || rows.length === 0) {
             return res.status(404).json({
-                error: 'No se encontró ningún paciente con esa cédula.'
+                error: 'No se encontró ningún paciente con esa cédula. Verifica el número.'
             });
         }
+
+        const p = rows[0];
+        const pacienteLocal = {
+            cedula: p.nui || p.cod?.replace(/^0+/, ''),
+            tipo_doc: p.tipo_doc?.trim() || null,
+            nombre_completo: [p.primer_nombre, p.segundo_nombre, p.primer_apellido, p.segundo_apellido].filter(Boolean).join(' '),
+            primer_nombre: p.primer_nombre?.trim() || null,
+            segundo_nombre: p.segundo_nombre?.trim() || null,
+            primer_apellido: p.primer_apellido?.trim() || null,
+            segundo_apellido: p.segundo_apellido?.trim() || null,
+            sexo: p.sexo?.trim() || null,
+            edad: p.edad ? Number(p.edad) : null,
+            telefono: p.telefono?.trim() || null,
+            estado: 'Activo'
+        };
 
         return res.status(200).json({
             success:  true,
             token:    cedulaClean,
-            paciente: formatPaciente(paciente)
+            paciente: pacienteLocal
         });
 
     } catch (err) {
@@ -173,81 +216,266 @@ router.get('/paciente/perfil', authMiddleware, (req, res) => {
     return res.status(200).json({ data: formatPaciente(req.paciente) });
 });
 
-// GET /api/mobile/citas/proximas — próximas citas del paciente autenticado
-router.get('/citas/proximas', authMiddleware, async (req, res) => {
-    if (!medicalPrisma) return res.status(503).json({ error: 'Base de datos no disponible.' });
-
-    const limit = Math.min(Number(req.query.limit) || 10, 50);
-    const hoy   = todayDecimal();
-
+// PUT /api/mobile/usuarios/:id — actualizar perfil del paciente (teléfono y correo)
+router.put(['/usuarios/:id', '/paciente/telefono'], authMiddleware, async (req, res) => {
     try {
-        const citas = await medicalPrisma.cita.findMany({
-            where: {
-                KC3_COD:    req.cedula,
-                KC3_FCH:    { gte: hoy },
-                KC3_ESTADO: { not: 'AN' },
-            },
-            orderBy: [{ KC3_FCH: 'asc' }, { KC3_HH: 'asc' }, { KC3_MM: 'asc' }],
-            take: limit,
-        });
-
-        const medicoCodes = [...new Set(citas.map(c => c.KC3_MEDICO).filter(Boolean))];
-        let medicoMap = {};
-        if (medicoCodes.length > 0) {
-            const medicos = await medicalPrisma.medico.findMany({
-                where: { MED_COD: { in: medicoCodes } },
-                select: { MED_COD: true, MED_NOMBRE: true }
-            });
-            medicoMap = Object.fromEntries(medicos.map(m => [String(m.MED_COD), m.MED_NOMBRE?.trim()]));
+        const nuevoTelefono = req.body.telefono;
+        const nuevoEmail = req.body.email; // Recibimos el email para compatibilidad con Flutter
+        
+        let result = true;
+        if (nuevoTelefono) {
+            result = await availability_service.updateCelular(req.cedula, nuevoTelefono);
         }
-
-        const data = citas.map(c => formatCita(c, medicoMap[String(c.KC3_MEDICO)]));
-        return res.status(200).json({ data, total: data.length });
-
+        
+        // Nota: La base de datos SQL Server (TKCLIENTESANEXO5/TMUSUARIOSFACTURACION) 
+        // no tiene columna oficial de correo electrónico, por lo que el email se recibe 
+        // pero no se persiste en la BD legacy por ahora.
+        
+        if (result.ok || result === true) {
+            return res.status(200).json({ 
+                success: true, 
+                message: 'Perfil actualizado correctamente',
+                email_ignored: !!nuevoEmail 
+            });
+        } else {
+            return res.status(400).json({ error: 'Formato inválido o error en BD', detalle: result.reason });
+        }
     } catch (err) {
-        console.error('[CITAS PROXIMAS] Error:', err.message);
-        return res.status(500).json({ error: 'Error al obtener las próximas citas.' });
+        return res.status(500).json({ error: 'Error interno al actualizar perfil' });
     }
 });
 
-// GET /api/mobile/citas/historial — historial de citas pasadas del paciente autenticado
-router.get('/citas/historial', authMiddleware, async (req, res) => {
-    if (!medicalPrisma) return res.status(503).json({ error: 'Base de datos no disponible.' });
-
-    const limit = Math.min(Number(req.query.limit) || 20, 100);
-    const page  = Math.max(Number(req.query.page)  || 1,  1);
-    const skip  = (page - 1) * limit;
-    const hoy   = todayDecimal();
-
-    try {
-        const [citas, total] = await Promise.all([
-            medicalPrisma.cita.findMany({
-                where: { KC3_COD: req.cedula, KC3_FCH: { lt: hoy } },
-                orderBy: [{ KC3_FCH: 'desc' }, { KC3_HH: 'desc' }],
-                take: limit,
-                skip: skip,
-            }),
-            medicalPrisma.cita.count({
-                where: { KC3_COD: req.cedula, KC3_FCH: { lt: hoy } }
-            })
-        ]);
-
-        const medicoCodes = [...new Set(citas.map(c => c.KC3_MEDICO).filter(Boolean))];
-        let medicoMap = {};
-        if (medicoCodes.length > 0) {
-            const medicos = await medicalPrisma.medico.findMany({
-                where: { MED_COD: { in: medicoCodes } },
-                select: { MED_COD: true, MED_NOMBRE: true }
-            });
-            medicoMap = Object.fromEntries(medicos.map(m => [String(m.MED_COD), m.MED_NOMBRE?.trim()]));
+// GET /api/mobile/sedes
+router.get('/sedes', authMiddleware, (req, res) => {
+    return res.status(200).json([
+        {
+            "id": 1,
+            "nombre": "Sede Principal Ebéjico",
+            "direccion": "Ebéjico",
+            "ciudad": "Ebéjico",
+            "telefono": "3016404175",
+            "activa": true
         }
+    ]);
+});
 
-        const data = citas.map(c => formatCita(c, medicoMap[String(c.KC3_MEDICO)]));
-        return res.status(200).json({ data, total, page, limit });
+// GET /api/mobile/procedimientos
+router.get('/procedimientos', authMiddleware, (req, res) => {
+    return res.status(200).json([
+        {
+            "id": 999,
+            "cups": "890201",
+            "nombre": "Consulta de Medicina General",
+            "modalidad": "Presencial",
+            "contraste": "N/A",
+            "activo": true
+        },
+        {
+            "id": 461,
+            "cups": "890203",
+            "nombre": "Consulta de Odontología",
+            "modalidad": "Presencial",
+            "contraste": "N/A",
+            "activo": true
+        },
+        {
+            "id": 510,
+            "cups": "890205",
+            "nombre": "Consulta de Pediatría",
+            "modalidad": "Presencial",
+            "contraste": "N/A",
+            "activo": true
+        }
+    ]);
+});
 
+// GET /api/mobile/doctores
+router.get('/doctores', authMiddleware, async (req, res) => {
+    try {
+        const docs = await medicalPrisma.$queryRawUnsafe(`
+            SELECT MED_COD as id, MED_NOMBRE as nombre, MED_ESPECIALIDAD_1 as especialidad
+            FROM TMMEDICOS 
+            WHERE MED_EST_ESTADO = 'A'
+        `);
+        const result = docs.map(d => ({
+            id: Number(d.id),
+            nombre: d.nombre?.trim(),
+            especialidad: d.especialidad?.trim() || "General",
+            activo: true
+        }));
+        return res.status(200).json(result);
     } catch (err) {
-        console.error('[HISTORIAL CITAS] Error:', err.message);
-        return res.status(500).json({ error: 'Error al obtener el historial de citas.' });
+        return res.status(500).json({ error: 'Error obteniendo doctores' });
+    }
+});
+
+// GET /api/mobile/horarios
+router.get('/horarios', authMiddleware, async (req, res) => {
+    try {
+        let especialidadCod = req.query.procedimiento_id || 999;
+        
+        // Mapeo seguro por si Flutter insiste en mandar 101 u otros IDs quemados
+        if (String(especialidadCod) === '101') especialidadCod = 999;
+        if (String(especialidadCod) === '109') especialidadCod = 461;
+        if (String(especialidadCod) === '112') especialidadCod = 510;
+        
+        let targetDate = req.query.fecha; 
+        let slots = [];
+        
+        if (targetDate) {
+            slots = await availability_service.getAvailableSlots(targetDate, especialidadCod);
+        } else {
+            // Si no envían fecha, buscamos iterativamente desde HOY hasta 7 días adelante
+            const hoy = new Date();
+            for (let i = 0; i <= 7; i++) {
+                let d = new Date(hoy);
+                d.setDate(d.getDate() + i);
+                let dateStr = d.toISOString().split('T')[0];
+                
+                let s = await availability_service.getAvailableSlots(dateStr, especialidadCod);
+                if (s && s.length > 0) {
+                    slots = s;
+                    targetDate = dateStr; // Fijamos la fecha donde encontramos
+                    break; // Cortamos en el primer día que tenga disponibilidad
+                }
+            }
+            if (!targetDate) targetDate = hoy.toISOString().split('T')[0]; // fallback
+        }
+        
+        const result = slots.map(s => {
+            const timeStr = `${String(s.hh).padStart(2, '0')}:${String(s.mm).padStart(2, '0')}`;
+            const horaFinStr = `${String(s.hh).padStart(2, '0')}:${String(Number(s.mm)+20).padStart(2, '0')}`; 
+            
+            // s.dateDecimal no existe en el objeto devuelto por getAvailableSlots, usamos targetDate
+            const dateDec = (s.fechaISO || targetDate).replace(/-/g, '');
+            const idVirtual = `${s.doctorId}_${dateDec}_${s.hh}_${s.mm}`;
+            
+            return {
+                id: idVirtual, 
+                sede_id: "1",
+                doctor_id: String(s.doctorId),
+                fecha: s.fechaISO || targetDate,
+                hora_inicio: timeStr,
+                hora_fin: horaFinStr,
+                disponible: s.disponible
+            };
+        });
+        
+        return res.status(200).json(result);
+    } catch (err) {
+        console.error('[HORARIOS ERROR]', err);
+        return res.status(500).json({ error: 'Error obteniendo horarios' });
+    }
+});
+
+// GET /api/mobile/citas — historial de citas
+router.get('/citas', authMiddleware, async (req, res) => {
+    try {
+        const cedula = req.cedula;
+        const citasRaw = await availability_service.getUserAppointments(cedula);
+        
+        const result = citasRaw.map(c => {
+            // Extraer la hora exacta del ID (ej. "333|20260811|14|40")
+            const parts = String(c.id).split('|');
+            let hh = "00", mm = "00";
+            if (parts.length === 4) {
+                hh = parts[2].padStart(2, '0');
+                mm = parts[3].padStart(2, '0');
+            }
+            
+            let isoDate;
+            try {
+                isoDate = new Date(`${c.fecha}T${hh}:${mm}:00-05:00`).toISOString();
+            } catch (e) {
+                isoDate = new Date().toISOString();
+            }
+
+            return {
+                id: String(c.id), // ID real para poder cancelar la cita (ej. "333|20260811|14|40")
+                usuario_id: cedula,
+                procedimiento_id: String(c.especialidadCod || "101"),
+                horario_id: "N/A",
+                sede_id: "1",
+                estado: (c.estado === 'Cancelada' || c.estado === '02') ? "Cancelada" : "Programada",
+                observaciones: c.consultorio ? `Consultorio: ${c.consultorio}` : "",
+                created_at: isoDate
+            };
+        });
+        return res.status(200).json(result);
+    } catch (err) {
+        return res.status(500).json({ error: 'Error obteniendo citas' });
+    }
+});
+
+// PATCH /api/mobile/citas/:id — cancelar cita
+router.patch('/citas/:id', authMiddleware, async (req, res) => {
+    try {
+        const citaId = req.params.id;
+        const body = req.body;
+        
+        if (body.estado !== 'Cancelada') {
+            return res.status(400).json({ error: 'Solo se permite actualizar el estado a "Cancelada"' });
+        }
+        
+        // El id es el string original que enviamos en el GET /citas (ej. "333|20260811|14|40")
+        const cancelado = await availability_service.cancelAppointment(citaId, req.cedula);
+        
+        if (cancelado) {
+            return res.status(200).json({ success: true, message: 'Cita cancelada correctamente' });
+        } else {
+            return res.status(400).json({ error: 'No se pudo cancelar la cita. Verifica el ID o si ya estaba cancelada.' });
+        }
+    } catch (err) {
+        return res.status(500).json({ error: 'Error interno al cancelar la cita' });
+    }
+});
+
+// POST /api/mobile/citas — agendamiento
+router.post('/citas', authMiddleware, async (req, res) => {
+    try {
+        const body = req.body;
+        const idParts = String(body.horario_id).split('_');
+        if (idParts.length !== 4) {
+            return res.status(400).json({ error: 'ID de horario inválido' });
+        }
+        
+        const docId = Number(idParts[0]);
+        const dateDecStr = idParts[1]; // ej: "20260811"
+        const fechaStr = `${dateDecStr.slice(0,4)}-${dateDecStr.slice(4,6)}-${dateDecStr.slice(6,8)}`;
+        const horaStr = `${idParts[2]}:${idParts[3].padStart(2, '0')}`;
+        
+        // Mapeamos el req.paciente extraído de TMUSUARIOSFACTURACION
+        const pacienteObj = {
+            KC0_COD: req.cedula,
+            KC0_NOM: req.paciente.nombre_completo,
+            KC0_RES_TEL: req.paciente.telefono,
+            KC0_PNOMBRE: req.paciente.primer_nombre,
+            KC0_PAPELLIDO: req.paciente.primer_apellido
+        };
+        
+        let especialidadCod = body.procedimiento_id || 999;
+        if (String(especialidadCod) === '101') especialidadCod = 999;
+        if (String(especialidadCod) === '109') especialidadCod = 461;
+        if (String(especialidadCod) === '112') especialidadCod = 510;
+        
+        const reservado = await availability_service.reserveSlot(
+            fechaStr,
+            horaStr,
+            req.cedula,
+            String(especialidadCod),
+            docId,
+            pacienteObj,
+            'Ebejico',
+            false
+        );
+        
+        if (reservado) {
+            return res.status(201).json({ success: true, message: 'Cita reservada correctamente' });
+        } else {
+            return res.status(400).json({ error: 'No se pudo reservar la cita (posiblemente ya ocupada o cruzada)' });
+        }
+    } catch (err) {
+        return res.status(500).json({ error: 'Error al reservar cita' });
     }
 });
 

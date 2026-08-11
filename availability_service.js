@@ -151,7 +151,7 @@ function createLocalDate(dateStr, h, m) {
 
 function parseRelativeDate(dateStr) {
     const today = new Date();
-    const clean = (dateStr || '').toLowerCase().trim();
+    const clean = String(dateStr || '').toLowerCase().trim();
     if (clean === 'hoy') return toLocalDateStr(today);
     if (clean === 'mañana' || clean === 'manana') {
         const d = new Date(today); d.setDate(today.getDate() + 1); return toLocalDateStr(d);
