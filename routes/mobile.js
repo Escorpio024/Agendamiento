@@ -368,41 +368,80 @@ router.get('/horarios', authMiddleware, async (req, res) => {
     }
 });
 
-// GET /api/mobile/citas — historial de citas
+// GET /api/mobile/citas — historial completo de citas (sin filtro de fecha)
 router.get('/citas', authMiddleware, async (req, res) => {
     try {
         const cedula = req.cedula;
-        const citasRaw = await availability_service.getUserAppointments(cedula);
         
-        const result = citasRaw.map(c => {
-            // Extraer la hora exacta del ID (ej. "333|20260811|14|40")
-            const parts = String(c.id).split('|');
-            let hh = "00", mm = "00";
-            if (parts.length === 4) {
-                hh = parts[2].padStart(2, '0');
-                mm = parts[3].padStart(2, '0');
-            }
+        // Buscar el código interno de 14 dígitos del paciente
+        const cleanId = cedula.replace(/\D/g, '');
+        const pacCod14 = cleanId.padStart(14, '0');
+        
+        // Query directa sin filtro de fecha — devuelve TODO el historial
+        // incluyendo citas pasadas y canceladas
+        const rows = await medicalPrisma.$queryRaw`
+            SELECT
+                t.TME2_CODM         AS medicoId,
+                t.TME2_FCH          AS fecha,
+                t.TME2_HH           AS hh,
+                t.TME2_MM           AS mm,
+                t.TME2_CONSULTORIO  AS consultorio,
+                LTRIM(RTRIM(m.MED_NOMBRE)) AS medicoNombre,
+                c.KC3_ESTADO        AS estado,
+                c.KC3_ESPECIALISTA  AS especialidadCod,
+                m.MED_ESPECIALIDAD_1 AS medicoEspecialidad
+            FROM TMTURNOSMEDICOSDETALLE t
+            INNER JOIN TMMEDICOS m ON m.MED_COD = t.TME2_CODM
+            LEFT JOIN TMCITASUSUARIOS c
+                ON  c.KC3_MEDICO = t.TME2_CODM
+                AND c.KC3_FCH    = t.TME2_FCH
+                AND c.KC3_HH     = t.TME2_HH
+                AND c.KC3_MM     = t.TME2_MM
+            WHERE LTRIM(RTRIM(t.TME2_COD)) = LTRIM(RTRIM(${pacCod14}))
+            ORDER BY t.TME2_FCH DESC, t.TME2_HH DESC, t.TME2_MM DESC
+        `;
+        
+        const result = rows.map(r => {
+            const medicoId = Number(r.medicoId);
+            const fechaDec = Number(r.fecha);
+            const hh       = Number(r.hh);
+            const mm       = Number(r.mm);
             
+            // Convertir fecha decimal (ej. 20260811) a YYYY-MM-DD
+            const fechaStr = decimalToDateStr(fechaDec);
+            
+            // Construir ISO date para created_at
             let isoDate;
             try {
-                isoDate = new Date(`${c.fecha}T${hh}:${mm}:00-05:00`).toISOString();
+                isoDate = new Date(`${fechaStr}T${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}:00-05:00`).toISOString();
             } catch (e) {
                 isoDate = new Date().toISOString();
             }
-
+            
+            // Estado: 'CA' = Cancelada en Xenco
+            const estadoXenco = r.estado ? String(r.estado).trim().toUpperCase() : null;
+            const estadoLabel = (estadoXenco === 'CA' || estadoXenco === '02') ? 'Cancelada' : 'Programada';
+            
+            const espCod = String(r.medicoEspecialidad || r.especialidadCod || '999').trim();
+            
             return {
-                id: String(c.id), // ID real para poder cancelar la cita (ej. "333|20260811|14|40")
+                id: `${medicoId}|${fechaDec}|${hh}|${mm}`,
                 usuario_id: cedula,
-                procedimiento_id: String(c.especialidadCod || "101"),
-                horario_id: "N/A",
-                sede_id: "1",
-                estado: (c.estado === 'Cancelada' || c.estado === '02') ? "Cancelada" : "Programada",
-                observaciones: c.consultorio ? `Consultorio: ${c.consultorio}` : "",
+                procedimiento_id: espCod,
+                horario_id: 'N/A',
+                sede_id: '1',
+                estado: estadoLabel,
+                observaciones: r.consultorio ? `Consultorio: ${r.consultorio}` : '',
+                medico: r.medicoNombre || `Médico ${medicoId}`,
+                fecha: fechaStr,
+                hora: `${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}`,
                 created_at: isoDate
             };
         });
+        
         return res.status(200).json(result);
     } catch (err) {
+        console.error('[CITAS MOBILE ERROR]', err);
         return res.status(500).json({ error: 'Error obteniendo citas' });
     }
 });
