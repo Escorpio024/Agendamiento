@@ -379,6 +379,7 @@ router.get('/citas', authMiddleware, async (req, res) => {
         
         // Query directa sin filtro de fecha — devuelve TODO el historial
         // incluyendo citas pasadas y canceladas
+        // Usamos subquery para KC3_ESTADO para evitar duplicados del JOIN
         const rows = await medicalPrisma.$queryRaw`
             SELECT
                 t.TME2_CODM         AS medicoId,
@@ -387,16 +388,23 @@ router.get('/citas', authMiddleware, async (req, res) => {
                 t.TME2_MM           AS mm,
                 t.TME2_CONSULTORIO  AS consultorio,
                 LTRIM(RTRIM(m.MED_NOMBRE)) AS medicoNombre,
-                c.KC3_ESTADO        AS estado,
-                c.KC3_ESPECIALISTA  AS especialidadCod,
+                (SELECT TOP 1 c.KC3_ESTADO
+                 FROM TMCITASUSUARIOS c
+                 WHERE c.KC3_MEDICO = t.TME2_CODM
+                   AND c.KC3_FCH    = t.TME2_FCH
+                   AND c.KC3_HH     = t.TME2_HH
+                   AND c.KC3_MM     = t.TME2_MM
+                 ORDER BY c.KC3_FCH DESC) AS estado,
+                (SELECT TOP 1 c.KC3_ESPECIALISTA
+                 FROM TMCITASUSUARIOS c
+                 WHERE c.KC3_MEDICO = t.TME2_CODM
+                   AND c.KC3_FCH    = t.TME2_FCH
+                   AND c.KC3_HH     = t.TME2_HH
+                   AND c.KC3_MM     = t.TME2_MM
+                 ORDER BY c.KC3_FCH DESC) AS especialidadCod,
                 m.MED_ESPECIALIDAD_1 AS medicoEspecialidad
             FROM TMTURNOSMEDICOSDETALLE t
             INNER JOIN TMMEDICOS m ON m.MED_COD = t.TME2_CODM
-            LEFT JOIN TMCITASUSUARIOS c
-                ON  c.KC3_MEDICO = t.TME2_CODM
-                AND c.KC3_FCH    = t.TME2_FCH
-                AND c.KC3_HH     = t.TME2_HH
-                AND c.KC3_MM     = t.TME2_MM
             WHERE LTRIM(RTRIM(t.TME2_COD)) = LTRIM(RTRIM(${pacCod14}))
             ORDER BY t.TME2_FCH DESC, t.TME2_HH DESC, t.TME2_MM DESC
         `;
