@@ -373,6 +373,11 @@ class ControlCVDService {
                     const mm   = record.fechaControl.substring(4, 6);
                     const dd   = record.fechaControl.substring(6, 8);
                     const fechaFormat = `${yyyy}-${mm}-${dd}`;
+                    
+                    // Determinar la sede original basada en el médico de la cita de CVD anterior
+                    // Médicos Sevilla: 444, 777 (Medicina), 999, 1000 (Odonto), 888 (PYP CVD)
+                    const sevillaDoctors = ['444', '777', '999', '1000', '888'];
+                    const sedeObjetivo = sevillaDoctors.includes(String(record.medicoOriginal)) ? 'Sevilla' : 'Ebejico';
 
                     // ── BÚSQUEDA BI-DIRECCIONAL DE CUPOS CVD ──────────────────────────────────────
                     // 1. Busca desde la fecha objetivo → hacia adelante (máx 7 días)
@@ -385,7 +390,7 @@ class ControlCVDService {
 
                     // Búsqueda hacia ADELANTE (incluye la fecha exacta)
                     const forwardResult = await availabilityService.getNextAvailableSlots(
-                        fechaFormat, 'medicina general', 'p y p medicos', 'Ebejico', true
+                        fechaFormat, 'medicina general', 'p y p medicos', sedeObjetivo, true
                     );
 
                     // Búsqueda hacia ATRÁS: probar día a día desde fecha-1 hasta fecha-7
@@ -402,7 +407,7 @@ class ControlCVDService {
                         if (candidate < hoy) break; // No buscar fechas ya pasadas
                         try {
                             const r = await availabilityService.getNextAvailableSlots(
-                                candidateStr, 'medicina general', 'p y p medicos', 'Ebejico', true
+                                candidateStr, 'medicina general', 'p y p medicos', sedeObjetivo, true
                             );
                             // Verificar que la fecha encontrada sea exactamente el candidato (no más adelante)
                             if (r && r.date === candidateStr && r.slots && r.slots.length > 0) {
@@ -503,7 +508,7 @@ class ControlCVDService {
                         tipoEspecialidad,
                         slot.doctorId,
                         pacData,
-                        'Ebejico',
+                        sedeObjetivo,
                         true // isCVD flag
                     );
 
