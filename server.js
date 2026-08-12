@@ -22,7 +22,7 @@ const CORS_ORIGINS = RAW_ORIGINS.trim() === '*'
 
 const corsOptions = {
     origin: CORS_ORIGINS,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
 };
 
 const app = express();
@@ -33,6 +33,10 @@ const io = new Server(server, { cors: corsOptions });
 app.use(cors(corsOptions));
 app.use(express.json({ limit: '2mb' }));   // Limitar JSON body
 app.use('/media', express.static(path.join(__dirname, 'public/media')));
+
+// ─── RUTAS API MOBILE (Flutter) ───────────────────────────────────────────────
+const mobileRoutes = require('./routes/mobile');
+app.use('/api/mobile', mobileRoutes);
 
 // Upload configuration
 const storage = multer.diskStorage({
