@@ -18,6 +18,7 @@
 const express = require('express');
 const router  = express.Router();
 const medicalPrisma = require('../db');
+const botPrisma = require('../dbBot');
 const availability_service = require('../availability_service');
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -479,6 +480,18 @@ router.patch('/citas/:id', authMiddleware, async (req, res) => {
                     }
                 });
             }
+            
+            try {
+                await botPrisma.mobileAppLog.create({
+                    data: {
+                        cedula: req.cedula,
+                        action: 'CANCELLED',
+                        month: new Date().toISOString().substring(0, 7)
+                    }
+                });
+            } catch (logErr) {
+                console.error('[MOBILE LOG ERROR]', logErr.message);
+            }
             return res.status(200).json({ success: true, message: 'Cita cancelada correctamente' });
         } else {
             return res.status(400).json({ error: 'No se pudo cancelar la cita. Verifica el ID o si ya estaba cancelada.' });
@@ -541,12 +554,48 @@ router.post('/citas', authMiddleware, async (req, res) => {
                     }
                 });
             }
+            
+            try {
+                await botPrisma.mobileAppLog.create({
+                    data: {
+                        cedula: req.cedula,
+                        action: 'CREATED',
+                        month: new Date().toISOString().substring(0, 7)
+                    }
+                });
+            } catch (logErr) {
+                console.error('[MOBILE LOG ERROR]', logErr.message);
+            }
             return res.status(201).json({ success: true, message: 'Cita reservada correctamente' });
         } else {
             return res.status(400).json({ error: 'No se pudo reservar la cita (posiblemente ya ocupada o cruzada)' });
         }
     } catch (err) {
         return res.status(500).json({ error: 'Error al reservar cita' });
+    }
+});
+
+// GET /api/mobile/stats — obtener estadísticas mensuales de la app móvil
+router.get('/stats', async (req, res) => {
+    try {
+        const month = req.query.month || new Date().toISOString().substring(0, 7);
+        
+        const logs = await botPrisma.mobileAppLog.findMany({
+            where: { month: month }
+        });
+        
+        const creadas = logs.filter(l => l.action === 'CREATED').length;
+        const canceladas = logs.filter(l => l.action === 'CANCELLED').length;
+        
+        return res.status(200).json({
+            month,
+            creadas,
+            canceladas,
+            total: logs.length
+        });
+    } catch (err) {
+        console.error('[MOBILE STATS ERROR]', err);
+        return res.status(500).json({ error: 'Error al obtener estadísticas' });
     }
 });
 

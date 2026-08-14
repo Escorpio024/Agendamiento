@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef } from 'react';
 import { io } from 'socket.io-client';
-import { Activity, ArrowLeft, RefreshCw, Smartphone, Calendar, AlertCircle, CheckCircle, Trash2 } from 'lucide-react';
+import { Activity, ArrowLeft, RefreshCw, Smartphone, Calendar, AlertCircle, CheckCircle, Trash2, BarChart2, X } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 
 export default function MobileMonitorPage() {
@@ -10,6 +10,32 @@ export default function MobileMonitorPage() {
     const [events, setEvents] = useState([]);
     const [isConnected, setIsConnected] = useState(false);
     const eventsEndRef = useRef(null);
+    
+    // Estados para el reporte mensual
+    const [showStats, setShowStats] = useState(false);
+    const [statsData, setStatsData] = useState(null);
+    const [statsMonth, setStatsMonth] = useState(new Date().toISOString().substring(0, 7));
+    const [loadingStats, setLoadingStats] = useState(false);
+
+    const fetchStats = async (month) => {
+        setLoadingStats(true);
+        try {
+            const API_URL = process.env.NEXT_PUBLIC_API_URL || (typeof window !== 'undefined' ? `http://${window.location.hostname}:3001` : 'http://localhost:3001');
+            const res = await fetch(`${API_URL}/api/mobile/stats?month=${month}`);
+            const data = await res.json();
+            setStatsData(data);
+        } catch (error) {
+            console.error('Error fetching stats:', error);
+        } finally {
+            setLoadingStats(false);
+        }
+    };
+
+    useEffect(() => {
+        if (showStats) {
+            fetchStats(statsMonth);
+        }
+    }, [showStats, statsMonth]);
 
     useEffect(() => {
         // Asumiendo que el backend corre en el mismo host o en el puerto por defecto (e.g. localhost:3000 o 3001)
@@ -101,9 +127,20 @@ export default function MobileMonitorPage() {
                         </div>
                     </div>
                     
-                    <div className="flex items-center gap-3 bg-white/5 px-4 py-2 rounded-xl border border-white/10">
-                        <div className={`w-3 h-3 rounded-full ${isConnected ? 'bg-emerald-500 shadow-[0_0_10px_#10b981]' : 'bg-red-500'}`} />
-                        <span className="text-sm font-medium">{isConnected ? 'En vivo' : 'Desconectado'}</span>
+                    <div className="flex items-center gap-4 bg-white/5 px-4 py-2 rounded-xl border border-white/10">
+                        <button
+                            onClick={() => setShowStats(true)}
+                            className="flex items-center gap-2 text-sm font-medium text-gray-300 hover:text-white transition-colors"
+                            title="Ver informes mensuales"
+                        >
+                            <BarChart2 size={16} />
+                            Informes
+                        </button>
+                        <div className="w-px h-4 bg-white/20"></div>
+                        <div className="flex items-center gap-2">
+                            <div className={`w-3 h-3 rounded-full ${isConnected ? 'bg-emerald-500 shadow-[0_0_10px_#10b981]' : 'bg-red-500'}`} />
+                            <span className="text-sm font-medium">{isConnected ? 'En vivo' : 'Desconectado'}</span>
+                        </div>
                     </div>
                 </div>
 
@@ -198,6 +235,61 @@ export default function MobileMonitorPage() {
                     </div>
                 </div>
             </div>
+            
+            {/* Modal de Estadísticas */}
+            {showStats && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+                    <div className="bg-[#1A1726] border border-white/10 rounded-2xl p-6 w-full max-w-lg shadow-2xl relative">
+                        <button 
+                            onClick={() => setShowStats(false)}
+                            className="absolute top-4 right-4 p-2 text-gray-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+                        >
+                            <X size={20} />
+                        </button>
+                        
+                        <h2 className="text-xl font-bold mb-6 flex items-center gap-2">
+                            <BarChart2 className="text-purple-400" />
+                            Informes Mensuales
+                        </h2>
+
+                        <div className="mb-6">
+                            <label className="block text-sm text-gray-400 mb-2">Seleccionar Mes</label>
+                            <input 
+                                type="month" 
+                                value={statsMonth}
+                                onChange={(e) => setStatsMonth(e.target.value)}
+                                className="w-full bg-black/30 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-purple-500 transition-colors"
+                            />
+                        </div>
+
+                        {loadingStats ? (
+                            <div className="py-12 flex flex-col items-center justify-center text-gray-500">
+                                <RefreshCw className="animate-spin mb-4" size={32} />
+                                <p>Cargando datos del mes...</p>
+                            </div>
+                        ) : statsData ? (
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-4 text-center">
+                                    <div className="text-emerald-400 mb-1"><CheckCircle className="mx-auto" size={24} /></div>
+                                    <div className="text-3xl font-bold text-white my-2">{statsData.creadas}</div>
+                                    <div className="text-xs text-gray-400 uppercase tracking-wide">Agendadas</div>
+                                </div>
+                                <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-4 text-center">
+                                    <div className="text-red-400 mb-1"><Trash2 className="mx-auto" size={24} /></div>
+                                    <div className="text-3xl font-bold text-white my-2">{statsData.canceladas}</div>
+                                    <div className="text-xs text-gray-400 uppercase tracking-wide">Canceladas</div>
+                                </div>
+                                <div className="col-span-2 bg-white/5 border border-white/10 rounded-xl p-4 flex justify-between items-center mt-2">
+                                    <span className="text-gray-400 text-sm">Total de actividad en el mes:</span>
+                                    <span className="text-xl font-bold">{statsData.total}</span>
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="py-8 text-center text-gray-500">No hay datos disponibles</div>
+                        )}
+                    </div>
+                </div>
+            )}
             
             <style jsx global>{`
                 .custom-scrollbar::-webkit-scrollbar {

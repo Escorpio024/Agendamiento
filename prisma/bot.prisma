@@ -111,3 +111,11 @@ model CampaignLog {
   sentAt       DateTime @default(now())
   campaign     Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
 }
+
+model MobileAppLog {
+  id        String   @id @default(cuid())
+  cedula    String
+  action    String
+  month     String
+  createdAt DateTime @default(now())
+}
