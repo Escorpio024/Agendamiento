@@ -44,7 +44,40 @@ export default function MobileMonitorPage() {
         }
     }, [showStats, statsMonth]);
 
+    // Función para cargar los últimos 50 eventos desde la DB
+    const fetchRecentLogs = async () => {
+        try {
+            let API_URL = process.env.NEXT_PUBLIC_API_URL;
+            if (!API_URL && typeof window !== 'undefined') {
+                API_URL = window.location.protocol === 'https:' 
+                    ? `https://${window.location.hostname}` 
+                    : `http://${window.location.hostname}:3001`;
+            }
+            if (!API_URL) API_URL = 'http://localhost:3001';
+
+            const res = await fetch(`${API_URL}/api/mobile/recent-logs`);
+            if (res.ok) {
+                const data = await res.json();
+                // Parseamos las fechas y reemplazamos los eventos
+                setEvents(data.map(ev => ({
+                    ...ev,
+                    timestamp: new Date(ev.timestamp)
+                })));
+            }
+        } catch (err) {
+            console.error('Error fetching recent logs:', err);
+        }
+    };
+
     useEffect(() => {
+        // Carga inicial
+        fetchRecentLogs();
+
+        // Polling cada 3 segundos como "espejo" (respaldo si WebSockets falla)
+        const interval = setInterval(() => {
+            fetchRecentLogs();
+        }, 3000);
+
         let API_URL = process.env.NEXT_PUBLIC_API_URL;
         if (!API_URL && typeof window !== 'undefined') {
             API_URL = window.location.protocol === 'https:' 
@@ -66,19 +99,11 @@ export default function MobileMonitorPage() {
 
         socket.on('mobile_appointment_update', (data) => {
             console.log('Nueva actualización móvil recibida:', data);
-            
-            // data debería tener: { action: 'CREATED'|'CANCELLED'|'RESCHEDULED', details: {...} }
-            const newEvent = {
-                id: Date.now() + Math.random().toString(),
-                timestamp: new Date(),
-                ...data
-            };
-            
-            setEvents(prev => [...prev, newEvent].slice(-50)); // Mantener máximo los últimos 50 eventos
+            fetchRecentLogs(); // Refrescamos la lista entera desde la DB
         });
 
-        // Limpieza al desmontar
         return () => {
+            clearInterval(interval);
             socket.disconnect();
         };
     }, []);

@@ -575,6 +575,33 @@ router.post('/citas', authMiddleware, async (req, res) => {
     }
 });
 
+// GET /api/mobile/recent-logs — obtener los últimos 50 eventos registrados
+router.get('/recent-logs', async (req, res) => {
+    try {
+        const logs = await botPrisma.mobileAppLog.findMany({
+            take: 50,
+            orderBy: { createdAt: 'desc' }
+        });
+        
+        // Mapear los logs al formato que espera el frontend en `events`
+        const mappedLogs = logs.map(log => ({
+            id: log.id,
+            action: log.action,
+            timestamp: log.createdAt,
+            details: {
+                cedula: log.cedula,
+                // Paciente y demás datos no se guardan en MobileAppLog, así que solo pasamos la cédula
+                // En un futuro podríamos guardar JSON de details en Prisma si lo requieren.
+            }
+        })).reverse(); // Invertimos para que el más viejo de los 50 quede primero y el más nuevo al final
+        
+        return res.status(200).json(mappedLogs);
+    } catch (err) {
+        console.error('[MOBILE LOGS ERROR]', err);
+        return res.status(500).json({ error: 'Error al obtener historial de eventos' });
+    }
+});
+
 // GET /api/mobile/stats — obtener estadísticas mensuales de la app móvil
 router.get('/stats', async (req, res) => {
     try {
