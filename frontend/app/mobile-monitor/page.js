@@ -20,7 +20,14 @@ export default function MobileMonitorPage() {
     const fetchStats = async (month) => {
         setLoadingStats(true);
         try {
-            const API_URL = process.env.NEXT_PUBLIC_API_URL || (typeof window !== 'undefined' ? `http://${window.location.hostname}:3001` : 'http://localhost:3001');
+            let API_URL = process.env.NEXT_PUBLIC_API_URL;
+            if (!API_URL && typeof window !== 'undefined') {
+                API_URL = window.location.protocol === 'https:' 
+                    ? `https://${window.location.hostname}` 
+                    : `http://${window.location.hostname}:3001`;
+            }
+            if (!API_URL) API_URL = 'http://localhost:3001';
+
             const res = await fetch(`${API_URL}/api/mobile/stats?month=${month}`);
             const data = await res.json();
             setStatsData(data);
@@ -38,9 +45,14 @@ export default function MobileMonitorPage() {
     }, [showStats, statsMonth]);
 
     useEffect(() => {
-        // Asumiendo que el backend corre en el mismo host o en el puerto por defecto (e.g. localhost:3000 o 3001)
-        // Usamos la URL base actual si es necesario, o dejamos que socket.io la deduzca
-        const API_URL = process.env.NEXT_PUBLIC_API_URL || (typeof window !== 'undefined' ? "http://:3001" : 'http://localhost:3001');
+        let API_URL = process.env.NEXT_PUBLIC_API_URL;
+        if (!API_URL && typeof window !== 'undefined') {
+            API_URL = window.location.protocol === 'https:' 
+                ? `https://${window.location.hostname}` 
+                : `http://${window.location.hostname}:3001`;
+        }
+        if (!API_URL) API_URL = 'http://localhost:3001';
+        
         const socket = io(API_URL);
 
         socket.on('connect', () => {
