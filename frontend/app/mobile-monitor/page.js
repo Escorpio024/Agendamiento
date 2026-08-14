@@ -14,7 +14,7 @@ export default function MobileMonitorPage() {
     useEffect(() => {
         // Asumiendo que el backend corre en el mismo host o en el puerto por defecto (e.g. localhost:3000 o 3001)
         // Usamos la URL base actual si es necesario, o dejamos que socket.io la deduzca
-        const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://agenda.aurora-ia.co';
+        const API_URL = process.env.NEXT_PUBLIC_API_URL || (typeof window !== 'undefined' ? "http://:3001" : 'http://localhost:3001');
         const socket = io(API_URL);
 
         socket.on('connect', () => {
