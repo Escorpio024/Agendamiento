@@ -9,7 +9,7 @@ const modules = [
         id: 'agendamiento',
         title: 'Agendamiento',
         subtitle: 'General',
-        description: 'Gestión de citas médicas y auditoría de conversaciones del bot de WhatsApp.',
+        description: 'Gestión de citas médicas y auditoría del bot.',
         icon: MessageCircle,
         iconBg: 'linear-gradient(135deg, #8263B1 0%, #5a4490 100%)',
         accentColor: '#A1E3D8',
@@ -19,14 +19,14 @@ const modules = [
         badgeText: '#C4AFED',
         tag: 'Activo',
         href: '/agendamiento',
-        features: ['Bot WhatsApp', 'Auditoría Chat', 'Citas', 'Recordatorios'],
+        features: ['Auditoría', 'Citas'],
         available: true,
     },
     {
         id: 'cardiovascular',
         title: 'Agendamiento',
         subtitle: 'Cardiovascular',
-        description: 'Módulo especializado para la gestión de citas y seguimiento cardiovascular.',
+        description: 'Seguimiento especializado de pacientes.',
         icon: Heart,
         iconBg: 'linear-gradient(135deg, #B14040 0%, #8B1A1A 100%)',
         accentColor: '#F9A8A8',
@@ -36,14 +36,14 @@ const modules = [
         badgeText: '#EDAFAF',
         tag: 'Pruebas',
         href: '/cardiovascular',
-        features: ['Cardiología', 'Seguimiento', 'Especialistas', 'Reportes'],
+        features: ['Cardiología', 'Reportes'],
         available: true,
     },
     {
         id: 'campaigns',
         title: 'Campañas',
         subtitle: 'Difusión Masiva',
-        description: 'Envía campañas y mensajes masivos a los pacientes registrados por WhatsApp.',
+        description: 'Envía mensajes masivos por WhatsApp.',
         icon: MessageCircle,
         iconBg: 'linear-gradient(135deg, #10b981 0%, #047857 100%)',
         accentColor: '#34d399',
@@ -53,9 +53,26 @@ const modules = [
         badgeText: '#6ee7b7',
         tag: 'Nuevo',
         href: '/campaigns',
-        features: ['Masivos', 'Prevención', 'Jornadas', 'Registro'],
+        features: ['Masivos', 'Prevención'],
         available: true,
     },
+    {
+        id: 'mobile-monitor',
+        title: 'Monitoreo',
+        subtitle: 'Actividad App Móvil',
+        description: 'Actividad de la app móvil en tiempo real.',
+        icon: Activity,
+        iconBg: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
+        accentColor: '#93c5fd',
+        badgeColor: '#3b82f6',
+        badgeBg: 'rgba(59,130,246,0.18)',
+        badgeBorder: 'rgba(59,130,246,0.35)',
+        badgeText: '#bfdbfe',
+        tag: 'Pruebas',
+        href: '/mobile-monitor',
+        features: ['Tiempo Real', 'Historial'],
+        available: true,
+    }
 ];
 
 export default function SelectorPage() {
@@ -117,7 +134,7 @@ export default function SelectorPage() {
             </div>
 
             {/* ── Cards ── */}
-            <div className="relative z-10 flex flex-col sm:flex-row gap-5 px-6 w-full max-w-5xl">
+            <div className="relative z-10 flex flex-col sm:flex-row gap-5 px-6 w-full max-w-[1400px]">
                 {modules.map((mod) => {
                     const Icon = mod.icon;
                     const isHovered = hoveredId === mod.id;
@@ -129,7 +146,7 @@ export default function SelectorPage() {
                             onMouseEnter={() => setHoveredId(mod.id)}
                             onMouseLeave={() => setHoveredId(null)}
                             disabled={!mod.available}
-                            className="flex-1 flex flex-col text-left rounded-2xl p-7 border transition-all duration-300 group relative overflow-hidden"
+                            className="flex-1 flex flex-col text-left rounded-2xl p-6 border transition-all duration-300 group relative overflow-hidden h-full"
                             style={{
                                 background: isHovered && mod.available
                                     ? 'rgba(45,40,62,0.8)'

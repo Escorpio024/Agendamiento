@@ -29,6 +29,9 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { cors: corsOptions });
 
+// Make io accessible to routers
+app.set('io', io);
+
 // Middleware
 app.use(cors(corsOptions));
 app.use(express.json({ limit: '2mb' }));   // Limitar JSON body

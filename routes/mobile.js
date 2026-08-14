@@ -468,6 +468,17 @@ router.patch('/citas/:id', authMiddleware, async (req, res) => {
         const cancelado = await availability_service.cancelAppointment(citaId, req.cedula);
         
         if (cancelado) {
+            const io = req.app.get('io');
+            if (io) {
+                io.emit('mobile_appointment_update', {
+                    action: 'CANCELLED',
+                    details: {
+                        cedula: req.cedula,
+                        paciente: req.paciente?.nombre_completo,
+                        mensaje: `Se canceló la cita con ID: ${citaId}`
+                    }
+                });
+            }
             return res.status(200).json({ success: true, message: 'Cita cancelada correctamente' });
         } else {
             return res.status(400).json({ error: 'No se pudo cancelar la cita. Verifica el ID o si ya estaba cancelada.' });
@@ -517,6 +528,19 @@ router.post('/citas', authMiddleware, async (req, res) => {
         );
         
         if (reservado) {
+            const io = req.app.get('io');
+            if (io) {
+                io.emit('mobile_appointment_update', {
+                    action: 'CREATED',
+                    details: {
+                        cedula: req.cedula,
+                        paciente: req.paciente?.nombre_completo,
+                        fecha: fechaStr + ' ' + horaStr,
+                        medico: `ID: ${docId}`,
+                        sede: 'Ebejico'
+                    }
+                });
+            }
             return res.status(201).json({ success: true, message: 'Cita reservada correctamente' });
         } else {
             return res.status(400).json({ error: 'No se pudo reservar la cita (posiblemente ya ocupada o cruzada)' });
