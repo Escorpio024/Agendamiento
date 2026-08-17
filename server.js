@@ -41,6 +41,42 @@ app.use('/media', express.static(path.join(__dirname, 'public/media')));
 const mobileRoutes = require('./routes/mobile');
 app.use('/api/mobile', mobileRoutes);
 
+// ─── WEBHOOK ONURIX SMS ───────────────────────────────────────────────────────
+// Onurix llama a este endpoint para verificar la URL y notificar entregas de SMS.
+// URL configurada en portal.onurix.com: http://8.35.195.230:3000/webhook/onurix
+app.get('/webhook/onurix', (req, res) => {
+    const token = req.query.token || req.query.verify_token || req.query.key;
+    const expected = process.env.ONURIX_WEBHOOK_TOKEN;
+    if (token && token === expected) {
+        logger.info('[Onurix Webhook] ✅ Verificación de URL exitosa');
+        res.status(200).send(token); // Onurix espera recibir el token de vuelta
+    } else {
+        logger.warn(`[Onurix Webhook] ⚠️  Token inválido: ${token}`);
+        res.status(403).json({ error: 'Token inválido' });
+    }
+});
+
+app.post('/webhook/onurix', (req, res) => {
+    const payload = req.body;
+    logger.info(`[Onurix Webhook] 📨 Notificación recibida: ${JSON.stringify(payload)}`);
+
+    // Registrar estado de entrega del SMS
+    const status  = payload?.status || payload?.state || 'desconocido';
+    const msgId   = payload?.id || payload?.message_id || 'N/A';
+    const phone   = payload?.number || payload?.to || 'N/A';
+
+    if (['delivered', 'sent', 'DELIVRD'].includes(status)) {
+        logger.info(`[Onurix Webhook] ✅ SMS entregado — ID: ${msgId} | Destino: ${phone}`);
+    } else if (['failed', 'undelivered', 'UNDELIV'].includes(status)) {
+        logger.warn(`[Onurix Webhook] ❌ SMS no entregado — ID: ${msgId} | Destino: ${phone} | Estado: ${status}`);
+    } else {
+        logger.info(`[Onurix Webhook] ℹ️  Estado SMS: ${status} — ID: ${msgId} | Destino: ${phone}`);
+    }
+
+    res.status(200).json({ ok: true });
+});
+
+
 // Upload configuration
 const storage = multer.diskStorage({
     destination: function (req, file, cb) {

@@ -15,6 +15,7 @@ const prisma    = require('./db');
 const botPrisma = require('./dbBot');  // SQLite del bot (conversaciones WhatsApp reales)
 const cron      = require('node-cron');
 const logger    = require('./logger');
+const { sendSMS } = require('./sms_service'); // Onurix SMS
 
 class ReminderService {
     constructor() {
@@ -262,6 +263,21 @@ class ReminderService {
                 }).catch(() => null);
 
                 const ok = await this.sendReminderMessage(cita, nombre, waId, medico);
+
+                // ── Envío por SMS (Onurix) — canal paralelo o de respaldo ──
+                // Se dispara independientemente del resultado de WA, pero solo
+                // si SMS_REMINDERS_ENABLED=true en .env (actualmente desactivado).
+                const rawPhone = await this.getPhoneForPatient(cod);
+                if (rawPhone) {
+                    const smsText = this.buildSMSText(cita, nombre, medico);
+                    const smsResult = await sendSMS(rawPhone, smsText);
+                    if (smsResult.success) {
+                        logger.info(`[Recordatorios] 📱 SMS enviado a ${cod} (${rawPhone})`);
+                    } else if (!smsResult.skipped) {
+                        logger.warn(`[Recordatorios] ⚠️  SMS falló para ${cod}: ${smsResult.error}`);
+                    }
+                }
+
                 if (ok) {
                     this.sentToday.add(clave);
                     this.saveSentReminders();
@@ -291,6 +307,32 @@ class ReminderService {
 
         logger.info(`[Recordatorios] ✅ ${sent} recordatorio(s) enviado(s).`);
         return sent;
+    }
+
+    /** Construir el texto del recordatorio para SMS (sin emojis ni Markdown) */
+    buildSMSText(cita, nombre, medico) {
+        const fchStr  = String(cita.KC3_FCH);
+        const fechaObj = new Date(
+            parseInt(fchStr.slice(0, 4)),
+            parseInt(fchStr.slice(4, 6)) - 1,
+            parseInt(fchStr.slice(6, 8))
+        );
+        const fechaFmt = fechaObj.toLocaleDateString('es-CO', {
+            weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+        });
+        const hh   = Number(cita.KC3_HH);
+        const mm   = Number(cita.KC3_MM);
+        const h12  = hh % 12 || 12;
+        const per  = hh < 12 ? 'AM' : 'PM';
+        const hora = `${h12}:${String(mm).padStart(2, '0')} ${per}`;
+        const primer = nombre.split(/[\s,]+/)[0] || 'Paciente';
+        const nomMed = medico?.MED_NOMBRE?.trim() || 'su medico asignado';
+        return (
+            `RECORDATORIO: Hola ${primer}, tiene cita medica manana ` +
+            `${fechaFmt} a las ${hora} con ${nomMed}. ` +
+            `Llegue 15 min antes. Cancelaciones: escriba a nuestro WhatsApp. ` +
+            `ESE Hospital San Rafael de Ebejico.`
+        );
     }
 
     async sendReminderMessage(cita, nombre, waId, medico) {
