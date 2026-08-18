@@ -15,7 +15,7 @@ const prisma    = require('./db');
 const botPrisma = require('./dbBot');  // SQLite del bot (conversaciones WhatsApp reales)
 const cron      = require('node-cron');
 const logger    = require('./logger');
-const { sendSMS } = require('./sms_service'); // Onurix SMS
+const { sendSMS, sendWhatsApp } = require('./sms_service'); // Onurix SMS + WA
 
 class ReminderService {
     constructor() {
@@ -264,17 +264,27 @@ class ReminderService {
 
                 const ok = await this.sendReminderMessage(cita, nombre, waId, medico);
 
-                // ── Envío por SMS (Onurix) — canal paralelo o de respaldo ──
-                // Se dispara independientemente del resultado de WA, pero solo
-                // si SMS_REMINDERS_ENABLED=true en .env (actualmente desactivado).
+                // ── Envío por Onurix (SMS + WhatsApp) — canales paralelos ──
+                // Se disparan independientemente del resultado del WA propio,
+                // controlados cada uno por su flag en .env.
                 const rawPhone = await this.getPhoneForPatient(cod);
                 if (rawPhone) {
-                    const smsText = this.buildSMSText(cita, nombre, medico);
-                    const smsResult = await sendSMS(rawPhone, smsText);
+                    const msgText = this.buildSMSText(cita, nombre, medico);
+
+                    // SMS (Onurix)
+                    const smsResult = await sendSMS(rawPhone, msgText);
                     if (smsResult.success) {
                         logger.info(`[Recordatorios] 📱 SMS enviado a ${cod} (${rawPhone})`);
                     } else if (!smsResult.skipped) {
                         logger.warn(`[Recordatorios] ⚠️  SMS falló para ${cod}: ${smsResult.error}`);
+                    }
+
+                    // WhatsApp (Onurix no-template)
+                    const waOnurixResult = await sendWhatsApp(rawPhone, msgText);
+                    if (waOnurixResult.success) {
+                        logger.info(`[Recordatorios] 💬 WhatsApp Onurix enviado a ${cod} (${rawPhone})`);
+                    } else if (!waOnurixResult.skipped) {
+                        logger.warn(`[Recordatorios] ⚠️  WhatsApp Onurix falló para ${cod}: ${waOnurixResult.error}`);
                     }
                 }
 

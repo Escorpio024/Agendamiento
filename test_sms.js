@@ -1,16 +1,13 @@
 /**
- * Script de prueba de SMS — Onurix
+ * Script de prueba — SMS Onurix
  * Uso: node test_sms.js
  *
- * Envía un SMS de prueba a los números indicados usando
- * las credenciales de Onurix del .env, ignorando SMS_REMINDERS_ENABLED.
+ * Endpoint correcto: POST https://www.onurix.com/api/v1/sms/send
+ * Todos los parámetros van en el body (form-urlencoded).
  */
 
 require('dotenv').config();
 const https = require('https');
-
-const ONURIX_BASE_URL = 'www.onurix.com';
-const ONURIX_PATH     = '/api/v1/send-sms';
 
 const NUMEROS_PRUEBA = [
     '3016404175',
@@ -25,34 +22,10 @@ const MENSAJE_PRUEBA =
 
 function normalizarNumero(num) {
     const digits = num.replace(/\D/g, '');
-    // Probar con numero completo 57XXXXXXXXXX Y solo 10 digitos
     if (digits.startsWith('57') && digits.length === 12) return digits;
     if (digits.length === 10 && digits.startsWith('3')) return `57${digits}`;
     return digits;
 }
-
-// Prueba con ambos formatos para identificar cuál acepta Onurix
-async function probarFormatos(numero, mensaje) {
-    const digits = numero.replace(/\D/g, '');
-    const formatos = [
-        `57${digits}`,   // Con prefijo Colombia
-        digits,          // Solo 10 dígitos
-        `+57${digits}`,  // Con +57
-    ];
-
-    console.log(`\n🔬 Probando formatos para ${numero}:`);
-    for (const fmt of formatos) {
-        console.log(`   → Formato: ${fmt}`);
-        const result = await enviarSMS(fmt, mensaje);
-        if (result.success) {
-            console.log(`   ✅ Funciona con: ${fmt}`);
-            return fmt;
-        }
-        await new Promise(r => setTimeout(r, 1500));
-    }
-    return null;
-}
-
 
 function enviarSMS(numero, mensaje) {
     return new Promise((resolve) => {
@@ -61,17 +34,18 @@ function enviarSMS(numero, mensaje) {
 
         if (!client || !key) {
             console.error('❌  ONURIX_CLIENT u ONURIX_KEY no están en el .env');
-            resolve({ success: false, error: 'Sin credenciales' });
+            resolve({ success: false });
             return;
         }
 
-        const normalizado = normalizarNumero(numero);
-        const query = `key=${encodeURIComponent(key)}&client=${encodeURIComponent(client)}`;
-        const body  = new URLSearchParams({ number: normalizado, sms: mensaje }).toString();
+        const phone = normalizarNumero(numero);
+
+        // Todos los params en el body (form-urlencoded) — según docs Onurix
+        const body = new URLSearchParams({ client, key, phone, sms: mensaje }).toString();
 
         const options = {
-            hostname : ONURIX_BASE_URL,
-            path     : `${ONURIX_PATH}?${query}`,
+            hostname : 'www.onurix.com',
+            path     : '/api/v1/sms/send',   // ← endpoint correcto (no deprecated)
             method   : 'POST',
             headers  : {
                 'Content-Type'   : 'application/x-www-form-urlencoded',
@@ -83,10 +57,12 @@ function enviarSMS(numero, mensaje) {
             let data = '';
             res.on('data', (c) => { data += c; });
             res.on('end', () => {
-                console.log(`  ↳ HTTP ${res.statusCode} | Respuesta: ${data}`);
+                console.log(`  ↳ HTTP ${res.statusCode} | ${data}`);
                 try {
                     const json = JSON.parse(data);
-                    resolve({ success: res.statusCode === 200, json, raw: data });
+                    const entregado = res.statusCode === 200 && json?.data?.phone !== null && json?.data?.phone !== undefined;
+                    console.log(`     phone: ${json?.data?.phone} | credits: ${json?.data?.credits} | state: ${json?.data?.state}`);
+                    resolve({ success: entregado, json });
                 } catch (_) {
                     resolve({ success: false, raw: data });
                 }
@@ -95,7 +71,7 @@ function enviarSMS(numero, mensaje) {
 
         req.on('error', (err) => {
             console.error(`  ↳ Error de red: ${err.message}`);
-            resolve({ success: false, error: err.message });
+            resolve({ success: false });
         });
 
         req.write(body);
@@ -106,64 +82,21 @@ function enviarSMS(numero, mensaje) {
 async function main() {
     console.log('');
     console.log('════════════════════════════════════════════════');
-    console.log('  PRUEBA DE SMS — Onurix');
+    console.log('  PRUEBA SMS — Onurix  (/api/v1/sms/send)');
     console.log(`  Client : ${process.env.ONURIX_CLIENT}`);
-    console.log(`  Key    : ${process.env.ONURIX_KEY ? '***' + process.env.ONURIX_KEY.slice(-8) : 'NO CONFIGURADA'}`);
+    console.log(`  Key    : ***${(process.env.ONURIX_KEY || '').slice(-8)}`);
     console.log('════════════════════════════════════════════════');
     console.log('');
 
-    // ── Paso 1: detectar qué formato de número acepta Onurix ──
-    console.log('🔬 Detectando formato de número aceptado por Onurix...');
-    const digits0 = NUMEROS_PRUEBA[0].replace(/\D/g, '');
-    const formatos = [
-        `57${digits0}`,    // Colombia con prefijo
-        digits0,           // Solo 10 dígitos
-        `+57${digits0}`,   // Con +57
-    ];
+    let ok = 0, fail = 0;
 
-    let formatoCorrecto = null;
-    for (const fmt of formatos) {
-        console.log(`   → Probando: ${fmt}`);
-        const r = await enviarSMS(fmt, MENSAJE_PRUEBA);
-        const esReal = r.success && r.json?.data?.phone !== null;
-        console.log(`     credits: ${r.json?.data?.credits ?? r.json?.credits} | phone: ${r.json?.data?.phone}`);
-        if (esReal) {
-            formatoCorrecto = fmt;
-            console.log(`   ✅ Formato que entrega el SMS: ${fmt}\n`);
-            break;
-        }
-        if (r.success) {
-            console.log(`   ⚠️  API acepta pero phone=null (posiblemente sin entrega real)`);
-        }
-        await new Promise(r => setTimeout(r, 1500));
-    }
+    for (const numero of NUMEROS_PRUEBA) {
+        const phone = normalizarNumero(numero);
+        console.log(`📤 Enviando a ${numero} → ${phone} ...`);
+        const result = await enviarSMS(numero, MENSAJE_PRUEBA);
 
-    if (!formatoCorrecto) {
-        console.log('');
-        console.log('⚠️  Todos los formatos devuelven phone=null.');
-        console.log('   Esto indica que los créditos son de WhatsApp, no de SMS.');
-        console.log('   Revisa en portal.onurix.com si tienes créditos SMS activos.');
-        console.log('');
-        return;
-    }
-
-    // ── Paso 2: enviar a los demás números con el formato correcto ──
-    let ok = 1; // ya contamos el primero
-    let fail = 0;
-    console.log(`📋 Enviando al resto con formato: ${formatoCorrecto.replace(digits0, 'XXXXXXXXXX')}\n`);
-
-    for (let i = 1; i < NUMEROS_PRUEBA.length; i++) {
-        const numero = NUMEROS_PRUEBA[i];
-        const digs = numero.replace(/\D/g, '');
-        const prefijo = formatoCorrecto.replace(digits0, '');
-        const fmt = `${prefijo}${digs}`;
-        console.log(`📤 Enviando a ${numero} → ${fmt} ...`);
-        const result = await enviarSMS(fmt, MENSAJE_PRUEBA);
-        if (result.success && result.json?.data?.phone !== null) {
-            console.log(`  ✅ ENVIADO correctamente\n`);
-            ok++;
-        } else if (result.success) {
-            console.log(`  ⚠️  Aceptado pero phone=null (posiblemente no entregado)\n`);
+        if (result.success) {
+            console.log(`  ✅ SMS ENVIADO correctamente\n`);
             ok++;
         } else {
             console.log(`  ❌ FALLÓ\n`);
@@ -173,7 +106,7 @@ async function main() {
     }
 
     console.log('════════════════════════════════════════════════');
-    console.log(`  Resultado: ${ok} aceptado(s), ${fail} fallido(s)`);
+    console.log(`  Resultado: ${ok} enviado(s), ${fail} fallido(s)`);
     console.log('════════════════════════════════════════════════');
     console.log('');
 }
