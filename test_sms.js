@@ -25,10 +25,34 @@ const MENSAJE_PRUEBA =
 
 function normalizarNumero(num) {
     const digits = num.replace(/\D/g, '');
+    // Probar con numero completo 57XXXXXXXXXX Y solo 10 digitos
     if (digits.startsWith('57') && digits.length === 12) return digits;
     if (digits.length === 10 && digits.startsWith('3')) return `57${digits}`;
     return digits;
 }
+
+// Prueba con ambos formatos para identificar cuál acepta Onurix
+async function probarFormatos(numero, mensaje) {
+    const digits = numero.replace(/\D/g, '');
+    const formatos = [
+        `57${digits}`,   // Con prefijo Colombia
+        digits,          // Solo 10 dígitos
+        `+57${digits}`,  // Con +57
+    ];
+
+    console.log(`\n🔬 Probando formatos para ${numero}:`);
+    for (const fmt of formatos) {
+        console.log(`   → Formato: ${fmt}`);
+        const result = await enviarSMS(fmt, mensaje);
+        if (result.success) {
+            console.log(`   ✅ Funciona con: ${fmt}`);
+            return fmt;
+        }
+        await new Promise(r => setTimeout(r, 1500));
+    }
+    return null;
+}
+
 
 function enviarSMS(numero, mensaje) {
     return new Promise((resolve) => {
@@ -88,28 +112,68 @@ async function main() {
     console.log('════════════════════════════════════════════════');
     console.log('');
 
-    let ok = 0;
-    let fail = 0;
+    // ── Paso 1: detectar qué formato de número acepta Onurix ──
+    console.log('🔬 Detectando formato de número aceptado por Onurix...');
+    const digits0 = NUMEROS_PRUEBA[0].replace(/\D/g, '');
+    const formatos = [
+        `57${digits0}`,    // Colombia con prefijo
+        digits0,           // Solo 10 dígitos
+        `+57${digits0}`,   // Con +57
+    ];
 
-    for (const numero of NUMEROS_PRUEBA) {
-        const normalizado = normalizarNumero(numero);
-        console.log(`📤 Enviando a ${numero} → ${normalizado} ...`);
-        const result = await enviarSMS(numero, MENSAJE_PRUEBA);
-        if (result.success) {
+    let formatoCorrecto = null;
+    for (const fmt of formatos) {
+        console.log(`   → Probando: ${fmt}`);
+        const r = await enviarSMS(fmt, MENSAJE_PRUEBA);
+        const esReal = r.success && r.json?.data?.phone !== null;
+        console.log(`     credits: ${r.json?.data?.credits ?? r.json?.credits} | phone: ${r.json?.data?.phone}`);
+        if (esReal) {
+            formatoCorrecto = fmt;
+            console.log(`   ✅ Formato que entrega el SMS: ${fmt}\n`);
+            break;
+        }
+        if (r.success) {
+            console.log(`   ⚠️  API acepta pero phone=null (posiblemente sin entrega real)`);
+        }
+        await new Promise(r => setTimeout(r, 1500));
+    }
+
+    if (!formatoCorrecto) {
+        console.log('');
+        console.log('⚠️  Todos los formatos devuelven phone=null.');
+        console.log('   Esto indica que los créditos son de WhatsApp, no de SMS.');
+        console.log('   Revisa en portal.onurix.com si tienes créditos SMS activos.');
+        console.log('');
+        return;
+    }
+
+    // ── Paso 2: enviar a los demás números con el formato correcto ──
+    let ok = 1; // ya contamos el primero
+    let fail = 0;
+    console.log(`📋 Enviando al resto con formato: ${formatoCorrecto.replace(digits0, 'XXXXXXXXXX')}\n`);
+
+    for (let i = 1; i < NUMEROS_PRUEBA.length; i++) {
+        const numero = NUMEROS_PRUEBA[i];
+        const digs = numero.replace(/\D/g, '');
+        const prefijo = formatoCorrecto.replace(digits0, '');
+        const fmt = `${prefijo}${digs}`;
+        console.log(`📤 Enviando a ${numero} → ${fmt} ...`);
+        const result = await enviarSMS(fmt, MENSAJE_PRUEBA);
+        if (result.success && result.json?.data?.phone !== null) {
             console.log(`  ✅ ENVIADO correctamente\n`);
+            ok++;
+        } else if (result.success) {
+            console.log(`  ⚠️  Aceptado pero phone=null (posiblemente no entregado)\n`);
             ok++;
         } else {
             console.log(`  ❌ FALLÓ\n`);
             fail++;
         }
-        // Pausa de 2s entre envíos para no saturar la API
-        if (NUMEROS_PRUEBA.indexOf(numero) < NUMEROS_PRUEBA.length - 1) {
-            await new Promise(r => setTimeout(r, 2000));
-        }
+        await new Promise(r => setTimeout(r, 2000));
     }
 
     console.log('════════════════════════════════════════════════');
-    console.log(`  Resultado: ${ok} enviado(s), ${fail} fallido(s)`);
+    console.log(`  Resultado: ${ok} aceptado(s), ${fail} fallido(s)`);
     console.log('════════════════════════════════════════════════');
     console.log('');
 }
