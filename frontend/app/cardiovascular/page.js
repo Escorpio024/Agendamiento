@@ -6,7 +6,8 @@ import {
     Clock, User, Phone, Building2, Hash, Stethoscope,
     FileText, ChevronRight, AlertCircle, Activity,
     HeartPulse, Loader2, ClipboardList, X, XCircle, AlertTriangle, RefreshCw, ShieldAlert, Download,
-    Edit3, Save, Trash2, History, CalendarPlus, ChevronDown, Check, RotateCcw, CalendarCheck2
+    Edit3, Save, Trash2, History, CalendarPlus, ChevronDown, Check, RotateCcw, CalendarCheck2,
+    BarChart2, Users, TrendingUp, TrendingDown, ListFilter
 } from 'lucide-react';
 
 // ─── Config ──────────────────────────────────────────────────────────────────
@@ -719,683 +720,508 @@ function ProgramarCitaModal({ patient, onClose, onSuccess }) {
     );
 }
 
-// ─── ReportModal ──────────────────────────────────────────────────────────────
-function ReportModal({ patient, programados, pendientes, realizados, onClose }) {
-    const now = new Date();
-    const fechaInforme = now.toLocaleDateString('es-CO', { day: '2-digit', month: 'long', year: 'numeric' });
+// ─── Reporte Riesgo Modal ────────────────────────────────────────────────────
+function ReporteRiesgoModal({ onClose }) {
+    const [year, setYear] = useState(new Date().getFullYear());
+    const [month, setMonth] = useState(0); // 0 = todos los meses del año
+    const [data, setData] = useState(null);
+    const [loading, setLoading] = useState(false);
+    const [errorMsg, setErrorMsg] = useState(null);
 
-    const citasPerdidas = programados.filter(ex => {
-        if (!ex.fecha) return false;
-        const d = new Date(ex.fecha.includes('T') ? ex.fecha : ex.fecha + 'T12:00:00');
-        return d < now && diffMonths(ex.fecha) >= 1;
+    // Filtros locales (aplicados sobre los datos ya cargados)
+    const [filtroRiesgo, setFiltroRiesgo] = useState('TODOS');
+    const [filtroEps, setFiltroEps] = useState('TODOS');
+    const [filtroControl, setFiltroControl] = useState('TODOS'); // TODOS | EN_CONTROL | SIN_CONTROL
+    const [busqueda, setBusqueda] = useState('');
+
+    const loadData = useCallback(async () => {
+        setLoading(true);
+        setErrorMsg(null);
+        setFiltroRiesgo('TODOS');
+        setFiltroEps('TODOS');
+        setFiltroControl('TODOS');
+        setBusqueda('');
+        try {
+            const params = new URLSearchParams({ year });
+            if (month > 0) params.set('month', month);
+            const res = await fetch(`${API_BASE}/api/cardiovascular/reporte-riesgo?${params}`);
+            if (res.ok) {
+                const json = await res.json();
+                setData(json);
+            } else {
+                const err = await res.json().catch(() => ({}));
+                setErrorMsg(err.error || `Error ${res.status} al cargar datos`);
+            }
+        } catch (e) {
+            setErrorMsg('Error de conexión. Verifica que el servidor backend está corriendo.');
+        } finally {
+            setLoading(false);
+        }
+    }, [year, month]);
+
+    useEffect(() => { loadData(); }, [loadData]);
+
+    // Pacientes filtrados localmente
+    const pacientesFiltrados = (data?.pacientes || []).filter(p => {
+        if (filtroRiesgo !== 'TODOS' && p.nivelRiesgo !== filtroRiesgo) return false;
+        if (filtroEps !== 'TODOS' && p.eps !== filtroEps) return false;
+        if (filtroControl === 'EN_CONTROL' && !p.enControl) return false;
+        if (filtroControl === 'SIN_CONTROL' && p.enControl) return false;
+        if (busqueda.trim()) {
+            const q = busqueda.toLowerCase();
+            if (!p.nombre.toLowerCase().includes(q) && !p.codigo.includes(q)) return false;
+        }
+        return true;
     });
-    const citasFuturas = programados.filter(ex => {
-        if (!ex.fecha) return false;
-        const d = new Date(ex.fecha.includes('T') ? ex.fecha : ex.fecha + 'T12:00:00');
-        return d >= now;
-    });
-    const exCorroborar = realizados.filter(ex => { const m = diffMonths(ex.fecha); return m !== null && m >= 1 && m < 3; });
-    const exRenovar = realizados.filter(ex => { const m = diffMonths(ex.fecha); return m !== null && m >= 3; });
-    const exVigentes = realizados.filter(ex => { const m = diffMonths(ex.fecha); return m !== null && m < 1; });
 
-    const tieneProblemas = citasPerdidas.length > 0 || exRenovar.length > 0 || pendientes.length > 0;
-    const tieneAlertas = exCorroborar.length > 0;
-    const nivelAlerta = tieneProblemas ? 'crítico' : tieneAlertas ? 'atención' : 'normal';
+    // Resumen calculado sobre los datos filtrados
+    const totalFiltrado = pacientesFiltrados.length;
+    const enControlFiltrado = pacientesFiltrados.filter(p => p.enControl).length;
+    const sinControlFiltrado = totalFiltrado - enControlFiltrado;
 
-    const colorAlerta = nivelAlerta === 'crítico' ? '#F9A8A8' : nivelAlerta === 'atención' ? '#FCD34D' : '#A1E3D8';
-    const bgAlerta = nivelAlerta === 'crítico' ? 'rgba(177,64,64,0.12)' : nivelAlerta === 'atención' ? 'rgba(251,191,36,0.1)' : 'rgba(161,227,216,0.08)';
-    const borderAlerta = nivelAlerta === 'crítico' ? 'rgba(177,64,64,0.35)' : nivelAlerta === 'atención' ? 'rgba(251,191,36,0.3)' : 'rgba(161,227,216,0.2)';
+    const riesgosUnicos = data?.filtros?.riesgosUnicos || [];
+    const epsUnicas = data?.filtros?.epsUnicas || [];
 
-    const downloadPDF = () => {
-        const alertaLabel = nivelAlerta === 'crítico' ? '⚠️ Estado Crítico — Se requieren acciones inmediatas'
-            : nivelAlerta === 'atención' ? '🔶 Requiere Atención — Hay exámenes que deben verificarse'
-                : '✅ Estado Normal — El proceso está al día';
+    const colorRiesgo = (r) => {
+        if (r === 'ALTO') return { bg: 'rgba(177,64,64,0.2)', color: '#F9A8A8', border: 'rgba(177,64,64,0.4)' };
+        if (r === 'MEDIO') return { bg: 'rgba(251,191,36,0.15)', color: '#FCD34D', border: 'rgba(251,191,36,0.4)' };
+        if (r === 'BAJO') return { bg: 'rgba(161,227,216,0.15)', color: '#A1E3D8', border: 'rgba(161,227,216,0.4)' };
+        return { bg: 'rgba(130,99,177,0.15)', color: '#C4AFED', border: 'rgba(130,99,177,0.4)' };
+    };
 
-        const renderItems = (items, badge) => items.map(ex => `
-            <tr>
-                <td>${ex.codigo || '—'}</td>
-                <td>${ex.tipoExamen}</td>
-                <td>${ex.fecha ? formatDate(ex.fecha) : 'Sin fecha'}</td>
-                <td>${ex.doctor || '—'}</td>
-                <td><span class="badge badge-${badge.toLowerCase().replace(' ', '-')}">${badge}</span></td>
-            </tr>`).join('');
+    const handleExportCSV = () => {
+        if (!pacientesFiltrados.length) return;
+        const meses = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+        const headers = ['Cédula','Nombre','Nivel Riesgo','EPS','Fecha Valoración','En Control','Última Cita CVD'];
+        const rows = pacientesFiltrados.map(p => [
+            p.codigo,
+            p.nombre,
+            p.nivelRiesgo,
+            p.eps,
+            formatDate(p.fechaValoracion),
+            p.enControl ? 'SÍ' : 'NO',
+            p.ultimaCitaCVD ? formatDate(p.ultimaCitaCVD) : '—'
+        ]);
+        const csvContent = [headers, ...rows].map(row =>
+            row.map(v => `"${String(v).replace(/"/g,'""')}"`).join(',')
+        ).join('\n');
+        const periodoLabel = month > 0 ? `${meses[month-1]}_${year}` : `${year}`;
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.setAttribute('href', url);
+        link.setAttribute('download', `reporte_riesgo_cvd_${periodoLabel}.csv`);
+        link.click();
+        URL.revokeObjectURL(url);
+    };
 
-        const tableSection = (title, items, badge, nota) => items.length === 0 ? '' : `
-            <section>
-                <h3>${title}</h3>
-                ${nota ? `<p class="nota">${nota}</p>` : ''}
-                <table>
-                    <thead><tr><th>Código</th><th>Examen</th><th>Fecha</th><th>Médico</th><th>Estado</th></tr></thead>
-                    <tbody>${renderItems(items, badge)}</tbody>
-                </table>
-            </section>`;
+    const handleExportPDF = () => {
+        if (!pacientesFiltrados.length) return;
+        const meses = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+        const periodoLabel = month > 0 ? `${meses[month-1]} ${year}` : `Año ${year}`;
+        const now = new Date().toLocaleDateString('es-CO', { day:'2-digit', month:'long', year:'numeric' });
 
-        const html = `<!DOCTYPE html>
-<html lang="es">
-<head>
-    <meta charset="UTF-8" />
-    <title>Informe Cardiovascular — ${patient?.nombre}</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 12px; color: #1a1a2e; background: #fff; padding: 32px; }
-        header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid #8263B1; padding-bottom: 16px; margin-bottom: 24px; }
-        header .logo { display: flex; align-items: center; gap: 12px; }
-        header .logo .icon { width: 48px; height: 48px; background: linear-gradient(135deg,#B14040,#8263B1); border-radius: 12px; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 22px; }
-        header h1 { font-size: 18px; font-weight: 800; color: #1a1a2e; }
-        header h1 span { color: #8263B1; }
-        header .meta { text-align: right; }
-        header .meta p { font-size: 11px; color: #666; margin-top: 2px; }
-        header .meta strong { font-size: 13px; color: #1a1a2e; }
-        .paciente-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 12px; background: #f7f5ff; border: 1px solid #d4c8f0; border-radius: 10px; padding: 14px 18px; margin-bottom: 22px; }
-        .paciente-grid .field label { font-size: 9px; text-transform: uppercase; letter-spacing: .08em; color: #8263B1; font-weight: 700; display: block; margin-bottom: 2px; }
-        .paciente-grid .field span { font-size: 13px; font-weight: 600; color: #1a1a2e; }
-        .alerta-banner { border-radius: 10px; padding: 12px 16px; margin-bottom: 22px; font-weight: 700; font-size: 13px; }
-        .alerta-critico  { background: #fff0f0; border: 1.5px solid #e57373; color: #b71c1c; }
-        .alerta-atencion { background: #fffde7; border: 1.5px solid #f9a825; color: #e65100; }
-        .alerta-normal   { background: #f0faf8; border: 1.5px solid #4db6ac; color: #00695c; }
-        section { margin-bottom: 20px; }
-        h3 { font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .1em; color: #1a1a2e; border-left: 4px solid #8263B1; padding-left: 10px; margin-bottom: 8px; }
-        .nota { font-size: 11px; color: #555; margin-bottom: 8px; }
-        table { width: 100%; border-collapse: collapse; font-size: 11px; }
-        thead { background: #f3f0ff; }
-        th { padding: 7px 10px; text-align: left; font-weight: 700; color: #4a3b72; border-bottom: 2px solid #c8b9f0; }
-        td { padding: 6px 10px; border-bottom: 1px solid #e8e3f5; }
-        tr:last-child td { border-bottom: none; }
-        .badge { font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; padding: 2px 8px; border-radius: 4px; }
-        .badge-cita-perdida, .badge-renovar, .badge-pendiente { background: #fde8e8; color: #b71c1c; }
-        .badge-corroborar { background: #fff8e1; color: #e65100; }
-        .badge-vigente { background: #e0f7f4; color: #00695c; }
-        .badge-programada { background: #ede7ff; color: #4a148c; }
-        footer { margin-top: 30px; padding-top: 14px; border-top: 2px solid #e8e3f5; display: flex; justify-content: space-between; font-size: 10px; color: #999; }
-        @media print { body { padding: 18px; } }
-    </style>
-</head>
-<body>
-    <header>
-        <div class="logo">
-            <div class="icon">♥</div>
-            <div>
-                <div style="font-size:10px;color:#8263B1;font-weight:700;text-transform:uppercase;letter-spacing:.15em;">Informe Clínico</div>
-                <h1>Riesgo <span>Cardiovascular</span></h1>
-            </div>
-        </div>
-        <div class="meta">
-            <p>Fecha del informe</p>
-            <strong>${fechaInforme}</strong>
-            <p style="margin-top:6px;">Generado por Auro Bot</p>
-        </div>
-    </header>
-    <div class="paciente-grid">
-        <div class="field"><label>Nombre</label><span>${patient?.nombre || '—'}</span></div>
-        <div class="field"><label>Cédula</label><span>${patient?.documento || '—'}</span></div>
-        <div class="field"><label>Edad</label><span>${patient?.edad ? patient.edad + ' años' : '—'}</span></div>
-        <div class="field"><label>Teléfono</label><span>${patient?.telefono || '—'}</span></div>
-        <div class="field" style="grid-column:span 2"><label>Entidad</label><span>${patient?.entidad || '—'}</span></div>
+        const riesgoColor = (r) => {
+            if (r === 'ALTO') return { bg: '#fde8e8', color: '#b71c1c' };
+            if (r === 'MEDIO') return { bg: '#fffde7', color: '#e65100' };
+            if (r === 'BAJO') return { bg: '#e0f7f4', color: '#00695c' };
+            return { bg: '#f3f0ff', color: '#4a3b72' };
+        };
+
+        const tableRows = pacientesFiltrados.map(p => {
+            const rc = riesgoColor(p.nivelRiesgo);
+            return `<tr>
+                <td>${p.codigo}</td>
+                <td>${p.nombre}</td>
+                <td><span style="background:${rc.bg};color:${rc.color};padding:2px 8px;border-radius:4px;font-size:10px;font-weight:700">${p.nivelRiesgo}</span></td>
+                <td>${p.eps}</td>
+                <td>${formatDate(p.fechaValoracion)}</td>
+                <td style="color:${p.enControl ? '#00695c' : '#b71c1c'};font-weight:700">${p.enControl ? 'SÍ ✓' : 'NO ✗'}</td>
+                <td>${p.ultimaCitaCVD ? formatDate(p.ultimaCitaCVD) : '—'}</td>
+            </tr>`;
+        }).join('');
+
+        const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"/>
+<title>Informe Riesgo Cardiovascular</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:'Segoe UI',Arial,sans-serif; font-size:11px; color:#1a1a2e; background:#fff; padding:28px; }
+header { display:flex; justify-content:space-between; align-items:flex-start; border-bottom:3px solid #8263B1; padding-bottom:14px; margin-bottom:20px; }
+.logo-icon { width:44px;height:44px;background:linear-gradient(135deg,#B14040,#8263B1);border-radius:10px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:20px; }
+h1 { font-size:17px; font-weight:800; color:#1a1a2e; }
+h1 span { color:#8263B1; }
+.meta p { font-size:10px; color:#666; margin-top:2px; }
+.meta strong { font-size:12px; }
+.kpis { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:18px; }
+.kpi { border-radius:10px; padding:12px 16px; }
+.kpi label { font-size:9px; text-transform:uppercase; letter-spacing:.08em; font-weight:700; display:block; margin-bottom:4px; }
+.kpi .num { font-size:26px; font-weight:800; }
+.kpi .pct { font-size:11px; opacity:.75; }
+table { width:100%; border-collapse:collapse; font-size:10px; }
+thead { background:#f3f0ff; }
+th { padding:6px 8px; text-align:left; font-weight:700; color:#4a3b72; border-bottom:2px solid #c8b9f0; }
+td { padding:5px 8px; border-bottom:1px solid #e8e3f5; }
+tr:last-child td { border-bottom:none; }
+footer { margin-top:24px; padding-top:12px; border-top:2px solid #e8e3f5; display:flex; justify-content:space-between; font-size:10px; color:#999; }
+</style></head><body>
+<header>
+  <div style="display:flex;align-items:center;gap:12px">
+    <div class="logo-icon">♥</div>
+    <div>
+      <div style="font-size:9px;color:#8263B1;font-weight:700;text-transform:uppercase;letter-spacing:.15em">Informe Clínico</div>
+      <h1>Riesgo <span>Cardiovascular</span></h1>
     </div>
-    <div class="alerta-banner alerta-${nivelAlerta === 'crítico' ? 'critico' : nivelAlerta === 'atención' ? 'atencion' : 'normal'}">
-        ${alertaLabel}
-    </div>
-    ${tableSection('Citas Programadas Perdidas', citasPerdidas, 'CITA PERDIDA', 'Los siguientes exámenes tenían fecha asignada pero no fueron atendidos.')}
-    ${tableSection('Exámenes que Requieren Renovación', exRenovar, 'RENOVAR', 'Superan los 3 meses de antigüedad.')}
-    ${tableSection('Exámenes para Corroborar', exCorroborar, 'CORROBORAR', 'Superan 1 mes de antigüedad.')}
-    ${pendientes.length > 0 ? `<section><h3>Exámenes Pendientes</h3><table><thead><tr><th>Código</th><th>Examen</th><th>Estado</th></tr></thead><tbody>${pendientes.map(ex => `<tr><td>${ex.codigo || '—'}</td><td>${ex.tipoExamen}</td><td><span class="badge badge-pendiente">PENDIENTE</span></td></tr>`).join('')}</tbody></table></section>` : ''}
-    ${tableSection('Exámenes Realizados Vigentes', exVigentes, 'VIGENTE', '')}
-    ${tableSection('Citas Próximas Programadas', citasFuturas, 'PROGRAMADA', '')}
-    <footer>
-        <span>Auro Bot · Módulo Cardiovascular</span>
-        <span>${fechaInforme} · Cédula: ${patient?.documento}</span>
-    </footer>
-    <script>window.onload = function(){ window.print(); setTimeout(()=>window.close(), 800); }</script>
+  </div>
+  <div class="meta" style="text-align:right">
+    <p>Período: <strong>${periodoLabel}</strong></p>
+    <p>Fecha: ${now}</p>
+    <p>Generado por Auro Bot</p>
+  </div>
+</header>
+<div class="kpis">
+  <div class="kpi" style="background:#f3f0ff;border:1px solid #c8b9f0">
+    <label style="color:#8263B1">Total Pacientes</label>
+    <div class="num" style="color:#4a3b72">${totalFiltrado}</div>
+    <div class="pct">con valoración de riesgo</div>
+  </div>
+  <div class="kpi" style="background:#e0f7f4;border:1px solid #80cbc4">
+    <label style="color:#00695c">En Control</label>
+    <div class="num" style="color:#00695c">${enControlFiltrado}</div>
+    <div class="pct">${totalFiltrado ? Math.round(enControlFiltrado/totalFiltrado*100) : 0}% del total</div>
+  </div>
+  <div class="kpi" style="background:#fde8e8;border:1px solid #e57373">
+    <label style="color:#b71c1c">Sin Control</label>
+    <div class="num" style="color:#b71c1c">${sinControlFiltrado}</div>
+    <div class="pct">${totalFiltrado ? Math.round(sinControlFiltrado/totalFiltrado*100) : 0}% del total</div>
+  </div>
+</div>
+<table>
+<thead><tr><th>Cédula</th><th>Nombre</th><th>Riesgo</th><th>EPS</th><th>Valoración</th><th>En Control</th><th>Última Cita CVD</th></tr></thead>
+<tbody>${tableRows}</tbody>
+</table>
+<footer>
+  <span>Auro Bot · Módulo Cardiovascular</span>
+  <span>${now} · ${totalFiltrado} pacientes</span>
+</footer>
+<script>window.onload=function(){window.print();setTimeout(()=>window.close(),800);}</script>
 </body></html>`;
-
-        const win = window.open('', '_blank', 'width=900,height=700');
+        const win = window.open('', '_blank', 'width=1000,height=750');
         if (win) { win.document.write(html); win.document.close(); }
     };
 
+    const MESES = ['Todos los meses','Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+
+    const inputBase = {
+        background: 'rgba(15,14,19,0.8)',
+        border: '1px solid rgba(130,99,177,0.3)',
+        color: 'var(--text-primary)',
+        borderRadius: '8px',
+        padding: '6px 10px',
+        fontSize: '12px',
+        outline: 'none',
+        cursor: 'pointer',
+    };
+
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
-            style={{ background: 'rgba(8,7,12,0.85)', backdropFilter: 'blur(8px)' }}
+            style={{ background: 'rgba(8,7,12,0.88)', backdropFilter: 'blur(8px)' }}
             onClick={e => e.target === e.currentTarget && onClose()}>
-            <div className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl shadow-2xl"
-                style={{ background: 'rgba(20,18,28,0.98)', border: '1px solid rgba(130,99,177,0.3)' }}>
-                <div className="sticky top-0 z-10 flex items-center justify-between px-6 py-4 border-b"
-                    style={{ background: 'rgba(20,18,28,0.98)', borderColor: 'rgba(130,99,177,0.2)' }}>
+            <div className="relative w-full max-w-6xl max-h-[95vh] flex flex-col rounded-2xl shadow-2xl overflow-hidden"
+                style={{ background: 'rgba(16,14,22,0.99)', border: '1px solid rgba(130,99,177,0.3)' }}>
+
+                {/* ── Header ── */}
+                <div className="flex items-center justify-between px-6 py-4 flex-shrink-0"
+                    style={{ borderBottom: '1px solid rgba(130,99,177,0.2)', background: 'rgba(20,18,28,0.98)' }}>
                     <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-xl flex items-center justify-center"
-                            style={{ background: 'linear-gradient(135deg, #B14040 0%, #8263B1 100%)' }}>
-                            <ClipboardList size={17} color="#F5F5F7" />
+                        <div className="w-10 h-10 rounded-xl flex items-center justify-center"
+                            style={{ background: 'linear-gradient(135deg, rgba(177,64,64,0.5) 0%, rgba(130,99,177,0.5) 100%)' }}>
+                            <BarChart2 size={20} color="#F9A8A8" />
                         </div>
                         <div>
                             <p className="text-[10px] tracking-widest uppercase font-semibold"
-                                style={{ color: 'rgba(196,175,237,0.6)' }}>Informe Clínico</p>
-                            <h2 className="text-sm font-bold" style={{ color: '#F5F5F7' }}>
-                                Riesgo Cardiovascular · {patient?.nombre}
-                            </h2>
+                                style={{ color: 'rgba(249,168,168,0.6)' }}>Informe Poblacional</p>
+                            <h2 className="text-sm font-bold" style={{ color: '#F5F5F7' }}>Riesgo Cardiovascular</h2>
                         </div>
                     </div>
-                    <button id="btn-close-report" onClick={onClose}
-                        className="w-8 h-8 rounded-lg flex items-center justify-center transition-all"
-                        style={{ background: 'rgba(245,245,247,0.06)', color: 'rgba(245,245,247,0.5)' }}
-                        onMouseEnter={e => e.currentTarget.style.background = 'rgba(177,64,64,0.2)'}
-                        onMouseLeave={e => e.currentTarget.style.background = 'rgba(245,245,247,0.06)'}>
-                        <X size={15} />
-                    </button>
-                </div>
-                <div className="p-6 flex flex-col gap-5">
-                    <div className="flex items-center justify-between">
-                        <div className="flex flex-col gap-0.5">
-                            <span className="text-[10px] uppercase tracking-widest font-semibold" style={{ color: 'rgba(161,227,216,0.5)' }}>Fecha del informe</span>
-                            <span className="text-xs font-medium" style={{ color: 'rgba(245,245,247,0.7)' }}>{fechaInforme}</span>
-                        </div>
-                        <div className="flex flex-col gap-0.5 text-right">
-                            <span className="text-[10px] uppercase tracking-widest font-semibold" style={{ color: 'rgba(161,227,216,0.5)' }}>Cédula</span>
-                            <span className="text-xs font-mono font-bold" style={{ color: '#C4AFED' }}>{patient?.documento}</span>
-                        </div>
-                    </div>
-                    <div className="flex items-center gap-3 px-4 py-3 rounded-xl"
-                        style={{ background: bgAlerta, border: `1px solid ${borderAlerta}` }}>
-                        <ShieldAlert size={18} style={{ color: colorAlerta, flexShrink: 0 }} />
-                        <div>
-                            <p className="text-xs font-bold" style={{ color: colorAlerta }}>
-                                {nivelAlerta === 'crítico' && '⚠️ Estado Crítico — Se requieren acciones inmediatas'}
-                                {nivelAlerta === 'atención' && '🔶 Requiere Atención — Hay exámenes que deben verificarse'}
-                                {nivelAlerta === 'normal' && '✅ Estado Normal — El proceso está al día'}
-                            </p>
-                            <p className="text-[11px] mt-0.5" style={{ color: 'rgba(245,245,247,0.5)' }}>
-                                Generado automáticamente con base en los registros del sistema
-                            </p>
-                        </div>
-                    </div>
-                    {citasPerdidas.length > 0 && (
-                        <ReportSection icon={<XCircle size={14} color="#F9A8A8" />} title="Citas Programadas Perdidas" color="rgba(177,64,64,0.15)" border="rgba(177,64,64,0.3)" titleColor="#F9A8A8">
-                            <p className="text-xs mb-3" style={{ color: 'rgba(237,175,175,0.7)' }}>Han pasado más de 30 días desde la fecha programada.</p>
-                            {citasPerdidas.map(ex => <ReportItem key={ex.id} codigo={ex.codigo} nombre={ex.tipoExamen} fecha={ex.fecha} badge="CITA PERDIDA" badgeColor="rgba(177,64,64,0.3)" badgeText="#F9A8A8" nota={`Han transcurrido ${diffMonths(ex.fecha)} mes(es).`} />)}
-                        </ReportSection>
-                    )}
-                    {exRenovar.length > 0 && (
-                        <ReportSection icon={<RefreshCw size={14} color="#F9A8A8" />} title="Requieren Renovación" color="rgba(177,64,64,0.1)" border="rgba(177,64,64,0.25)" titleColor="#F9A8A8">
-                            <p className="text-xs mb-3" style={{ color: 'rgba(237,175,175,0.7)' }}>Superan los 3 meses de antigüedad.</p>
-                            {exRenovar.map(ex => <ReportItem key={ex.id} codigo={ex.codigo} nombre={ex.tipoExamen} fecha={ex.fecha} badge="RENOVAR" badgeColor="rgba(177,64,64,0.25)" badgeText="#F9A8A8" nota={`Realizado hace ${diffMonths(ex.fecha)} meses.`} />)}
-                        </ReportSection>
-                    )}
-                    {exCorroborar.length > 0 && (
-                        <ReportSection icon={<AlertTriangle size={14} color="#FCD34D" />} title="Para Corroborar" color="rgba(251,191,36,0.08)" border="rgba(251,191,36,0.25)" titleColor="#FCD34D">
-                            <p className="text-xs mb-3" style={{ color: 'rgba(252,211,77,0.7)' }}>Superan 1 mes de antigüedad.</p>
-                            {exCorroborar.map(ex => <ReportItem key={ex.id} codigo={ex.codigo} nombre={ex.tipoExamen} fecha={ex.fecha} badge="CORROBORAR" badgeColor="rgba(251,191,36,0.18)" badgeText="#FCD34D" nota={`Realizado hace ${diffMonths(ex.fecha)} mes(es).`} />)}
-                        </ReportSection>
-                    )}
-                    {pendientes.length > 0 && (
-                        <ReportSection icon={<AlertCircle size={14} color="#F9A8A8" />} title="Exámenes Pendientes" color="rgba(177,64,64,0.1)" border="rgba(177,64,64,0.25)" titleColor="#F9A8A8">
-                            <p className="text-xs mb-3" style={{ color: 'rgba(237,175,175,0.7)' }}>{pendientes.length} examen(es) sin fecha asignada.</p>
-                            {pendientes.map(ex => <ReportItem key={ex.id} codigo={ex.codigo} nombre={ex.tipoExamen} badge="PENDIENTE" badgeColor="rgba(177,64,64,0.2)" badgeText="#EDAFAF" nota="Sin fecha asignada." />)}
-                        </ReportSection>
-                    )}
-                    {exVigentes.length > 0 && (
-                        <ReportSection icon={<CheckCircle2 size={14} color="#A1E3D8" />} title="Vigentes" color="rgba(161,227,216,0.05)" border="rgba(161,227,216,0.15)" titleColor="#A1E3D8">
-                            {exVigentes.map(ex => <ReportItem key={ex.id} codigo={ex.codigo} nombre={ex.tipoExamen} fecha={ex.fecha} badge="VIGENTE" badgeColor="rgba(161,227,216,0.15)" badgeText="#A1E3D8" nota="Dentro del período de vigencia." />)}
-                        </ReportSection>
-                    )}
-                    {citasFuturas.length > 0 && (
-                        <ReportSection icon={<Calendar size={14} color="#C4AFED" />} title="Citas Próximas" color="rgba(130,99,177,0.08)" border="rgba(130,99,177,0.2)" titleColor="#C4AFED">
-                            {citasFuturas.map(ex => <ReportItem key={ex.id} codigo={ex.codigo} nombre={ex.tipoExamen} fecha={ex.fecha} badge="PROGRAMADA" badgeColor="rgba(130,99,177,0.2)" badgeText="#C4AFED" nota="Cita futura activa." />)}
-                        </ReportSection>
-                    )}
-                    <div className="flex items-center justify-between pt-2 border-t" style={{ borderColor: 'rgba(130,99,177,0.15)' }}>
-                        <span className="text-[10px]" style={{ color: 'rgba(245,245,247,0.2)' }}>Auro Bot · Módulo Cardiovascular · {fechaInforme}</span>
-                        <div className="flex items-center gap-2">
-                            <button id="btn-download-pdf" onClick={downloadPDF}
-                                className="flex items-center gap-2 text-xs font-bold px-4 py-2 rounded-lg transition-all"
-                                style={{ background: 'linear-gradient(135deg,rgba(130,99,177,0.4),rgba(177,64,64,0.4))', color: '#E2D4FF', border: '1px solid rgba(130,99,177,0.5)' }}
-                                onMouseEnter={e => { e.currentTarget.style.background = 'linear-gradient(135deg,rgba(130,99,177,0.7),rgba(177,64,64,0.7))'; }}
-                                onMouseLeave={e => { e.currentTarget.style.background = 'linear-gradient(135deg,rgba(130,99,177,0.4),rgba(177,64,64,0.4))'; }}>
-                                <Download size={12} /> Descargar PDF
-                            </button>
-                            <button id="btn-close-report-footer" onClick={onClose}
-                                className="text-xs font-semibold px-4 py-2 rounded-lg transition-all"
-                                style={{ background: 'rgba(245,245,247,0.07)', color: 'rgba(245,245,247,0.45)', border: '1px solid rgba(245,245,247,0.1)' }}
-                                onMouseEnter={e => e.currentTarget.style.background = 'rgba(245,245,247,0.12)'}
-                                onMouseLeave={e => e.currentTarget.style.background = 'rgba(245,245,247,0.07)'}>
-                                Cerrar
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    );
-}
-
-function ReportSection({ icon, title, color, border, titleColor, children }) {
-    return (
-        <div className="rounded-xl p-4" style={{ background: color, border: `1px solid ${border}` }}>
-            <div className="flex items-center gap-2 mb-3">
-                {icon}
-                <span className="text-xs font-bold tracking-wide uppercase" style={{ color: titleColor }}>{title}</span>
-            </div>
-            {children}
-        </div>
-    );
-}
-
-function ReportItem({ codigo, nombre, fecha, badge, badgeColor, badgeText, nota }) {
-    return (
-        <div className="flex items-start justify-between gap-3 py-2 border-t first:border-t-0"
-            style={{ borderColor: 'rgba(245,245,247,0.05)' }}>
-            <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                    {codigo && (
-                        <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded"
-                            style={{ background: 'rgba(245,245,247,0.07)', color: 'rgba(245,245,247,0.4)' }}>
-                            {codigo}
-                        </span>
-                    )}
-                    <span className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>{nombre}</span>
-                </div>
-                {fecha && <p className="text-[11px] mt-0.5" style={{ color: 'rgba(245,245,247,0.35)' }}>{formatDate(fecha)}</p>}
-                {nota && <p className="text-[11px] mt-0.5 italic" style={{ color: 'rgba(245,245,247,0.4)' }}>{nota}</p>}
-            </div>
-            <span className="text-[10px] font-bold px-2 py-1 rounded-md flex-shrink-0 mt-0.5"
-                style={{ background: badgeColor, color: badgeText }}>
-                {badge}
-            </span>
-        </div>
-    );
-}
-
-// ─── InfoField editable ───────────────────────────────────────────────────────
-function InfoFieldEditable({ icon: Icon, label, value, editValue, editing, onChange, full }) {
-    return (
-        <div className={full ? 'col-span-2' : ''}>
-            <p className="text-[10px] font-semibold uppercase tracking-wider mb-0.5"
-                style={{ color: 'rgba(161,227,216,0.5)' }}>
-                {label}
-            </p>
-            {editing ? (
-                <input
-                    type="text"
-                    value={editValue}
-                    onChange={e => onChange(e.target.value)}
-                    className="w-full px-2 py-1.5 rounded-lg text-sm outline-none transition-all"
-                    style={{
-                        background: 'rgba(15,14,19,0.8)',
-                        border: '1px solid rgba(130,99,177,0.4)',
-                        color: 'var(--text-primary)',
-                    }}
-                />
-            ) : (
-                <div className="flex items-center gap-1.5">
-                    <Icon size={11} style={{ color: '#A1E3D8', opacity: 0.6, flexShrink: 0 }} />
-                    <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
-                        {value || '—'}
-                    </span>
-                </div>
-            )}
-        </div>
-    );
-}
-
-function InfoField({ icon: Icon, label, value, full }) {
-    return (
-        <div className={full ? 'col-span-2' : ''}>
-            <p className="text-[10px] font-semibold uppercase tracking-wider mb-0.5"
-                style={{ color: 'rgba(161,227,216,0.5)' }}>
-                {label}
-            </p>
-            <div className="flex items-center gap-1.5">
-                <Icon size={11} style={{ color: '#A1E3D8', opacity: 0.6, flexShrink: 0 }} />
-                <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
-                    {value || '—'}
-                </span>
-            </div>
-        </div>
-    );
-}
-
-// ─── ControlesViewerModal ──────────────────────────────────────────────────
-function ControlesViewerModal({ onClose }) {
-    const [controles, setControles] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [filtroFecha, setFiltroFecha] = useState('TODOS');
-    const [filtroEstado, setFiltroEstado] = useState('TODOS');
-
-    const loadControles = useCallback(() => {
-        setLoading(true);
-        fetch(`${API_BASE}/api/cardiovascular/controles`)
-            .then(res => res.json())
-            .then(data => {
-                if (Array.isArray(data)) {
-                    setControles(data);
-                } else {
-                    console.error('Error del servidor:', data);
-                    setControles([]);
-                }
-                setLoading(false);
-            })
-            .catch(() => setLoading(false));
-    }, []);
-
-    useEffect(() => { loadControles(); }, [loadControles]);
-
-    const handleEliminar = async (id) => {
-        if (!confirm('¿Seguro que deseas cancelar y eliminar este control programado?')) return;
-        try {
-            const res = await fetch(`${API_BASE}/api/cardiovascular/controles/${id}`, { method: 'DELETE' });
-            if (res.ok) {
-                loadControles();
-            } else {
-                alert('Error al eliminar');
-            }
-        } catch (e) {
-            alert('Error de red');
-        }
-    };
-
-    const getEstadoBadge = (estado) => {
-        if (estado === 'BOOKED_AND_REMINDED') return { text: 'AGENDADO Y AVISADO', bg: 'rgba(161,227,216,0.15)', color: '#A1E3D8' };
-        if (estado === 'BOOKED')              return { text: 'AGENDADA POR BOT', bg: 'rgba(74,222,128,0.15)', color: '#86EFAC' };
-        if (estado === 'BOOKED_PRESENCIAL')   return { text: 'PRESENCIAL ✅', bg: 'rgba(56,189,248,0.15)', color: '#7DD3FC' };
-        if (estado === 'BOOKING_FAILED_NO_SLOT')  return { text: 'SIN CUPO', bg: 'rgba(251,146,60,0.15)', color: '#FED7AA' };
-        if (estado === 'BOOKING_FAILED_XENCO')    return { text: 'ERROR XENCO', bg: 'rgba(177,64,64,0.15)', color: '#F9A8A8' };
-        if (estado === 'FAILED_NO_PHONE')         return { text: 'SIN TELÉFONO', bg: 'rgba(177,64,64,0.15)', color: '#F9A8A8' };
-        if (estado === 'FAILED')                  return { text: 'FALLIDO', bg: 'rgba(177,64,64,0.15)', color: '#F9A8A8' };
-        if (estado === 'REMINDED_NO_BOOKING')     return { text: 'AVISADO SIN CITA', bg: 'rgba(251,191,36,0.15)', color: '#FCD34D' };
-        return { text: 'PENDIENTE', bg: 'rgba(251,191,36,0.15)', color: '#FCD34D' };
-    };
-
-
-    // ─── Filtros calculados ───────────────────────────────────────────────
-    const fechasUnicas = [...new Set(controles.map(c => c.fechaCitaOriginal))].sort().reverse();
-
-    const estadosResumen = {
-        TOTAL: controles.length,
-        PENDIENTE: controles.filter(c => !['BOOKED','BOOKED_AND_REMINDED','BOOKED_PRESENCIAL','BOOKING_FAILED_NO_SLOT','BOOKING_FAILED_XENCO','FAILED_NO_PHONE','FAILED','REMINDED_NO_BOOKING'].includes(c.estado)).length,
-        AGENDADO: controles.filter(c => c.estado === 'BOOKED' || c.estado === 'BOOKED_AND_REMINDED').length,
-        PRESENCIAL: controles.filter(c => c.estado === 'BOOKED_PRESENCIAL').length,
-        SIN_CUPO: controles.filter(c => c.estado === 'BOOKING_FAILED_NO_SLOT').length,
-        ERROR: controles.filter(c => ['BOOKING_FAILED_XENCO','FAILED_NO_PHONE','FAILED'].includes(c.estado)).length,
-    };
-
-    const [procesando, setProcesando] = useState(false);
-    const [procesMsg, setProcesMsg] = useState('');
-    const [escaneando, setEscaneando] = useState(false);
-    const [scanMsg, setScanMsg] = useState('');
-    const [recalculando, setRecalculando] = useState(false);
-    const [recalcMsg, setRecalcMsg] = useState('');
-
-    const handleProcesarPendientes = async () => {
-        if (!confirm('¿Deseas iniciar el agendamiento automático para todos los controles PENDIENTES ahora mismo?\n\nCada paciente recibirá un WhatsApp confirmando su cita.')) return;
-        setProcesando(true);
-        setProcesMsg('');
-        try {
-            const res = await fetch(`${API_BASE}/api/cardiovascular/controles/procesar-pendientes`, { method: 'POST' });
-            const data = await res.json();
-            setProcesMsg(data.message || 'Procesando...');
-            setTimeout(() => { loadControles(); setProcesando(false); }, 8000);
-        } catch (e) {
-            setProcesMsg('Error de red. Intenta de nuevo.');
-            setProcesando(false);
-        }
-    };
-
-    const handleScanPresencial = async () => {
-        if (!confirm('¿Deseas verificar en Xenco cuáles de los pacientes "Sin Cupo" ya tienen una cita agendada presencialmente?\n\nEsto puede tardar uno o dos minutos.')) return;
-        setEscaneando(true);
-        setScanMsg('');
-        try {
-            const res = await fetch(`${API_BASE}/api/cardiovascular/controles/scan-presenciales`, { method: 'POST' });
-            const data = await res.json();
-            setScanMsg(data.message || 'Escaneando...');
-            setTimeout(() => { loadControles(); setEscaneando(false); }, 90000);
-        } catch (e) {
-            setScanMsg('Error de red. Intenta de nuevo.');
-            setEscaneando(false);
-        }
-    };
-
-    const handleRecalcularFechas = async () => {
-        if (!confirm('¿Deseas recalcular las fechas de control de los pacientes PENDIENTES?\n\nEsto corrige los registros cuya fecha fue calculada incorrectamente (usaba la fecha de HOY en vez de la fecha del examen).\n\nSe aplicarán las reglas: NUEVA EPS=2 meses, resto=3 meses.')) return;
-        setRecalculando(true);
-        setRecalcMsg('');
-        try {
-            const res = await fetch(`${API_BASE}/api/cardiovascular/controles/recalcular-fechas`, { method: 'POST' });
-            const data = await res.json();
-            setRecalcMsg(data.message || 'Recalculado');
-            setTimeout(() => { loadControles(); setRecalculando(false); setRecalcMsg(''); }, 5000);
-        } catch (e) {
-            setRecalcMsg('Error de red. Intenta de nuevo.');
-            setRecalculando(false);
-        }
-    };
-
-    const handleSync = async () => {
-        if (!confirm('¿Deseas buscar HOY MISMOS a los pacientes que terminaron cita en Xenco para programarlos? (Normalmente el bot lo hace solo a las 8:00 PM).')) return;
-        setProcesando(true);
-        setProcesMsg('Sincronizando...');
-        try {
-            const res = await fetch(`${API_BASE}/api/cardiovascular/sync`);
-            const data = await res.json();
-            setProcesMsg(data.message || 'Sincronizado');
-            setTimeout(() => { loadControles(); setProcesando(false); setProcesMsg(''); }, 3000);
-        } catch (e) {
-            setProcesMsg('Error al sincronizar.');
-            setProcesando(false);
-        }
-    };
-
-    const controlesFiltrados = controles.filter(c => {
-        const pasaFecha = filtroFecha === 'TODOS' || c.fechaCitaOriginal === filtroFecha;
-        const esPendiente = !['BOOKED','BOOKED_AND_REMINDED','BOOKED_PRESENCIAL','BOOKING_FAILED_NO_SLOT','BOOKING_FAILED_XENCO','FAILED_NO_PHONE','FAILED','REMINDED_NO_BOOKING'].includes(c.estado);
-        let pasaEstado = true;
-        if (filtroEstado === 'PENDIENTE') pasaEstado = esPendiente;
-        else if (filtroEstado === 'AGENDADO') pasaEstado = c.estado === 'BOOKED' || c.estado === 'BOOKED_AND_REMINDED';
-        else if (filtroEstado === 'PRESENCIAL') pasaEstado = c.estado === 'BOOKED_PRESENCIAL';
-        else if (filtroEstado === 'SIN_CUPO') pasaEstado = c.estado === 'BOOKING_FAILED_NO_SLOT';
-        else if (filtroEstado === 'ERROR') pasaEstado = ['BOOKING_FAILED_XENCO','FAILED_NO_PHONE','FAILED'].includes(c.estado);
-        return pasaFecha && pasaEstado;
-    });
-
-
-    return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
-            style={{ background: 'rgba(8,7,12,0.85)', backdropFilter: 'blur(8px)' }}
-            onClick={e => e.target === e.currentTarget && onClose()}>
-            <div className="relative w-full max-w-4xl max-h-[90vh] overflow-hidden rounded-2xl flex flex-col shadow-2xl"
-                style={{ background: 'rgba(20,18,28,0.98)', border: '1px solid rgba(130,99,177,0.3)' }}>
-                {/* Header */}
-                <div className="flex items-center justify-between px-6 py-4 border-b flex-shrink-0"
-                    style={{ borderColor: 'rgba(130,99,177,0.2)' }}>
                     <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl flex items-center justify-center"
-                            style={{ background: 'linear-gradient(135deg, rgba(130,99,177,0.4) 0%, rgba(90,68,144,0.4) 100%)' }}>
-                            <CalendarCheck2 size={20} color="#C4AFED" />
+                        {/* Período */}
+                        <div className="flex items-center gap-2">
+                            <select value={year} onChange={e => setYear(parseInt(e.target.value))} style={inputBase}>
+                                {[2024,2025,2026,2027].map(y => <option key={y} value={y}>{y}</option>)}
+                            </select>
+                            <select value={month} onChange={e => setMonth(parseInt(e.target.value))} style={inputBase}>
+                                {MESES.map((m, i) => <option key={i} value={i}>{m}</option>)}
+                            </select>
                         </div>
-                        <div>
-                            <h2 className="text-base font-bold" style={{ color: '#F5F5F7' }}>Visor de Controles</h2>
-                            <p className="text-xs" style={{ color: 'rgba(196,175,237,0.7)' }}>
-                                {loading ? 'Cargando...' : `${controlesFiltrados.length} de ${controles.length} pacientes`}
-                            </p>
-                        </div>
-                    </div>
-                    <button onClick={onClose}
-                        className="w-8 h-8 rounded-lg flex items-center justify-center transition-all"
-                        style={{ background: 'rgba(245,245,247,0.06)', color: 'rgba(245,245,247,0.5)' }}
-                        onMouseEnter={e => e.currentTarget.style.background = 'rgba(177,64,64,0.2)'}
-                        onMouseLeave={e => e.currentTarget.style.background = 'rgba(245,245,247,0.06)'}>
-                        <X size={15} />
-                    </button>
-                </div>
-
-                {/* Barra de acciones */}
-                <div className="flex items-center gap-3 px-6 py-3 flex-shrink-0 flex-wrap" style={{ background: 'rgba(130,99,177,0.06)', borderBottom: '1px solid rgba(130,99,177,0.1)' }}>
-                    <button
-                        onClick={handleSync}
-                        disabled={procesando || escaneando}
-                        className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all"
-                        style={{ background: procesando ? 'rgba(74,222,128,0.1)' : 'rgba(74,222,128,0.2)', color: '#86EFAC', border: '1px solid rgba(74,222,128,0.35)' }}>
-                        {procesando ? <Loader2 size={13} className="animate-spin" /> : <span>🔄</span>}
-                        Sincronizar Pacientes CVD
-                    </button>
-                    <button
-                        onClick={handleScanPresencial}
-                        disabled={escaneando || procesando}
-                        className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all"
-                        style={{ background: escaneando ? 'rgba(56,189,248,0.1)' : 'rgba(56,189,248,0.2)', color: '#7DD3FC', border: '1px solid rgba(56,189,248,0.35)' }}>
-                        {escaneando ? <Loader2 size={13} className="animate-spin" /> : <span>🔍</span>}
-                        {escaneando ? 'Verificando en Xenco...' : '🏥 Verificar Presenciales en Xenco'}
-                    </button>
-                    <button
-                        onClick={handleProcesarPendientes}
-                        disabled={procesando || escaneando || recalculando}
-                        className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all"
-                        style={{ background: procesando ? 'rgba(130,99,177,0.2)' : 'rgba(130,99,177,0.35)', color: '#C4AFED', border: '1px solid rgba(130,99,177,0.4)' }}>
-                        {procesando ? <Loader2 size={13} className="animate-spin" /> : <CalendarCheck2 size={13} />}
-                        {procesando ? 'Procesando y enviando WhatsApp...' : '📲 Agendar Pendientes y Avisar Ahora'}
-                    </button>
-                    <button
-                        onClick={handleRecalcularFechas}
-                        disabled={recalculando || procesando || escaneando}
-                        className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all"
-                        style={{ background: recalculando ? 'rgba(251,146,60,0.1)' : 'rgba(251,146,60,0.2)', color: '#FED7AA', border: '1px solid rgba(251,146,60,0.4)' }}>
-                        {recalculando ? <Loader2 size={13} className="animate-spin" /> : <span>📐</span>}
-                        {recalculando ? 'Recalculando fechas...' : 'Corregir Fechas Pendientes'}
-                    </button>
-                    {(procesMsg || scanMsg || recalcMsg) && (
-                        <span className="text-xs" style={{ color: '#A1E3D8' }}>✔ {procesMsg || scanMsg || recalcMsg}</span>
-                    )}
-                </div>
-
-                {/* ── Resumen de estados ── */}
-                <div className="flex items-center gap-2 px-6 py-2 flex-shrink-0 flex-wrap" style={{ background: 'rgba(20,18,28,0.8)', borderBottom: '1px solid rgba(130,99,177,0.1)' }}>
-                    {[
-                        { key: 'TODOS',      label: 'Todos',        count: estadosResumen.TOTAL,      bg: 'rgba(130,99,177,0.2)',   color: '#C4AFED' },
-                        { key: 'PENDIENTE',  label: 'Pendientes',   count: estadosResumen.PENDIENTE,  bg: 'rgba(251,191,36,0.15)', color: '#FCD34D' },
-                        { key: 'AGENDADO',   label: 'Bot ✅',        count: estadosResumen.AGENDADO,   bg: 'rgba(74,222,128,0.15)', color: '#86EFAC' },
-                        { key: 'PRESENCIAL', label: 'Presencial 🏥', count: estadosResumen.PRESENCIAL, bg: 'rgba(56,189,248,0.15)', color: '#7DD3FC' },
-                        { key: 'SIN_CUPO',  label: 'Sin cupo',     count: estadosResumen.SIN_CUPO,   bg: 'rgba(251,146,60,0.15)', color: '#FED7AA' },
-                        { key: 'ERROR',     label: 'Error',        count: estadosResumen.ERROR,      bg: 'rgba(177,64,64,0.15)',  color: '#F9A8A8' },
-                    ].map(btn => (
-                        <button key={btn.key}
-                            onClick={() => setFiltroEstado(btn.key)}
-                            className="flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-semibold transition-all"
-                            style={{
-                                background: filtroEstado === btn.key ? btn.bg : 'rgba(255,255,255,0.04)',
-                                color: filtroEstado === btn.key ? btn.color : 'rgba(245,245,247,0.4)',
-                                border: `1px solid ${filtroEstado === btn.key ? btn.color.replace(')', ',0.4)').replace('rgb', 'rgba') : 'rgba(255,255,255,0.07)'}`,
-                                transform: filtroEstado === btn.key ? 'scale(1.05)' : 'scale(1)'
-                            }}>
-                            <span style={{ background: btn.bg, color: btn.color, borderRadius: '50%', width: 16, height: 16, display:'inline-flex', alignItems:'center', justifyContent:'center', fontSize: 10, fontWeight: 800 }}>{btn.count}</span>
-                            {btn.label}
+                        {/* Exportar */}
+                        {data && !loading && !errorMsg && (
+                            <div className="flex items-center gap-2">
+                                <button onClick={handleExportCSV}
+                                    className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold transition-all"
+                                    style={{ background: 'rgba(161,227,216,0.2)', color: '#A1E3D8', border: '1px solid rgba(161,227,216,0.35)' }}
+                                    onMouseEnter={e => e.currentTarget.style.background = 'rgba(161,227,216,0.3)'}
+                                    onMouseLeave={e => e.currentTarget.style.background = 'rgba(161,227,216,0.2)'}>
+                                    <Download size={12} /> CSV
+                                </button>
+                                <button onClick={handleExportPDF}
+                                    className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold transition-all"
+                                    style={{ background: 'rgba(177,64,64,0.25)', color: '#F9A8A8', border: '1px solid rgba(177,64,64,0.4)' }}
+                                    onMouseEnter={e => e.currentTarget.style.background = 'rgba(177,64,64,0.4)'}
+                                    onMouseLeave={e => e.currentTarget.style.background = 'rgba(177,64,64,0.25)'}>
+                                    <Download size={12} /> PDF
+                                </button>
+                            </div>
+                        )}
+                        <button onClick={onClose}
+                            className="w-8 h-8 rounded-lg flex items-center justify-center transition-all"
+                            style={{ background: 'rgba(245,245,247,0.06)', color: 'rgba(245,245,247,0.5)' }}
+                            onMouseEnter={e => e.currentTarget.style.background = 'rgba(177,64,64,0.2)'}
+                            onMouseLeave={e => e.currentTarget.style.background = 'rgba(245,245,247,0.06)'}>
+                            <X size={15} />
                         </button>
-                    ))}
-
-                    {/* Separador */}
-                    <div style={{ width: 1, height: 20, background: 'rgba(130,99,177,0.2)', margin: '0 4px' }} />
-
-                    {/* Filtro por fecha */}
-                    <div className="flex items-center gap-1.5">
-                        <Calendar size={12} style={{ color: 'rgba(196,175,237,0.5)' }} />
-                        <select
-                            value={filtroFecha}
-                            onChange={e => setFiltroFecha(e.target.value)}
-                            className="text-[11px] rounded-lg px-2 py-1 outline-none"
-                            style={{ background: 'rgba(130,99,177,0.15)', color: '#C4AFED', border: '1px solid rgba(130,99,177,0.25)', cursor: 'pointer' }}>
-                            <option value="TODOS">📅 Todos los días</option>
-                            {fechasUnicas.map(f => (
-                                <option key={f} value={f}>📅 {formatDate(f)}</option>
-                            ))}
-                        </select>
                     </div>
                 </div>
 
-                {/* List */}
-                <div className="flex-1 overflow-y-auto p-6">
+                {/* ── Body ── */}
+                <div className="flex-1 overflow-y-auto">
                     {loading ? (
-                        <div className="flex items-center justify-center py-20">
-                            <Loader2 size={30} className="animate-spin text-[#8263B1]" />
+                        <div className="flex flex-col items-center justify-center py-24 gap-3">
+                            <Loader2 size={36} className="animate-spin" style={{ color: '#8263B1' }} />
+                            <p className="text-sm" style={{ color: 'rgba(245,245,247,0.4)' }}>Consultando valoraciones de riesgo...</p>
                         </div>
-                    ) : controles.length === 0 ? (
-                        <EmptyState message="No hay controles a 3 meses programados actualmente." />
-                    ) : (
-                        <div className="grid grid-cols-1 gap-3">
-                            {controlesFiltrados.length === 0 ? (
-                                <div className="text-center py-12" style={{ color: 'rgba(196,175,237,0.4)' }}>
-                                    <CalendarCheck2 size={32} style={{ margin: '0 auto 12px', opacity: 0.3 }} />
-                                    <p className="text-sm">No hay pacientes con este filtro</p>
-                                </div>
-                            ) : controlesFiltrados.map(c => {
-                                const badge = getEstadoBadge(c.estado);
-                                return (
-                                    <div key={c.id} className="flex items-center justify-between p-4 rounded-xl border transition-all"
-                                        style={{ background: 'rgba(45,40,62,0.4)', borderColor: 'rgba(130,99,177,0.2)' }}
-                                        onMouseEnter={e => e.currentTarget.style.background = 'rgba(45,40,62,0.7)'}
-                                        onMouseLeave={e => e.currentTarget.style.background = 'rgba(45,40,62,0.4)'}>
-                                        <div className="flex-1 flex flex-col gap-2">
-                                            <div className="flex items-center gap-3 mt-1">
-                                                <span className="font-bold text-sm" style={{ color: '#F5F5F7' }}>{c.paciente}</span>
-                                                <span className="text-xs font-mono flex items-center gap-1" style={{ color: '#C4AFED', background: 'rgba(130,99,177,0.15)', padding: '2px 6px', borderRadius: '4px' }}>
-                                                    CC: {c.cedula}
-                                                </span>
-                                                <span className="text-xs font-mono flex items-center gap-1" style={{ color: c.telefono === 'SIN TELÉFONO' ? '#F9A8A8' : '#A1E3D8', background: c.telefono === 'SIN TELÉFONO' ? 'rgba(177,64,64,0.15)' : 'rgba(161,227,216,0.15)', padding: '2px 6px', borderRadius: '4px' }}>
-                                                    <Phone size={10} /> {c.telefono}
-                                                </span>
-                                                <span className="text-[10px] font-bold px-2 py-0.5 rounded uppercase" style={{ background: badge.bg, color: badge.color }}>
-                                                    {badge.text}
-                                                </span>
-                                                {c.canceladaEnXenco && (
-                                                    <span className="text-[10px] font-bold px-2 py-0.5 rounded uppercase" style={{ background: 'rgba(239, 68, 68, 0.2)', color: '#FCA5A5', border: '1px solid rgba(239, 68, 68, 0.5)' }}>
-                                                        CANCELADA EN XENCO
-                                                    </span>
-                                                )}
-                                            </div>
-                                            <div className="flex items-center gap-6 mt-1">
-                                                <div className="flex items-center gap-1.5">
-                                                    <History size={13} style={{ color: 'rgba(245,245,247,0.4)' }} />
-                                                    <span className="text-xs" style={{ color: 'rgba(245,245,247,0.6)' }}>
-                                                        Original: {formatDate(c.fechaCitaOriginal)}
-                                                    </span>
-                                                </div>
-                                                <div className="flex items-center gap-1.5">
-                                                    <Calendar size={13} style={{ color: '#A1E3D8' }} />
-                                                    <span className="text-xs font-semibold" style={{ color: '#A1E3D8' }}>
-                                                        Cita control: {formatDate(c.fechaControl)}{c.citaHora ? ` — ${c.citaHora}` : ''}
-                                                    </span>
-                                                </div>
-                                                <div className="flex items-center gap-1.5">
-                                                    <Bell size={13} style={{ color: 'rgba(245,245,247,0.4)' }} />
-                                                    <span className="text-xs" style={{ color: 'rgba(245,245,247,0.6)' }}>
-                                                        Recordatorio laboratorios: {formatDate(c.fechaRecordatorio)}
-                                                    </span>
-                                                </div>
-                                            </div>
-                                            {/* EPS y código */}
-                                            <div className="flex items-center gap-2 mt-1.5">
-                                                {c.epsInfo && (
-                                                    <span className="text-[10px] px-2 py-0.5 rounded font-semibold" style={{ background: c.epsInfo.includes('NUEVA EPS') ? 'rgba(59,130,246,0.15)' : 'rgba(168,85,247,0.15)', color: c.epsInfo.includes('NUEVA EPS') ? '#93C5FD' : '#D8B4FE' }}>
-                                                        🏥 {c.epsInfo}
-                                                    </span>
-                                                )}
-                                                {c.articuloCita && (
-                                                    <span className="text-[10px] px-2 py-0.5 rounded font-mono" style={{ background: 'rgba(130,99,177,0.15)', color: '#C4AFED' }}>
-                                                        {c.articuloCita}
-                                                    </span>
-                                                )}
-                                            </div>
-                                        </div>
-                                        <div className="flex-shrink-0 ml-4">
-                                            <button onClick={() => handleEliminar(c.id)}
-                                                className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all"
-                                                style={{ background: 'rgba(177,64,64,0.15)', color: '#F9A8A8', border: '1px solid rgba(177,64,64,0.3)' }}
-                                                onMouseEnter={e => e.currentTarget.style.background = 'rgba(177,64,64,0.25)'}
-                                                onMouseLeave={e => e.currentTarget.style.background = 'rgba(177,64,64,0.15)'}>
-                                                <Trash2 size={13} />
-                                                Cancelar
-                                            </button>
-                                        </div>
+                    ) : errorMsg ? (
+                        <div className="flex flex-col items-center justify-center py-20 gap-3 px-8">
+                            <AlertTriangle size={44} style={{ color: '#F9A8A8' }} />
+                            <p className="text-sm text-center" style={{ color: '#F9A8A8' }}>{errorMsg}</p>
+                            <button onClick={loadData}
+                                className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all"
+                                style={{ background: 'rgba(130,99,177,0.25)', color: '#C4AFED', border: '1px solid rgba(130,99,177,0.4)' }}>
+                                <RefreshCw size={12} /> Reintentar
+                            </button>
+                        </div>
+                    ) : data ? (
+                        <div className="flex flex-col gap-0">
+
+                            {/* ── KPI Cards ── */}
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 p-5"
+                                style={{ borderBottom: '1px solid rgba(130,99,177,0.12)', background: 'rgba(20,18,28,0.6)' }}>
+                                {/* Total */}
+                                <div className="rounded-xl px-5 py-4"
+                                    style={{ background: 'rgba(130,99,177,0.12)', border: '1px solid rgba(130,99,177,0.25)' }}>
+                                    <p className="text-[10px] tracking-widest uppercase font-semibold mb-1"
+                                        style={{ color: 'rgba(196,175,237,0.6)' }}>Total Pacientes</p>
+                                    <p className="text-3xl font-black" style={{ color: '#C4AFED' }}>
+                                        {filtroRiesgo !== 'TODOS' || filtroEps !== 'TODOS' || filtroControl !== 'TODOS' || busqueda ? totalFiltrado : data.resumen.total}
+                                    </p>
+                                    <div className="flex items-center gap-1 mt-1">
+                                        <Users size={11} style={{ color: 'rgba(196,175,237,0.5)' }} />
+                                        <span className="text-[10px]" style={{ color: 'rgba(196,175,237,0.5)' }}>con valoración de riesgo</span>
                                     </div>
-                                );
-                            })}
+                                </div>
+                                {/* En control */}
+                                <div className="rounded-xl px-5 py-4"
+                                    style={{ background: 'rgba(161,227,216,0.08)', border: '1px solid rgba(161,227,216,0.22)' }}>
+                                    <p className="text-[10px] tracking-widest uppercase font-semibold mb-1"
+                                        style={{ color: 'rgba(161,227,216,0.6)' }}>En Control</p>
+                                    <p className="text-3xl font-black" style={{ color: '#A1E3D8' }}>{enControlFiltrado}</p>
+                                    <div className="flex items-center gap-1 mt-1">
+                                        <TrendingUp size={11} style={{ color: 'rgba(161,227,216,0.5)' }} />
+                                        <span className="text-[10px]" style={{ color: 'rgba(161,227,216,0.5)' }}>
+                                            {totalFiltrado ? Math.round(enControlFiltrado / totalFiltrado * 100) : 0}% del filtro
+                                        </span>
+                                    </div>
+                                </div>
+                                {/* Sin control */}
+                                <div className="rounded-xl px-5 py-4"
+                                    style={{ background: 'rgba(177,64,64,0.1)', border: '1px solid rgba(177,64,64,0.25)' }}>
+                                    <p className="text-[10px] tracking-widest uppercase font-semibold mb-1"
+                                        style={{ color: 'rgba(249,168,168,0.6)' }}>Sin Control</p>
+                                    <p className="text-3xl font-black" style={{ color: '#F9A8A8' }}>{sinControlFiltrado}</p>
+                                    <div className="flex items-center gap-1 mt-1">
+                                        <TrendingDown size={11} style={{ color: 'rgba(249,168,168,0.5)' }} />
+                                        <span className="text-[10px]" style={{ color: 'rgba(249,168,168,0.5)' }}>
+                                            {totalFiltrado ? Math.round(sinControlFiltrado / totalFiltrado * 100) : 0}% del filtro
+                                        </span>
+                                    </div>
+                                </div>
+                                {/* Desglose por riesgo */}
+                                <div className="rounded-xl px-5 py-4"
+                                    style={{ background: 'rgba(45,40,62,0.5)', border: '1px solid rgba(130,99,177,0.18)' }}>
+                                    <p className="text-[10px] tracking-widest uppercase font-semibold mb-2"
+                                        style={{ color: 'rgba(196,175,237,0.6)' }}>Por Nivel de Riesgo</p>
+                                    <div className="flex flex-col gap-1">
+                                        {Object.entries(data.resumen.porRiesgo || {}).map(([r, stats]) => {
+                                            const rc = colorRiesgo(r);
+                                            return (
+                                                <div key={r} className="flex items-center justify-between">
+                                                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded"
+                                                        style={{ background: rc.bg, color: rc.color }}>{r}</span>
+                                                    <span className="text-xs font-bold" style={{ color: rc.color }}>{stats.total}</span>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* ── Barra de filtros ── */}
+                            <div className="flex items-center gap-3 px-5 py-3 flex-wrap flex-shrink-0"
+                                style={{ background: 'rgba(130,99,177,0.05)', borderBottom: '1px solid rgba(130,99,177,0.1)' }}>
+                                <ListFilter size={13} style={{ color: 'rgba(196,175,237,0.5)' }} />
+                                <span className="text-[10px] uppercase tracking-widest font-semibold" style={{ color: 'rgba(196,175,237,0.5)' }}>Filtros:</span>
+
+                                {/* Filtro Riesgo */}
+                                <div className="flex items-center gap-1">
+                                    {['TODOS', ...riesgosUnicos].map(r => {
+                                        const rc = r === 'TODOS' ? { bg: 'rgba(130,99,177,0.2)', color: '#C4AFED', border: 'rgba(130,99,177,0.4)' } : colorRiesgo(r);
+                                        const active = filtroRiesgo === r;
+                                        return (
+                                            <button key={r} onClick={() => setFiltroRiesgo(r)}
+                                                className="text-[11px] font-bold px-3 py-1 rounded-full transition-all"
+                                                style={{
+                                                    background: active ? rc.bg : 'rgba(255,255,255,0.04)',
+                                                    color: active ? rc.color : 'rgba(245,245,247,0.35)',
+                                                    border: `1px solid ${active ? rc.border : 'rgba(255,255,255,0.07)'}`,
+                                                    transform: active ? 'scale(1.05)' : 'scale(1)',
+                                                }}>
+                                                {r === 'TODOS' ? 'Todos los riesgos' : r}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+
+                                <div style={{ width: 1, height: 18, background: 'rgba(130,99,177,0.2)' }} />
+
+                                {/* Filtro Control */}
+                                {[
+                                    { key: 'TODOS', label: 'Todos', bg: 'rgba(130,99,177,0.2)', color: '#C4AFED', border: 'rgba(130,99,177,0.4)' },
+                                    { key: 'EN_CONTROL', label: '✓ En Control', bg: 'rgba(161,227,216,0.15)', color: '#A1E3D8', border: 'rgba(161,227,216,0.4)' },
+                                    { key: 'SIN_CONTROL', label: '✗ Sin Control', bg: 'rgba(177,64,64,0.15)', color: '#F9A8A8', border: 'rgba(177,64,64,0.4)' },
+                                ].map(btn => (
+                                    <button key={btn.key} onClick={() => setFiltroControl(btn.key)}
+                                        className="text-[11px] font-bold px-3 py-1 rounded-full transition-all"
+                                        style={{
+                                            background: filtroControl === btn.key ? btn.bg : 'rgba(255,255,255,0.04)',
+                                            color: filtroControl === btn.key ? btn.color : 'rgba(245,245,247,0.35)',
+                                            border: `1px solid ${filtroControl === btn.key ? btn.border : 'rgba(255,255,255,0.07)'}`,
+                                            transform: filtroControl === btn.key ? 'scale(1.05)' : 'scale(1)',
+                                        }}>
+                                        {btn.label}
+                                    </button>
+                                ))}
+
+                                <div style={{ width: 1, height: 18, background: 'rgba(130,99,177,0.2)' }} />
+
+                                {/* Filtro EPS */}
+                                <select value={filtroEps} onChange={e => setFiltroEps(e.target.value)}
+                                    className="text-[11px] rounded-lg px-2 py-1 outline-none"
+                                    style={{ background: 'rgba(130,99,177,0.15)', color: '#C4AFED', border: '1px solid rgba(130,99,177,0.25)', cursor: 'pointer', maxWidth: '200px' }}>
+                                    <option value="TODOS">🏥 Todas las EPS</option>
+                                    {epsUnicas.map(e => <option key={e} value={e}>{e}</option>)}
+                                </select>
+
+                                {/* Búsqueda */}
+                                <div className="flex items-center gap-1.5 flex-1 min-w-[140px] px-3 py-1.5 rounded-lg"
+                                    style={{ background: 'rgba(15,14,19,0.8)', border: '1px solid rgba(130,99,177,0.2)', maxWidth: '220px' }}>
+                                    <Search size={11} style={{ color: 'rgba(196,175,237,0.5)', flexShrink: 0 }} />
+                                    <input type="text" placeholder="Nombre o cédula..."
+                                        value={busqueda} onChange={e => setBusqueda(e.target.value)}
+                                        className="flex-1 bg-transparent outline-none text-[11px]"
+                                        style={{ color: 'var(--text-primary)' }} />
+                                </div>
+
+                                <span className="text-[11px] ml-auto" style={{ color: 'rgba(245,245,247,0.3)' }}>
+                                    {totalFiltrado} paciente{totalFiltrado !== 1 ? 's' : ''}
+                                </span>
+                            </div>
+
+                            {/* ── Tabla de pacientes ── */}
+                            <div className="overflow-auto" style={{ maxHeight: 'calc(95vh - 350px)' }}>
+                                {pacientesFiltrados.length === 0 ? (
+                                    <div className="flex flex-col items-center justify-center py-16 gap-2">
+                                        <Users size={32} style={{ color: 'rgba(245,245,247,0.1)' }} />
+                                        <p className="text-xs" style={{ color: 'rgba(245,245,247,0.3)' }}>No hay pacientes con este filtro</p>
+                                    </div>
+                                ) : (
+                                    <table className="w-full" style={{ borderCollapse: 'collapse' }}>
+                                        <thead>
+                                            <tr style={{ background: 'rgba(130,99,177,0.1)', borderBottom: '1px solid rgba(130,99,177,0.15)' }}>
+                                                {['Cédula','Nombre','Riesgo','EPS','Fecha Valoración','Control','Última Cita CVD'].map(h => (
+                                                    <th key={h} className="px-4 py-3 text-left text-[10px] font-bold tracking-widest uppercase"
+                                                        style={{ color: 'rgba(196,175,237,0.6)', whiteSpace: 'nowrap' }}>{h}</th>
+                                                ))}
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {pacientesFiltrados.map((p, i) => {
+                                                const rc = colorRiesgo(p.nivelRiesgo);
+                                                return (
+                                                    <tr key={`${p.codigo}-${i}`}
+                                                        style={{ borderBottom: '1px solid rgba(130,99,177,0.08)', transition: 'background 0.15s' }}
+                                                        onMouseEnter={e => e.currentTarget.style.background = 'rgba(130,99,177,0.08)'}
+                                                        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                                                        <td className="px-4 py-3">
+                                                            <span className="text-xs font-mono" style={{ color: '#C4AFED' }}>{p.codigo}</span>
+                                                        </td>
+                                                        <td className="px-4 py-3">
+                                                            <span className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>{p.nombre}</span>
+                                                        </td>
+                                                        <td className="px-4 py-3">
+                                                            <span className="text-[10px] font-bold px-2 py-1 rounded"
+                                                                style={{ background: rc.bg, color: rc.color, border: `1px solid ${rc.border}` }}>
+                                                                {p.nivelRiesgo}
+                                                            </span>
+                                                        </td>
+                                                        <td className="px-4 py-3">
+                                                            <span className="text-[11px]" style={{ color: 'rgba(245,245,247,0.6)' }}>{p.eps}</span>
+                                                        </td>
+                                                        <td className="px-4 py-3">
+                                                            <span className="text-[11px]" style={{ color: 'rgba(245,245,247,0.55)' }}>{formatDate(p.fechaValoracion)}</span>
+                                                        </td>
+                                                        <td className="px-4 py-3">
+                                                            <span className="text-[11px] font-bold flex items-center gap-1"
+                                                                style={{ color: p.enControl ? '#A1E3D8' : '#F9A8A8' }}>
+                                                                {p.enControl
+                                                                    ? <><CheckCircle2 size={13} /> Sí</>
+                                                                    : <><XCircle size={13} /> No</>
+                                                                }
+                                                            </span>
+                                                        </td>
+                                                        <td className="px-4 py-3">
+                                                            <span className="text-[11px]" style={{ color: p.ultimaCitaCVD ? 'rgba(161,227,216,0.7)' : 'rgba(245,245,247,0.25)' }}>
+                                                                {p.ultimaCitaCVD ? formatDate(p.ultimaCitaCVD) : '— Sin cita'}
+                                                            </span>
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            })}
+                                        </tbody>
+                                    </table>
+                                )}
+                            </div>
+
+                            {/* ── Desglose por EPS ── */}
+                            {data.resumen.porEps && data.resumen.porEps.length > 0 && (
+                                <div className="px-5 py-4 flex-shrink-0"
+                                    style={{ borderTop: '1px solid rgba(130,99,177,0.15)', background: 'rgba(20,18,28,0.6)' }}>
+                                    <p className="text-[10px] tracking-widest uppercase font-semibold mb-3"
+                                        style={{ color: 'rgba(196,175,237,0.5)' }}>Desglose por EPS (datos totales del período)</p>
+                                    <div className="flex flex-wrap gap-2">
+                                        {data.resumen.porEps.map(eps => (
+                                            <div key={eps.nombre} className="flex items-center gap-2 px-3 py-2 rounded-xl"
+                                                style={{ background: 'rgba(130,99,177,0.1)', border: '1px solid rgba(130,99,177,0.18)' }}>
+                                                <span className="text-[11px] font-semibold" style={{ color: '#C4AFED' }}>{eps.nombre}</span>
+                                                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded"
+                                                    style={{ background: 'rgba(130,99,177,0.2)', color: '#C4AFED' }}>{eps.total}</span>
+                                                <span className="text-[10px]" style={{ color: '#A1E3D8' }}>✓ {eps.enControl}</span>
+                                                <span className="text-[10px]" style={{ color: '#F9A8A8' }}>✗ {eps.sinControl}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
                         </div>
-                    )}
+                    ) : null}
                 </div>
             </div>
         </div>
@@ -1673,39 +1499,40 @@ function DashboardIndicadoresModal({ onClose }) {
     );
 }
 
-// ─── Main Page ────────────────────────────────────────────────────────────────
-export default function CardiovascularPage() {
+// ─── Main Page ─────────────────────────────────────────────────────────
+function CardiovascularPage() {
     const [searchId, setSearchId] = useState('');
     const [dateFilter, setDateFilter] = useState('all');
     const [showReport, setShowReport] = useState(false);
     const [loading, setLoading] = useState(false);
-    const [patient, setPatient] = useState(MOCK_PATIENT);
-    const [programados, setProgramados] = useState(MOCK_PROGRAMADOS);
-    const [pendientes, setPendientes] = useState(MOCK_PENDIENTES);
-    const [realizados, setRealizados] = useState(MOCK_REALIZADOS);
+    const [patient, setPatient] = useState(null);
+    const [programados, setProgramados] = useState([]);
+    const [pendientes, setPendientes] = useState([]);
+    const [realizados, setRealizados] = useState([]);
     const [sendingId, setSendingId] = useState(null);
     const [agendandoId, setAgendandoId] = useState(null);
     const [toast, setToast] = useState(null);
 
-    // ── Edición de paciente ───────────────────────────────────────────────────
+    // ── Edición de paciente ────────────────────────────────────────────────────
     const [editingPatient, setEditingPatient] = useState(false);
     const [editPhone, setEditPhone] = useState('');
     const [editPhoneErr, setEditPhoneErr] = useState('');
     const [savingPatient, setSavingPatient] = useState(false);
 
-    // ── Eliminación de programado ─────────────────────────────────────────────
-    const [eliminandoExamen, setEliminandoExamen] = useState(null); // examen en proceso
+    // ── Eliminación de programado ───────────────────────────────────────────────
+    const [eliminandoExamen, setEliminandoExamen] = useState(null);
     const [eliminandoId, setEliminandoId] = useState(null);
 
-    // ── Historial ─────────────────────────────────────────────────────────────
+    // ── Historial ─────────────────────────────────────────────────────────────────
     const [showHistorial, setShowHistorial] = useState(false);
 
-    // ── Programar cita ────────────────────────────────────────────────────────
+    // ── Programar cita ──────────────────────────────────────────────────────────────
     const [showProgramarCita, setShowProgramarCita] = useState(false);
     const [showControlesViewer, setShowControlesViewer] = useState(false);
     const [showIndicadores, setShowIndicadores] = useState(false);
+    const [showReporteRiesgo, setShowReporteRiesgo] = useState(false);
 
-    // ── Filtro por fecha ──────────────────────────────────────────────────────
+    // ── Filtro por fecha ──────────────────────────────────────────────────────────────
     const applyDateFilter = (list) => {
         if (dateFilter === 'all') return list;
         const now = new Date();
@@ -1749,10 +1576,8 @@ export default function CardiovascularPage() {
         }
     }, [searchId]);
 
-    // ── Guardar edición del paciente ──────────────────────────────────────────
     const handleSavePatient = async () => {
         if (!patient) return;
-        // ── Validar formato teléfono antes de enviar ──
         const digitsOnly = editPhone.replace(/\D/g, '');
         if (digitsOnly.length < 7 || digitsOnly.length > 15) {
             setEditPhoneErr('Ingresa un número válido (7 a 15 dígitos, sin espacios ni guiones).');
@@ -1782,7 +1607,6 @@ export default function CardiovascularPage() {
         }
     };
 
-    // ── Recordatorio WhatsApp ─────────────────────────────────────────────────
     const handleRemind = async (id, tipoExamen) => {
         setSendingId(id);
         try {
@@ -1807,7 +1631,6 @@ export default function CardiovascularPage() {
         }
     };
 
-    // ── Eliminar programación ─────────────────────────────────────────────────
     const handleEliminar = (examen) => setEliminandoExamen(examen);
 
     const confirmarEliminacion = async (motivo) => {
@@ -1911,6 +1734,10 @@ export default function CardiovascularPage() {
                 <DashboardIndicadoresModal onClose={() => setShowIndicadores(false)} />
             )}
 
+            {showReporteRiesgo && (
+                <ReporteRiesgoModal onClose={() => setShowReporteRiesgo(false)} />
+            )}
+
             {/* ── Decorativos ── */}
             <div className="fixed inset-0 chat-bg pointer-events-none" />
             <div className="fixed top-[-160px] left-[-160px] w-[600px] h-[600px] rounded-full pointer-events-none"
@@ -1996,8 +1823,23 @@ export default function CardiovascularPage() {
                         <Activity size={13} />
                         Indicadores CVD
                     </button>
+                    <button
+                        onClick={() => setShowReporteRiesgo(true)}
+                        className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all"
+                        style={{
+                            background: 'linear-gradient(135deg, rgba(130,99,177,0.35) 0%, rgba(177,64,64,0.35) 100%)',
+                            color: '#E2D4FF',
+                            border: '1px solid rgba(130,99,177,0.5)',
+                            boxShadow: '0 0 15px rgba(130,99,177,0.15)',
+                        }}
+                        onMouseEnter={e => e.currentTarget.style.boxShadow = '0 0 25px rgba(130,99,177,0.35)'}
+                        onMouseLeave={e => e.currentTarget.style.boxShadow = '0 0 15px rgba(130,99,177,0.15)'}>
+                        <BarChart2 size={13} />
+                        Informe Riesgo
+                    </button>
                 </div>
             </header>
+
 
             {/* ── Main content ── */}
             <main className="relative z-10 flex-1 p-6 overflow-auto">
@@ -2264,3 +2106,5 @@ export default function CardiovascularPage() {
         </div>
     );
 }
+
+export default CardiovascularPage;

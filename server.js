@@ -463,6 +463,181 @@ app.get('/api/cardiovascular/indicadores', async (req, res) => {
     }
 });
 
+// ─── GET /api/cardiovascular/reporte-riesgo — Informe poblacional de riesgo CVD ──
+// Consulta TQVALORACIONRIESGO y determina cuántos pacientes están en control
+// Parámetros (query): riesgo, enControl, year, month
+app.get('/api/cardiovascular/reporte-riesgo', async (req, res) => {
+    try {
+        const { riesgo, enControl, year, month } = req.query;
+
+        // Período de valoración (por defecto: año en curso)
+        const y = year ? parseInt(year) : new Date().getFullYear();
+        const m = month ? parseInt(month) : null;
+
+        let fechaDesde, fechaHasta;
+        if (m) {
+            fechaDesde = parseInt(`${y}${String(m).padStart(2, '0')}01`);
+            fechaHasta = parseInt(`${y}${String(m).padStart(2, '0')}31`);
+        } else {
+            fechaDesde = parseInt(`${y}0101`);
+            fechaHasta = parseInt(`${y}1231`);
+        }
+
+        // ─── 1. Obtener todos los pacientes con valoración de riesgo en el período ──
+        const valoraciones = await medicalPrisma.$queryRawUnsafe(`
+            SELECT
+                LTRIM(RTRIM(r.QNJ_COD)) AS codigo,
+                r.QNJ_FCH AS fechaValoracion,
+                LTRIM(RTRIM(r.QNJ_RIESGO)) AS nivelRiesgo,
+                LTRIM(RTRIM(ISNULL(f.KC2_PNOMBRE,'')) + ' ' + ISNULL(f.KC2_PAPELLIDO,'')) AS nombre,
+                LTRIM(RTRIM(ISNULL(n.KCN_NOM,''))) AS nombreNui,
+                ISNULL(LTRIM(RTRIM(e.ENT_NOMBRE)), 'SIN EPS') AS eps,
+                c.KC3_ENTIDAD AS entidadCod
+            FROM TQVALORACIONRIESGO r
+            LEFT JOIN tMUSUARIOSFACTURACION f
+                ON LTRIM(RTRIM(f.KC2_COD)) = LTRIM(RTRIM(r.QNJ_COD))
+            LEFT JOIN pacienteNUI n
+                ON LTRIM(RTRIM(n.KCN_COD)) = LTRIM(RTRIM(r.QNJ_COD))
+            OUTER APPLY (
+                SELECT TOP 1 c2.KC3_ENTIDAD
+                FROM TMCITASUSUARIOS c2
+                WHERE LTRIM(RTRIM(c2.KC3_COD)) = LTRIM(RTRIM(r.QNJ_COD))
+                  AND c2.KC3_NUM > 0
+                ORDER BY c2.KC3_FCH DESC
+            ) c
+            LEFT JOIN TMENTIDADES e ON e.ENT_COD = c.KC3_ENTIDAD
+            WHERE r.QNJ_FCH >= ${fechaDesde}
+              AND r.QNJ_FCH <= ${fechaHasta}
+        `);
+
+        if (!valoraciones || valoraciones.length === 0) {
+            return res.json({
+                resumen: { total: 0, enControl: 0, sinControl: 0, porRiesgo: {}, porEps: [] },
+                pacientes: []
+            });
+        }
+
+        // ─── 2. Para cada paciente, verificar si tiene cita CVD reciente (últimos 3 meses) ─
+        const hoy = new Date();
+        const hace3Meses = new Date(hoy);
+        hace3Meses.setMonth(hace3Meses.getMonth() - 3);
+        const fechaControl3M = parseInt(
+            `${hace3Meses.getFullYear()}${String(hace3Meses.getMonth() + 1).padStart(2,'0')}${String(hace3Meses.getDate()).padStart(2,'0')}`
+        );
+
+        // Obtener el conjunto de cédulas únicas para hacer la consulta masiva
+        const cedulas = [...new Set(valoraciones.map(v => v.codigo).filter(Boolean))];
+        const cedulasSql = cedulas.map(c => `'${c.replace(/'/g, "''")}'`).join(',');
+
+        let citasRecientes = [];
+        if (cedulasSql.length > 0) {
+            citasRecientes = await medicalPrisma.$queryRawUnsafe(`
+                SELECT
+                    LTRIM(RTRIM(KC3_COD)) AS codigo,
+                    MAX(KC3_FCH) AS ultimaCita
+                FROM TMCITASUSUARIOS
+                WHERE LTRIM(RTRIM(KC3_COD)) IN (${cedulasSql})
+                  AND KC3_FCH >= ${fechaControl3M}
+                  AND KC3_NUM > 0
+                  AND LTRIM(RTRIM(KC3_ARTIC)) IN ('890301-7','890301-8','890301-12','890301-13','890301-14','890301-15','890301-16')
+                GROUP BY LTRIM(RTRIM(KC3_COD))
+            `);
+        }
+
+        // Mapa: código → última cita CVD
+        const citasMap = {};
+        for (const c of citasRecientes) {
+            if (c.codigo) citasMap[c.codigo.trim()] = c.ultimaCita;
+        }
+
+        // ─── 3. Construir lista de pacientes enriquecida ──────────────────────────
+        // Deduplicar por código (quedarse con la valoración más reciente por paciente)
+        const pacientesMap = {};
+        for (const v of valoraciones) {
+            const cod = (v.codigo || '').trim();
+            if (!cod) continue;
+            if (!pacientesMap[cod] || v.fechaValoracion > pacientesMap[cod].fechaValoracion) {
+                pacientesMap[cod] = v;
+            }
+        }
+
+        let pacientes = Object.values(pacientesMap).map(v => {
+            const cod = (v.codigo || '').trim();
+            const ultimaCita = citasMap[cod] || null;
+            const estaEnControl = !!ultimaCita;
+            const nombreFinal = (v.nombre && v.nombre.trim()) || (v.nombreNui && v.nombreNui.trim()) || 'Sin nombre';
+            const nivelRiesgo = (v.nivelRiesgo || 'DESCONOCIDO').toUpperCase().trim();
+            return {
+                codigo: cod,
+                nombre: nombreFinal,
+                nivelRiesgo,
+                eps: (v.eps || 'SIN EPS').trim(),
+                fechaValoracion: String(v.fechaValoracion),
+                enControl: estaEnControl,
+                ultimaCitaCVD: ultimaCita ? String(ultimaCita) : null,
+            };
+        });
+
+        // ─── 4. Aplicar filtros opcionales ──────────────────────────────────────
+        if (riesgo && riesgo !== 'TODOS') {
+            pacientes = pacientes.filter(p => p.nivelRiesgo === riesgo.toUpperCase());
+        }
+        if (enControl === 'true') {
+            pacientes = pacientes.filter(p => p.enControl);
+        } else if (enControl === 'false') {
+            pacientes = pacientes.filter(p => !p.enControl);
+        }
+
+        // ─── 5. Calcular resumen ─────────────────────────────────────────────────
+        const total = pacientes.length;
+        const enControlCount = pacientes.filter(p => p.enControl).length;
+        const sinControlCount = total - enControlCount;
+
+        const porRiesgo = {};
+        for (const p of pacientes) {
+            if (!porRiesgo[p.nivelRiesgo]) porRiesgo[p.nivelRiesgo] = { total: 0, enControl: 0, sinControl: 0 };
+            porRiesgo[p.nivelRiesgo].total++;
+            if (p.enControl) porRiesgo[p.nivelRiesgo].enControl++;
+            else porRiesgo[p.nivelRiesgo].sinControl++;
+        }
+
+        const epsMap = {};
+        for (const p of pacientes) {
+            const eps = p.eps || 'SIN EPS';
+            if (!epsMap[eps]) epsMap[eps] = { nombre: eps, total: 0, enControl: 0, sinControl: 0 };
+            epsMap[eps].total++;
+            if (p.enControl) epsMap[eps].enControl++;
+            else epsMap[eps].sinControl++;
+        }
+        const porEps = Object.values(epsMap).sort((a, b) => b.total - a.total);
+
+        // ─── 6. Obtener lista de EPS y riesgos únicos para los filtros UI ────────
+        const allPacientesRaw = Object.values(pacientesMap);
+        const epsUnicas = [...new Set(allPacientesRaw.map(p => (p.eps || 'SIN EPS').trim()))].sort();
+        const riesgosUnicos = [...new Set(allPacientesRaw.map(p => (p.nivelRiesgo || 'DESCONOCIDO').toUpperCase().trim()))].sort();
+
+        res.json({
+            resumen: {
+                total,
+                enControl: enControlCount,
+                sinControl: sinControlCount,
+                pctEnControl: total ? Math.round((enControlCount / total) * 1000) / 10 : 0,
+                pctSinControl: total ? Math.round((sinControlCount / total) * 1000) / 10 : 0,
+                porRiesgo,
+                porEps,
+            },
+            filtros: {
+                epsUnicas,
+                riesgosUnicos,
+            },
+            pacientes,
+        });
+    } catch (error) {
+        logger.error('[CARDIOVASCULAR] Error generando reporte de riesgo:', error.message);
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // GET /api/cardiovascular/sync — Forzar sincronización manual de pacientes CVD
 app.get('/api/cardiovascular/sync', async (req, res) => {
     try {
