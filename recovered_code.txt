@@ -1,5 +1,0 @@
-- [x] Revisar estructura del proyecto y endpoints existentes
-- [x] Backend: Agregar endpoint `GET /api/cardiovascular/reporte-riesgo` en server.js
-- [x] Frontend: Agregar componente `ReporteRiesgoModal` en page.js
-- [x] Frontend: Agregar botón "Informe Riesgo" en la barra superior
-- [x] Verificar que el servidor responde correctamente — ✅ Build exitoso (código 0)
