@@ -486,28 +486,21 @@ app.get('/api/cardiovascular/reporte-riesgo', async (req, res) => {
         // ─── 1. Obtener todos los pacientes con valoración de riesgo en el período ──
         const valoraciones = await medicalPrisma.$queryRawUnsafe(`
             SELECT
-                LTRIM(RTRIM(r.QNJ_COD)) AS codigo,
-                r.QNJ_FCH AS fechaValoracion,
-                LTRIM(RTRIM(r.QNJ_RIESGO)) AS nivelRiesgo,
-                LTRIM(RTRIM(ISNULL(f.KC2_PNOMBRE,'')) + ' ' + ISNULL(f.KC2_PAPELLIDO,'')) AS nombre,
-                LTRIM(RTRIM(ISNULL(n.KCN_NOM,''))) AS nombreNui,
-                ISNULL(LTRIM(RTRIM(e.ENT_NOMBRE)), 'SIN EPS') AS eps,
-                c.KC3_ENTIDAD AS entidadCod
-            FROM TQVALORACIONRIESGO r
-            LEFT JOIN tMUSUARIOSFACTURACION f
-                ON LTRIM(RTRIM(f.KC2_COD)) = LTRIM(RTRIM(r.QNJ_COD))
-            LEFT JOIN pacienteNUI n
-                ON LTRIM(RTRIM(n.KCN_COD)) = LTRIM(RTRIM(r.QNJ_COD))
-            OUTER APPLY (
-                SELECT TOP 1 c2.KC3_ENTIDAD
-                FROM TMCITASUSUARIOS c2
-                WHERE LTRIM(RTRIM(c2.KC3_COD)) = LTRIM(RTRIM(r.QNJ_COD))
-                  AND c2.KC3_NUM > 0
-                ORDER BY c2.KC3_FCH DESC
-            ) c
-            LEFT JOIN TMENTIDADES e ON e.ENT_COD = c.KC3_ENTIDAD
-            WHERE r.QNJ_FCH >= ${fechaDesde}
-              AND r.QNJ_FCH <= ${fechaHasta}
+                LTRIM(RTRIM(CAST(v.Codigo_KC AS VARCHAR))) AS codigo,
+                v.[Fecha HC] AS fechaValoracion,
+                LTRIM(RTRIM(v.[RIESGO CV])) AS nivelRiesgoOriginal,
+                LTRIM(RTRIM(
+                    ISNULL(v.[P.Nombre], '') + ' ' + 
+                    ISNULL(v.[S.Nombre], '') + ' ' + 
+                    ISNULL(v.[P.Apellido], '') + ' ' + 
+                    ISNULL(v.[S.Apellido], '')
+                )) AS nombre,
+                ISNULL(LTRIM(RTRIM(v.[NOMBRE ENTIDAD])), 'SIN EPS') AS eps
+            FROM VIQ_ALTO_COSTO v
+            WHERE v.[Fecha HC] >= ${fechaDesde}
+              AND v.[Fecha HC] <= ${fechaHasta}
+              AND v.[RIESGO CV] IS NOT NULL
+              AND LTRIM(RTRIM(v.[RIESGO CV])) != ''
         `);
 
         if (!valoraciones || valoraciones.length === 0) {
@@ -565,8 +558,9 @@ app.get('/api/cardiovascular/reporte-riesgo', async (req, res) => {
             const cod = (v.codigo || '').trim();
             const ultimaCita = citasMap[cod] || null;
             const estaEnControl = !!ultimaCita;
-            const nombreFinal = (v.nombre && v.nombre.trim()) || (v.nombreNui && v.nombreNui.trim()) || 'Sin nombre';
-            const nivelRiesgo = (v.nivelRiesgo || 'DESCONOCIDO').toUpperCase().trim();
+            const nombreFinal = (v.nombre && v.nombre.trim()) || 'Sin nombre';
+            const mapaRiesgo = { '0': 'BAJO', '1': 'MEDIO', '2': 'ALTO', '3': 'MUY ALTO' };
+            const nivelRiesgo = mapaRiesgo[v.nivelRiesgoOriginal] || 'DESCONOCIDO';
             return {
                 codigo: cod,
                 nombre: nombreFinal,
