@@ -491,22 +491,24 @@ async function getAvailableSlots(fechaStr, tipo = 'medicina general', preferredD
     }
     
     // Ahora filtramos esos turnos "actuales" por sede (lista blanca) y especialidad
-    const listaPermitidos = [...(sede === 'Sevilla' ? MEDICOS_PERMITIDOS_SEVILLA : MEDICOS_PERMITIDOS_EBEJICO)];
+    let listaPermitidos;
     if (isCVD) {
-        // CVD Ebejico → médico 111 | CVD Sevilla → médico 888
+        // CVD: SOLO el médico PYP correspondiente a la sede. Sin médicos generales.
         const medicoCVD = sede === 'Sevilla' ? MEDICO_CVD_SEVILLA : MEDICO_CVD_EBEJICO;
-        if (!listaPermitidos.includes(medicoCVD)) listaPermitidos.push(medicoCVD);
-    }
-    // Odontología en Ebejico: agregar médicos de odontología de Ebejico a la lista permitida
-    if (sede !== 'Sevilla' && esOdontologia) {
-        for (const codM of MEDICOS_ODONTOLOGIA_EBEJICO) {
-            if (!listaPermitidos.includes(codM)) listaPermitidos.push(codM);
+        listaPermitidos = [medicoCVD];
+    } else {
+        listaPermitidos = [...(sede === 'Sevilla' ? MEDICOS_PERMITIDOS_SEVILLA : MEDICOS_PERMITIDOS_EBEJICO)];
+        // Odontología en Ebejico: agregar médicos de odontología de Ebejico a la lista permitida
+        if (sede !== 'Sevilla' && esOdontologia) {
+            for (const codM of MEDICOS_ODONTOLOGIA_EBEJICO) {
+                if (!listaPermitidos.includes(codM)) listaPermitidos.push(codM);
+            }
         }
-    }
-    // Odontología en Sevilla: agregar médicos de odontología a la lista permitida
-    if (sede === 'Sevilla' && esOdontologia) {
-        for (const codM of MEDICOS_ODONTOLOGIA_SEVILLA) {
-            if (!listaPermitidos.includes(codM)) listaPermitidos.push(codM);
+        // Odontología en Sevilla: agregar médicos de odontología a la lista permitida
+        if (sede === 'Sevilla' && esOdontologia) {
+            for (const codM of MEDICOS_ODONTOLOGIA_SEVILLA) {
+                if (!listaPermitidos.includes(codM)) listaPermitidos.push(codM);
+            }
         }
     }
 
@@ -517,6 +519,9 @@ async function getAvailableSlots(fechaStr, tipo = 'medicina general', preferredD
 
         // Solo médicos de la lista blanca de esta sede
         if (!listaPermitidos.includes(Number(t.TME_CODM))) return false;
+
+        // Si es CVD, ya filtramos por médico exacto arriba. Aceptar.
+        if (isCVD) return true;
 
         // Para Ebejico: si es odontología, solo mostrar odontólogos; si es medicina, solo médicos
         if (sede !== 'Sevilla') {

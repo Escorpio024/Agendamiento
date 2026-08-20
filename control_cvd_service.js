@@ -374,11 +374,23 @@ class ControlCVDService {
                     const dd   = record.fechaControl.substring(6, 8);
                     const fechaFormat = `${yyyy}-${mm}-${dd}`;
                     
-                    // Determinar la sede original basada en el médico de la cita de CVD anterior
-                    // Médicos Sevilla: 444, 777 (Medicina), 999, 1000 (Odonto), 888 (PYP CVD)
-                    const sevillaDoctors = ['444', '777', '999', '1000', '888'];
-                    const sedeObjetivo = sevillaDoctors.includes(String(record.medicoOriginal)) ? 'Sevilla' : 'Ebejico';
-
+                    // Determinar la sede original de forma estricta para CVD
+                    // 888 es el médico PYP de Sevilla, 111 es de Ebéjico.
+                    let sedeObjetivo = 'Ebejico';
+                    if (String(record.medicoOriginal) === '888') {
+                        sedeObjetivo = 'Sevilla';
+                    } else if (String(record.medicoOriginal) !== '111') {
+                        // Fallback: si fue agendado por otro especialista, buscar la zona del paciente
+                        try {
+                            const pacInfo = await prisma.pacienteNUI.findFirst({
+                                where: { OR: [{ KCN_COD: record.cedula }, { KCN_COD_NUI: record.cedula }] }
+                            });
+                            // Si la zona es 002 (Sevilla)
+                            if (pacInfo && String(pacInfo.KCN_ZONA) === '002') {
+                                sedeObjetivo = 'Sevilla';
+                            }
+                        } catch(e) { }
+                    }
                     // ── BÚSQUEDA BI-DIRECCIONAL DE CUPOS CVD ──────────────────────────────────────
                     // 1. Busca desde la fecha objetivo → hacia adelante (máx 7 días)
                     // 2. Simultáneamente busca hacia atrás (máx 7 días antes)
@@ -390,7 +402,7 @@ class ControlCVDService {
 
                     // Búsqueda hacia ADELANTE (incluye la fecha exacta)
                     const forwardResult = await availabilityService.getNextAvailableSlots(
-                        fechaFormat, 'medicina general', 'p y p medicos', sedeObjetivo, true
+                        fechaFormat, 'medicina general', null, sedeObjetivo, true
                     );
 
                     // Búsqueda hacia ATRÁS: probar día a día desde fecha-1 hasta fecha-7
@@ -407,7 +419,7 @@ class ControlCVDService {
                         if (candidate < hoy) break; // No buscar fechas ya pasadas
                         try {
                             const r = await availabilityService.getNextAvailableSlots(
-                                candidateStr, 'medicina general', 'p y p medicos', sedeObjetivo, true
+                                candidateStr, 'medicina general', null, sedeObjetivo, true
                             );
                             // Verificar que la fecha encontrada sea exactamente el candidato (no más adelante)
                             if (r && r.date === candidateStr && r.slots && r.slots.length > 0) {
