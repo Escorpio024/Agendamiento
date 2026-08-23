@@ -115,6 +115,21 @@ function EmptyState({ message }) {
     );
 }
 
+function InfoField({ icon: Icon, label, value, full }) {
+    return (
+        <div className={full ? "col-span-2" : ""}>
+            <p className="text-[10px] font-semibold uppercase tracking-wider mb-0.5"
+                style={{ color: 'rgba(161,227,216,0.5)' }}>{label}</p>
+            <div className="flex items-center gap-2">
+                <Icon size={11} style={{ color: '#A1E3D8', opacity: 0.6, flexShrink: 0 }} />
+                <span className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>
+                    {value || '—'}
+                </span>
+            </div>
+        </div>
+    );
+}
+
 // ─── ExamenProgramadoRow — con botón Eliminar ─────────────────────────────────
 function ExamenProgramadoRow({ examen, onRemind, onEliminar, sendingId, eliminandoId }) {
     const isSending = sendingId === examen.id;
