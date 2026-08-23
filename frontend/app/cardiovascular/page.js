@@ -739,7 +739,11 @@ function ProgramarCitaModal({ patient, onClose, onSuccess }) {
 // ─── Helpers locales ─────────────────────────────────────────────────────────
 function getEpsStyle(tipoEps) {
     if (tipoEps === 'NUEVA_EPS') return { bg: 'rgba(251,191,36,0.15)', color: '#FCD34D', border: 'rgba(251,191,36,0.4)', label: 'Nueva EPS', meses: 2 };
-    if (tipoEps === 'SAVIA') return { bg: 'rgba(161,227,216,0.15)', color: '#A1E3D8', border: 'rgba(161,227,216,0.4)', label: 'Savia Salud', meses: 3 };
+    if (tipoEps === 'SAVIA')    return { bg: 'rgba(161,227,216,0.15)', color: '#A1E3D8', border: 'rgba(161,227,216,0.4)', label: 'Savia Salud', meses: 3 };
+    if (tipoEps === 'ALIANZA')  return { bg: 'rgba(99,179,237,0.15)', color: '#90CDF4', border: 'rgba(99,179,237,0.4)', label: 'Alianza', meses: 3 };
+    if (tipoEps === 'FIDUC')    return { bg: 'rgba(167,139,250,0.15)', color: '#C4AFED', border: 'rgba(167,139,250,0.4)', label: 'Fideicomisos', meses: 3 };
+    if (tipoEps === 'SURA')     return { bg: 'rgba(52,211,153,0.15)', color: '#6EE7B7', border: 'rgba(52,211,153,0.4)', label: 'Sura EPS', meses: 3 };
+    if (tipoEps === 'SALUD_TOTAL') return { bg: 'rgba(248,113,113,0.15)', color: '#FCA5A5', border: 'rgba(248,113,113,0.4)', label: 'Salud Total', meses: 3 };
     return { bg: 'rgba(130,99,177,0.15)', color: '#C4AFED', border: 'rgba(130,99,177,0.35)', label: 'Otra EPS', meses: 3 };
 }
 

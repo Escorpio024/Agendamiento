@@ -512,7 +512,7 @@ app.get('/api/cardiovascular/reporte-riesgo', async (req, res) => {
         }
 
         // ─── Helper: determinar tipo de EPS y período de control ─────────────────
-        // Nueva EPS = 2 meses, Savia Salud y otras = 3 meses
+        // Nueva EPS = 2 meses, todas las demás (Alianza, Savia, Fideicomisos, etc.) = 3 meses
         function getEpsInfo(epsNombre) {
             const n = String(epsNombre || '').toUpperCase().trim();
             if (n.includes('NUEVA EPS')) {
@@ -520,6 +520,18 @@ app.get('/api/cardiovascular/reporte-riesgo', async (req, res) => {
             }
             if (n.includes('SAVIA')) {
                 return { tipoEps: 'SAVIA', periodoControlMeses: 3, label: 'Savia Salud' };
+            }
+            if (n.includes('ALIANZA')) {
+                return { tipoEps: 'ALIANZA', periodoControlMeses: 3, label: 'Alianza' };
+            }
+            if (n.includes('FIDUC') || n.includes('FIDEICOMISOS')) {
+                return { tipoEps: 'FIDUC', periodoControlMeses: 3, label: 'Fideicomisos' };
+            }
+            if (n.includes('SURA')) {
+                return { tipoEps: 'SURA', periodoControlMeses: 3, label: 'Sura EPS' };
+            }
+            if (n.includes('SALUD TOTAL')) {
+                return { tipoEps: 'SALUD_TOTAL', periodoControlMeses: 3, label: 'Salud Total' };
             }
             return { tipoEps: 'OTRA', periodoControlMeses: 3, label: epsNombre || 'SIN EPS' };
         }
@@ -542,9 +554,20 @@ app.get('/api/cardiovascular/reporte-riesgo', async (req, res) => {
         }
 
         // ─── 2. Buscar la última cita CVD por paciente (sin restricción de fecha) ──
+        // IMPORTANTE: VIQ_ALTO_COSTO devuelve códigos sin ceros (ej: "504362"),
+        // pero TMCITASUSUARIOS los almacena con 14 dígitos (ej: "00000000504362").
+        // Se construye la versión con padding para el IN de SQL.
         const hoy = new Date();
         const cedulas = [...new Set(valoraciones.map(v => v.codigo).filter(Boolean))];
-        const cedulasSql = cedulas.map(c => `'${c.replace(/'/g, "''")}'`).join(',');
+
+        // Para cada cédula cruda, agregar también la versión con 14 dígitos
+        const todasLasVariantes = new Set();
+        for (const c of cedulas) {
+            const cTrim = c.trim();
+            todasLasVariantes.add(cTrim);
+            todasLasVariantes.add(cTrim.padStart(14, '0'));
+        }
+        const cedulasSql = [...todasLasVariantes].map(c => `'${c.replace(/'/g, "''")}'`).join(',');
 
         let ultimasCitas = [];
         if (cedulasSql.length > 0) {
@@ -560,10 +583,17 @@ app.get('/api/cardiovascular/reporte-riesgo', async (req, res) => {
             `);
         }
 
-        // Mapa: código → fecha de última cita CVD (formato YYYYMMDD como número)
+
+        // Mapa: código normalizado (sin ceros) → fecha de última cita CVD
+        // TMCITASUSUARIOS devuelve 14 dígitos; normalizamos quitando los ceros para
+        // que el lookup coincida con los códigos sin ceros de VIQ_ALTO_COSTO
         const citasMap = {};
         for (const c of ultimasCitas) {
-            if (c.codigo) citasMap[c.codigo.trim()] = c.ultimaCita;
+            if (!c.codigo) continue;
+            const codBD = c.codigo.trim();
+            // Guardar tanto con ceros como sin ceros para cubrir cualquier formato
+            citasMap[codBD] = c.ultimaCita;
+            citasMap[codBD.replace(/^0+/, '') || codBD] = c.ultimaCita;
         }
 
         // ─── 3. Deduplicar valoraciones (más reciente por paciente) ──────────────
