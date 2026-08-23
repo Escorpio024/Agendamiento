@@ -2258,7 +2258,7 @@ async function processIncomingMessage({ from, msgId, text: rawText, type, mediaI
     server.setMessageHandler(processIncomingMessage);
 
     // Inicializar servicios con metaClient
-    reminderService.init(metaClient);
+    reminderService.init();
     controlCvdService.init(metaClient);
     campaignService.init(metaClient);
 

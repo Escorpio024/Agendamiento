@@ -1,21 +1,22 @@
 /**
  * SERVICIO DE RECORDATORIOS v2
  * ─────────────────────────────────────────────────────────────
- * Fixes aplicados:
+ * Canal activo: SMS vía Onurix (controlado por SMS_REMINDERS_ENABLED en .env)
+ * WhatsApp eliminado — se envían SOLO recordatorios por SMS.
+ *
+ * Lógica:
  *  1. Envía solo 1 recordatorio por cita (deduplicación por clave única)
  *  2. Lee TODAS las citas (bot + Xenco) desde TMCITASUSUARIOS
  *  3. Busca teléfono desde TKCLIENTESANEXO5 (fuente real de Xenco)
  *     → fallback a TMUSUARIOSFACTURACION → TMUSUARIOSASEGURAMIENTO
- *  4. Corre UNA vez al día a las 9 AM (no cada hora)
- *  5. Fix: variables phone/telefono → whatsappId (evitaba crash silencioso)
+ *  4. Corre UNA vez al día a las 8 AM
  */
 const fs        = require('fs');
 const path      = require('path');
 const prisma    = require('./db');
-const botPrisma = require('./dbBot');  // SQLite del bot (conversaciones WhatsApp reales)
 const cron      = require('node-cron');
 const logger    = require('./logger');
-const { sendSMS, sendWhatsApp } = require('./sms_service'); // Onurix SMS + WA
+const { sendSMS } = require('./sms_service'); // Solo SMS — WhatsApp eliminado
 
 class ReminderService {
     constructor() {
@@ -57,22 +58,14 @@ class ReminderService {
         }
     }
 
-    init(whatsappClient) {
-        this.client = whatsappClient;
-
-        // En modo NO_WHATSAPP no hay cliente real — no iniciar el scheduler
-        if (!whatsappClient) {
-            logger.warn('[Recordatorios] NO_WHATSAPP=true — scheduler de recordatorios desactivado.');
-            return;
-        }
-
+    init() {
+        // El servicio de recordatorios ya no depende del cliente de WhatsApp.
+        // Solo envía SMS vía Onurix (controlado por SMS_REMINDERS_ENABLED en .env).
         this.startScheduler();
-        logger.info('✅ Servicio de recordatorios v2 iniciado (9 AM + 6 PM, sin duplicados)');
+        logger.info('✅ Servicio de recordatorios v2 iniciado (8 AM, solo SMS, sin duplicados)');
     }
 
-    setClient(whatsappClient) {
-        this.client = whatsappClient;
-    }
+
 
     startScheduler() {
         if (this.isRunning) return;
@@ -216,8 +209,8 @@ class ReminderService {
     }
 
     async sendReminders() {
-        if (!prisma || !this.client) {
-            logger.warn('[Recordatorios] Prisma o cliente WA no disponible — omitiendo envío.');
+        if (!prisma) {
+            logger.warn('[Recordatorios] Prisma no disponible — omitiendo envío.');
             return 0;
         }
 
@@ -251,63 +244,35 @@ class ReminderService {
                     continue;
                 }
 
-                const waId = await this.getWhatsAppId(cod);
-                if (!waId) {
-                    logger.warn(`[Recordatorios] ⚠️  Sin teléfono/WA: ${cod}`);
-                    continue;
-                }
-
                 const nombre = await this.getNombreForPatient(cod);
                 const medico = await prisma.medico.findFirst({
                     where: { MED_COD: Number(cita.KC3_MEDICO) }
                 }).catch(() => null);
 
-                const ok = await this.sendReminderMessage(cita, nombre, waId, medico);
-
-                // ── Envío por Onurix (SMS + WhatsApp) — canales paralelos ──
-                // Se disparan independientemente del resultado del WA propio,
-                // controlados cada uno por su flag en .env.
+                // ── Envío por SMS (Onurix) — único canal activo ──
                 const rawPhone = await this.getPhoneForPatient(cod);
+                let ok = false;
                 if (rawPhone) {
                     const msgText = this.buildSMSText(cita, nombre, medico);
-
-                    // SMS (Onurix)
                     const smsResult = await sendSMS(rawPhone, msgText);
                     if (smsResult.success) {
                         logger.info(`[Recordatorios] 📱 SMS enviado a ${cod} (${rawPhone})`);
+                        ok = true;
                     } else if (!smsResult.skipped) {
                         logger.warn(`[Recordatorios] ⚠️  SMS falló para ${cod}: ${smsResult.error}`);
                     }
-
-                    // WhatsApp (Onurix no-template)
-                    const waOnurixResult = await sendWhatsApp(rawPhone, msgText);
-                    if (waOnurixResult.success) {
-                        logger.info(`[Recordatorios] 💬 WhatsApp Onurix enviado a ${cod} (${rawPhone})`);
-                    } else if (!waOnurixResult.skipped) {
-                        logger.warn(`[Recordatorios] ⚠️  WhatsApp Onurix falló para ${cod}: ${waOnurixResult.error}`);
-                    }
+                } else {
+                    logger.warn(`[Recordatorios] ⚠️  Sin teléfono para: ${cod}`);
                 }
 
                 if (ok) {
                     this.sentToday.add(clave);
                     this.saveSentReminders();
                     sent++;
-
-                    // ── ANTI-BAN: Pausas escalonadas para no ser detectado como spam ──
-                    // Pausa mediana cada 20 mensajes: 5-8 minutos
-                    if (sent > 0 && sent % 20 === 0) {
-                        const pausaMin = Math.floor(Math.random() * 3 + 5); // 5-8 min
-                        logger.info(`[Recordatorios] 🧘 Pausa anti-ban (20 enviados): ${pausaMin} minutos...`);
-                        await new Promise(r => setTimeout(r, pausaMin * 60 * 1000));
-                    } else {
-                        // Delay variable entre mensajes: 30-60 segundos
-                        const delaySeg = Math.floor(Math.random() * 30 + 30);
-                        logger.debug(`[Recordatorios] ⏳ Esperando ${delaySeg}s...`);
-                        await new Promise(r => setTimeout(r, delaySeg * 1000));
-                    }
-                } else {
-                    // Si no se envió (ej. número no reconocido), pausa corta
-                    await new Promise(r => setTimeout(r, 3000));
+                    // Delay corto entre mensajes para no saturar la API
+                    const delaySeg = Math.floor(Math.random() * 5 + 3); // 3-8 seg
+                    logger.debug(`[Recordatorios] ⏳ Esperando ${delaySeg}s...`);
+                    await new Promise(r => setTimeout(r, delaySeg * 1000));
                 }
             }
 
@@ -345,92 +310,6 @@ class ReminderService {
         );
     }
 
-    async sendReminderMessage(cita, nombre, waId, medico) {
-        try {
-            if (!waId) return false;
-            // Asegurar que tiene sufijo @...
-            const whatsappId = waId.includes('@') ? waId : `57${waId}@c.us`;
-
-            // Formatear fecha
-            const fchStr = String(cita.KC3_FCH);
-            const fechaObj = new Date(
-                parseInt(fchStr.slice(0, 4)),
-                parseInt(fchStr.slice(4, 6)) - 1,
-                parseInt(fchStr.slice(6, 8))
-            );
-            const fechaFmt = fechaObj.toLocaleDateString('es-CO', {
-                weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
-            });
-
-            // Formatear hora
-            const hh = Number(cita.KC3_HH);
-            const mm = Number(cita.KC3_MM);
-            const h12 = hh % 12 || 12;
-            const period = hh < 12 ? 'AM' : 'PM';
-            const horaFmt = `${h12}:${String(mm).padStart(2, '0')} ${period}`;
-
-            const primerNombre = nombre.split(/[\s,]+/)[0] || 'Paciente';
-            const nomMedico = medico?.MED_NOMBRE?.trim() || 'tu médico asignado';
-            const consultorio = cita.KC3_CONSULTORIO?.trim() || '';
-
-            const mensaje =
-                `🔔 *RECORDATORIO DE CITA MÉDICA*\n\n` +
-                `Hola *${primerNombre}*,\n\n` +
-                `Te recordamos que tienes una cita programada para *mañana*:\n\n` +
-                `📅 *Fecha:* ${fechaFmt}\n` +
-                `🕐 *Hora:* ${horaFmt}\n` +
-                `👨‍⚕️ *Médico:* ${nomMedico}\n` +
-                (consultorio ? `🚪 *Consultorio:* ${consultorio}\n` : '') +
-                `\nPor favor, llega *15 minutos antes* de tu cita.\n\n` +
-                `Si necesitas cancelar o reprogramar, escríbeme por este chat.\n\n` +
-                `_ESE Hospital San Rafael de Ebéjico_ 🏥`;
-
-            // Verificar que WhatsApp esté conectado antes de enviar
-            const waState = await this.client.getState().catch(() => null);
-            if (waState !== 'CONNECTED') {
-                logger.warn(`[Recordatorios] ⚠️  WA no conectado (${waState}), omitiendo envío a ${whatsappId}`);
-                return false;
-            }
-
-            // Los IDs tipo @lid ya son IDs válidos de WhatsApp — enviar directamente.
-            // getNumberId() sólo funciona con números de teléfono (@c.us), no con @lid.
-            if (whatsappId.includes('@lid')) {
-                await this.client.sendMessage(whatsappId, mensaje);
-                logger.info(`[Recordatorios] ✅ Enviado vía @lid a ${primerNombre} (${whatsappId})`);
-                return true;
-            }
-
-            // Para @c.us: verificar que el número exista en WhatsApp antes de enviar
-            const cleanPhone = whatsappId.replace('@c.us', '').replace('@s.whatsapp.net', '');
-            const numberId = await this.client.getNumberId(cleanPhone).catch(() => null);
-            
-            if (numberId) {
-                // getNumberId encontró el número — usar su ID serializado (puede ser @lid o @c.us)
-                await this.client.sendMessage(numberId._serialized, mensaje);
-                logger.info(`[Recordatorios] ✅ Enviado a ${primerNombre} (${numberId._serialized})`);
-                return true;
-            }
-
-            // getNumberId devolvió null — puede ocurrir con cuentas @lid en versiones nuevas de WhatsApp.
-            // Si el número tiene formato válido de celular colombiano (57 + 10 dígitos empezando con 3),
-            // intentar enviar directamente. WhatsApp enruta correctamente aunque use @lid internamente.
-            const localNum = cleanPhone.startsWith('57') ? cleanPhone.slice(2) : cleanPhone;
-            const esMovilColombia = localNum.length === 10 && localNum.startsWith('3');
-
-            if (esMovilColombia) {
-                logger.debug(`[Recordatorios] ⚠️ getNumberId null para ${cleanPhone} — intentando envío directo @c.us`);
-                await this.client.sendMessage(`${cleanPhone}@c.us`, mensaje);
-                logger.info(`[Recordatorios] ✅ Enviado (directo) a ${primerNombre} (${cleanPhone}@c.us)`);
-                return true;
-            }
-
-            logger.warn(`[Recordatorios] ❌ WhatsApp no reconoce el número ${cleanPhone} y no es un celular colombiano válido — omitiendo`);
-            return false;
-        } catch (error) {
-            logger.warn(`[Recordatorios] ❌ Error enviando a ${waId}: ${error.message}`);
-            return false;
-        }
-    }
 }
 
 module.exports = new ReminderService();

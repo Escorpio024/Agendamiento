@@ -329,11 +329,7 @@ app.post('/api/conversations/:id/status', async (req, res) => {
 // Enviar recordatorios manualmente a todos
 app.post('/api/send-reminders', async (req, res) => {
     try {
-        if (!whatsappClient) {
-            return res.status(503).json({ error: 'WhatsApp no conectado' });
-        }
         const reminderService = require('./reminder_service');
-        reminderService.setClient(whatsappClient);
         const result = await reminderService.sendReminders();
         const sent = result || 0;
         console.log(`[RECORDATORIOS MANUALES] Enviados: ${sent}`);
@@ -347,10 +343,6 @@ app.post('/api/send-reminders', async (req, res) => {
 // Enviar recordatorio manual para UNA sola cita
 app.post('/api/appointments/:id/remind', async (req, res) => {
     try {
-        if (!whatsappClient) {
-            return res.status(503).json({ error: 'WhatsApp no conectado' });
-        }
-        
         const { id } = req.params;
         const appt = await botPrisma.appointmentLog.findUnique({ where: { id } });
         
@@ -358,12 +350,24 @@ app.post('/api/appointments/:id/remind', async (req, res) => {
             return res.status(404).json({ error: 'Cita no encontrada en el historial' });
         }
 
-        const mensaje = `🔔 *¡Hola! Te recordamos tu cita médica para el ${appt.appointmentDate}*\n\n👤 *Paciente:* ${appt.patientName}\n🏥 *Servicio:* ${appt.serviceType || 'Medicina General'}\n📅 *Fecha:* ${appt.appointmentDate}\n🕐 *Hora:* ${appt.appointmentTime || 'N/A'}\n👨‍⚕️ *Doctor:* ${appt.doctorName || 'Asignado'}\n\nPor favor llega con 15 minutos de anticipación. 😊`;
+        const { sendSMS } = require('./sms_service');
+        const { normalizarTelefono } = require('./sms_service');
         
-        await whatsappClient.sendMessage(appt.whatsappId, mensaje);
-        console.log(`[RECORDATORIO INDIVIDUAL] Enviado a ${appt.whatsappId} para cita ${id}`);
+        const rawPhone = appt.whatsappId ? appt.whatsappId.replace('@c.us', '').replace('@s.whatsapp.net', '') : null;
+        if (!rawPhone) {
+            return res.status(400).json({ error: 'No se encontró un número válido para el paciente' });
+        }
+
+        const mensaje = `RECORDATORIO: Hola ${appt.patientName}, le recordamos su cita medica para el ${appt.appointmentDate} a las ${appt.appointmentTime || 'N/A'} con ${appt.doctorName || 'su medico asignado'}. Llegue 15 min antes. ESE Hospital San Rafael de Ebejico.`;
         
-        res.json({ success: true });
+        const smsResult = await sendSMS(rawPhone, mensaje);
+        if (smsResult.success) {
+            console.log(`[RECORDATORIO INDIVIDUAL] SMS Enviado a ${rawPhone} para cita ${id}`);
+            res.json({ success: true });
+        } else {
+            console.warn(`[RECORDATORIO INDIVIDUAL] Error SMS: ${smsResult.error}`);
+            res.status(500).json({ error: 'Error enviando el SMS', details: smsResult.error });
+        }
     } catch (error) {
         console.error('Error enviando recordatorio individual:', error);
         res.status(500).json({ error: error.message });
