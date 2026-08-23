@@ -1,13 +1,14 @@
 "use client";
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import {
     Search, Filter, Bell, Calendar, CheckCircle2,
     Clock, User, Phone, Building2, Hash, Stethoscope,
     FileText, ChevronRight, AlertCircle, Activity,
     HeartPulse, Loader2, ClipboardList, X, XCircle, AlertTriangle, RefreshCw, ShieldAlert, Download,
     Edit3, Save, Trash2, History, CalendarPlus, ChevronDown, Check, RotateCcw, CalendarCheck2,
-    BarChart2, Users, TrendingUp, TrendingDown, ListFilter
+    BarChart2, Users, TrendingUp, TrendingDown, ListFilter, Shield, Timer, Wifi, WifiOff,
+    ChevronLeft, Zap, ScanLine, RotateCw
 } from 'lucide-react';
 
 // ─── Config ──────────────────────────────────────────────────────────────────
@@ -720,6 +721,304 @@ function ProgramarCitaModal({ patient, onClose, onSuccess }) {
     );
 }
 
+// ─── Helpers locales ─────────────────────────────────────────────────────────
+function getEpsStyle(tipoEps) {
+    if (tipoEps === 'NUEVA_EPS') return { bg: 'rgba(251,191,36,0.15)', color: '#FCD34D', border: 'rgba(251,191,36,0.4)', label: 'Nueva EPS', meses: 2 };
+    if (tipoEps === 'SAVIA') return { bg: 'rgba(161,227,216,0.15)', color: '#A1E3D8', border: 'rgba(161,227,216,0.4)', label: 'Savia Salud', meses: 3 };
+    return { bg: 'rgba(130,99,177,0.15)', color: '#C4AFED', border: 'rgba(130,99,177,0.35)', label: 'Otra EPS', meses: 3 };
+}
+
+function MesesBadge({ mesesSinCita, periodoControlMeses }) {
+    if (mesesSinCita === null || mesesSinCita === undefined) {
+        return <span className="text-[10px] px-2 py-0.5 rounded" style={{ background: 'rgba(245,245,247,0.07)', color: 'rgba(245,245,247,0.3)' }}>Sin cita</span>;
+    }
+    const pct = mesesSinCita / periodoControlMeses;
+    let bg, color;
+    if (pct <= 0.6) { bg = 'rgba(161,227,216,0.18)'; color = '#A1E3D8'; }
+    else if (pct <= 1) { bg = 'rgba(251,191,36,0.18)'; color = '#FCD34D'; }
+    else { bg = 'rgba(177,64,64,0.18)'; color = '#F9A8A8'; }
+    const texto = mesesSinCita === 0 ? 'Este mes' : `${mesesSinCita} mes${mesesSinCita !== 1 ? 'es' : ''}`;
+    return <span className="text-[10px] font-bold px-2 py-0.5 rounded" style={{ background: bg, color, border: `1px solid ${color}33` }}>{texto}</span>;
+}
+
+// ─── Visor de Controles Modal ─────────────────────────────────────────────────
+const CVD_ESTADOS = [
+    { key: 'TODOS', label: 'Todos', bg: 'rgba(130,99,177,0.2)', color: '#C4AFED', border: 'rgba(130,99,177,0.4)' },
+    { key: 'PENDING', label: 'Pendiente', bg: 'rgba(251,191,36,0.15)', color: '#FCD34D', border: 'rgba(251,191,36,0.4)' },
+    { key: 'BOOKED', label: 'Agendado', bg: 'rgba(161,227,216,0.15)', color: '#A1E3D8', border: 'rgba(161,227,216,0.4)' },
+    { key: 'BOOKED_PRESENCIAL', label: 'Presencial', bg: 'rgba(161,227,216,0.1)', color: '#6EE7B7', border: 'rgba(161,227,216,0.3)' },
+    { key: 'BOOKING_FAILED_NO_SLOT', label: 'Sin cupo', bg: 'rgba(177,64,64,0.15)', color: '#F9A8A8', border: 'rgba(177,64,64,0.4)' },
+    { key: 'BOOKING_FAILED_XENCO', label: 'Error Xenco', bg: 'rgba(177,64,64,0.2)', color: '#EDAFAF', border: 'rgba(177,64,64,0.5)' },
+    { key: 'FAILED_NO_PHONE', label: 'Sin teléfono', bg: 'rgba(130,99,177,0.15)', color: '#A78BFA', border: 'rgba(130,99,177,0.4)' },
+    { key: 'REMINDER_SENT', label: 'Recordatorio', bg: 'rgba(130,99,177,0.2)', color: '#C4AFED', border: 'rgba(130,99,177,0.4)' },
+];
+
+function estadoBadge(estado) {
+    const e = CVD_ESTADOS.find(x => x.key === estado) || CVD_ESTADOS[0];
+    return <span className="text-[9px] font-bold px-2 py-0.5 rounded-full" style={{ background: e.bg, color: e.color, border: `1px solid ${e.border}` }}>{e.label}</span>;
+}
+
+function ControlesViewerModal({ onClose }) {
+    const [controles, setControles] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
+    const [filtroEstado, setFiltroEstado] = useState('TODOS');
+    const [busqueda, setBusqueda] = useState('');
+    const [actionMsg, setActionMsg] = useState(null);
+    const [actionLoading, setActionLoading] = useState(null);
+
+    const showMsg = (text, tipo = 'ok') => {
+        setActionMsg({ text, tipo });
+        setTimeout(() => setActionMsg(null), 4000);
+    };
+
+    const cargar = useCallback(async () => {
+        setLoading(true); setError(null);
+        try {
+            const res = await fetch(`${API_BASE}/api/cardiovascular/controles`);
+            if (!res.ok) throw new Error(`Error ${res.status}`);
+            const data = await res.json();
+            setControles(Array.isArray(data) ? data : []);
+        } catch (e) { setError(e.message); }
+        finally { setLoading(false); }
+    }, []);
+
+    useEffect(() => { cargar(); }, [cargar]);
+
+    const handleEliminar = async (id) => {
+        if (!confirm('¿Eliminar este control? Esta acción no se puede deshacer.')) return;
+        try {
+            const res = await fetch(`${API_BASE}/api/cardiovascular/controles/${id}`, { method: 'DELETE' });
+            if (res.ok) { setControles(prev => prev.filter(c => c.id !== id)); showMsg('✅ Control eliminado'); }
+            else showMsg('❌ Error al eliminar', 'err');
+        } catch { showMsg('❌ Error de conexión', 'err'); }
+    };
+
+    const handleAccion = async (endpoint, label) => {
+        setActionLoading(label);
+        try {
+            const res = await fetch(`${API_BASE}/api/cardiovascular/controles/${endpoint}`, { method: 'POST' });
+            const data = await res.json().catch(() => ({}));
+            showMsg(data.message || `✅ ${label} iniciado`);
+            setTimeout(() => cargar(), 3000);
+        } catch { showMsg('❌ Error de conexión', 'err'); }
+        finally { setActionLoading(null); }
+    };
+
+    const filtrados = controles.filter(c => {
+        if (filtroEstado !== 'TODOS' && c.estado !== filtroEstado) return false;
+        if (busqueda.trim()) {
+            const q = busqueda.toLowerCase();
+            if (!(c.cedula || '').includes(q) && !(c.paciente || '').toLowerCase().includes(q)) return false;
+        }
+        return true;
+    });
+
+    const counts = {};
+    CVD_ESTADOS.forEach(e => {
+        counts[e.key] = e.key === 'TODOS' ? controles.length : controles.filter(c => c.estado === e.key).length;
+    });
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            style={{ background: 'rgba(8,7,12,0.88)', backdropFilter: 'blur(8px)' }}
+            onClick={e => e.target === e.currentTarget && onClose()}>
+            <div className="relative w-full max-w-6xl max-h-[96vh] flex flex-col rounded-2xl shadow-2xl overflow-hidden"
+                style={{ background: 'rgba(16,14,22,0.99)', border: '1px solid rgba(130,99,177,0.3)' }}>
+
+                {/* Header */}
+                <div className="flex items-center justify-between px-6 py-4 flex-shrink-0"
+                    style={{ borderBottom: '1px solid rgba(130,99,177,0.2)', background: 'rgba(20,18,28,0.98)' }}>
+                    <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl flex items-center justify-center"
+                            style={{ background: 'linear-gradient(135deg, rgba(130,99,177,0.5) 0%, rgba(177,64,64,0.4) 100%)' }}>
+                            <CalendarCheck2 size={20} color="#E2D4FF" />
+                        </div>
+                        <div>
+                            <p className="text-[10px] tracking-widest uppercase font-semibold" style={{ color: 'rgba(196,175,237,0.6)' }}>Control CVD</p>
+                            <h2 className="text-sm font-bold" style={{ color: '#F5F5F7' }}>Visor de Controles</h2>
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        {actionMsg && (
+                            <span className="text-xs px-3 py-1.5 rounded-lg font-medium"
+                                style={{ background: actionMsg.tipo === 'err' ? 'rgba(177,64,64,0.2)' : 'rgba(161,227,216,0.12)', color: actionMsg.tipo === 'err' ? '#F9A8A8' : '#A1E3D8' }}>
+                                {actionMsg.text}
+                            </span>
+                        )}
+                        <button onClick={() => handleAccion('procesar-pendientes', 'Procesar pendientes')}
+                            disabled={!!actionLoading}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all"
+                            style={{ background: 'rgba(251,191,36,0.15)', color: '#FCD34D', border: '1px solid rgba(251,191,36,0.35)' }}
+                            title="Disparar agendamiento WhatsApp para pendientes">
+                            {actionLoading === 'Procesar pendientes' ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} />}
+                            Procesar
+                        </button>
+                        <button onClick={() => handleAccion('scan-presenciales', 'Scan presenciales')}
+                            disabled={!!actionLoading}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all"
+                            style={{ background: 'rgba(161,227,216,0.12)', color: '#A1E3D8', border: '1px solid rgba(161,227,216,0.3)' }}
+                            title="Verificar en Xenco quién ya tiene cita presencial">
+                            {actionLoading === 'Scan presenciales' ? <Loader2 size={12} className="animate-spin" /> : <ScanLine size={12} />}
+                            Scan
+                        </button>
+                        <button onClick={() => handleAccion('recalcular-fechas', 'Recalcular')}
+                            disabled={!!actionLoading}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all"
+                            style={{ background: 'rgba(130,99,177,0.15)', color: '#C4AFED', border: '1px solid rgba(130,99,177,0.3)' }}
+                            title="Recalcular fechas de control pendientes">
+                            {actionLoading === 'Recalcular' ? <Loader2 size={12} className="animate-spin" /> : <RotateCw size={12} />}
+                            Recalcular
+                        </button>
+                        <button onClick={cargar} className="w-8 h-8 rounded-lg flex items-center justify-center transition-all"
+                            style={{ background: 'rgba(130,99,177,0.12)', color: '#C4AFED' }}
+                            title="Actualizar">
+                            <RefreshCw size={13} />
+                        </button>
+                        <button onClick={onClose} className="w-8 h-8 rounded-lg flex items-center justify-center transition-all"
+                            style={{ background: 'rgba(245,245,247,0.06)', color: 'rgba(245,245,247,0.5)' }}
+                            onMouseEnter={e => e.currentTarget.style.background = 'rgba(177,64,64,0.2)'}
+                            onMouseLeave={e => e.currentTarget.style.background = 'rgba(245,245,247,0.06)'}>
+                            <X size={15} />
+                        </button>
+                    </div>
+                </div>
+
+                {/* Filtros */}
+                <div className="flex items-center gap-2 px-5 py-2.5 flex-wrap flex-shrink-0"
+                    style={{ background: 'rgba(130,99,177,0.05)', borderBottom: '1px solid rgba(130,99,177,0.1)' }}>
+                    {CVD_ESTADOS.map(e => (
+                        <button key={e.key} onClick={() => setFiltroEstado(e.key)}
+                            className="text-[10px] font-bold px-2.5 py-1 rounded-full transition-all"
+                            style={{
+                                background: filtroEstado === e.key ? e.bg : 'rgba(255,255,255,0.04)',
+                                color: filtroEstado === e.key ? e.color : 'rgba(245,245,247,0.3)',
+                                border: `1px solid ${filtroEstado === e.key ? e.border : 'rgba(255,255,255,0.07)'}`,
+                            }}>
+                            {e.label} <span style={{ opacity: 0.7 }}>({counts[e.key] || 0})</span>
+                        </button>
+                    ))}
+                    <div className="flex items-center gap-1.5 ml-auto px-3 py-1.5 rounded-lg flex-shrink-0"
+                        style={{ background: 'rgba(15,14,19,0.8)', border: '1px solid rgba(130,99,177,0.2)', minWidth: '180px' }}>
+                        <Search size={11} style={{ color: 'rgba(196,175,237,0.5)', flexShrink: 0 }} />
+                        <input type="text" placeholder="Cédula o nombre..."
+                            value={busqueda} onChange={e => setBusqueda(e.target.value)}
+                            className="flex-1 bg-transparent outline-none text-[11px]"
+                            style={{ color: 'var(--text-primary)' }} />
+                    </div>
+                    <span className="text-[10px] text-right" style={{ color: 'rgba(245,245,247,0.25)' }}>{filtrados.length} registros</span>
+                </div>
+
+                {/* Body */}
+                <div className="flex-1 overflow-auto">
+                    {loading ? (
+                        <div className="flex items-center justify-center py-24 gap-3">
+                            <Loader2 size={30} className="animate-spin" style={{ color: '#8263B1' }} />
+                            <span className="text-sm" style={{ color: 'rgba(245,245,247,0.4)' }}>Cargando controles...</span>
+                        </div>
+                    ) : error ? (
+                        <div className="flex flex-col items-center justify-center py-20 gap-3">
+                            <AlertTriangle size={40} style={{ color: '#F9A8A8' }} />
+                            <p className="text-sm" style={{ color: '#F9A8A8' }}>❌ {error}</p>
+                            <button onClick={cargar} className="text-xs px-4 py-2 rounded-lg font-bold"
+                                style={{ background: 'rgba(130,99,177,0.25)', color: '#C4AFED', border: '1px solid rgba(130,99,177,0.4)' }}>
+                                <RefreshCw size={11} className="inline mr-1" /> Reintentar
+                            </button>
+                        </div>
+                    ) : filtrados.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center py-20 gap-2">
+                            <CalendarCheck2 size={36} style={{ color: 'rgba(245,245,247,0.1)' }} />
+                            <p className="text-xs" style={{ color: 'rgba(245,245,247,0.3)' }}>No hay controles con este filtro</p>
+                        </div>
+                    ) : (
+                        <table className="w-full" style={{ borderCollapse: 'collapse' }}>
+                            <thead>
+                                <tr style={{ background: 'rgba(130,99,177,0.1)', borderBottom: '1px solid rgba(130,99,177,0.15)' }}>
+                                    {['Cédula','Paciente','EPS Info','Cita Original','Fecha Control','Recordatorio','Estado','Teléfono',''].map(h => (
+                                        <th key={h} className="px-3 py-3 text-left text-[9px] font-bold tracking-widest uppercase"
+                                            style={{ color: 'rgba(196,175,237,0.6)', whiteSpace: 'nowrap' }}>{h}</th>
+                                    ))}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {filtrados.map(c => {
+                                    const epsInfo = String(c.epsInfo || '').toUpperCase();
+                                    const esNuevaEps = epsInfo.includes('NUEVA EPS');
+                                    const esSavia = epsInfo.includes('SAVIA');
+                                    const epsBadgeStyle = esNuevaEps
+                                        ? { bg: 'rgba(251,191,36,0.15)', color: '#FCD34D', border: 'rgba(251,191,36,0.4)' }
+                                        : esSavia
+                                            ? { bg: 'rgba(161,227,216,0.12)', color: '#A1E3D8', border: 'rgba(161,227,216,0.3)' }
+                                            : { bg: 'rgba(130,99,177,0.12)', color: '#C4AFED', border: 'rgba(130,99,177,0.25)' };
+                                    return (
+                                        <tr key={c.id}
+                                            style={{ borderBottom: '1px solid rgba(130,99,177,0.08)', transition: 'background 0.15s' }}
+                                            onMouseEnter={e => e.currentTarget.style.background = 'rgba(130,99,177,0.07)'}
+                                            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                                            <td className="px-3 py-2.5">
+                                                <span className="text-[11px] font-mono" style={{ color: '#C4AFED' }}>{c.cedula}</span>
+                                            </td>
+                                            <td className="px-3 py-2.5">
+                                                <span className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>{c.paciente || '—'}</span>
+                                            </td>
+                                            <td className="px-3 py-2.5">
+                                                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
+                                                    style={{ background: epsBadgeStyle.bg, color: epsBadgeStyle.color, border: `1px solid ${epsBadgeStyle.border}` }}>
+                                                    {c.epsInfo || '—'}
+                                                </span>
+                                            </td>
+                                            <td className="px-3 py-2.5">
+                                                <span className="text-[11px]" style={{ color: 'rgba(245,245,247,0.55)' }}>{formatDate(c.fechaCitaOriginal)}</span>
+                                            </td>
+                                            <td className="px-3 py-2.5">
+                                                <span className="text-[11px] font-semibold" style={{ color: '#C4AFED' }}>{formatDate(c.fechaControl)}</span>
+                                            </td>
+                                            <td className="px-3 py-2.5">
+                                                <span className="text-[11px]" style={{ color: 'rgba(245,245,247,0.45)' }}>{formatDate(c.fechaRecordatorio)}</span>
+                                            </td>
+                                            <td className="px-3 py-2.5">{estadoBadge(c.estado)}</td>
+                                            <td className="px-3 py-2.5">
+                                                <span className="text-[11px] font-mono" style={{ color: 'rgba(245,245,247,0.4)' }}>{c.telefono || '—'}</span>
+                                            </td>
+                                            <td className="px-3 py-2.5">
+                                                <button onClick={() => handleEliminar(c.id)}
+                                                    className="w-6 h-6 rounded flex items-center justify-center transition-all"
+                                                    style={{ color: 'rgba(249,168,168,0.4)' }}
+                                                    onMouseEnter={e => { e.currentTarget.style.background = 'rgba(177,64,64,0.2)'; e.currentTarget.style.color = '#F9A8A8'; }}
+                                                    onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'rgba(249,168,168,0.4)'; }}
+                                                    title="Eliminar">
+                                                    <Trash2 size={12} />
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    )}
+                </div>
+
+                {/* Footer */}
+                <div className="px-6 py-3 border-t flex items-center justify-between flex-shrink-0"
+                    style={{ borderColor: 'rgba(130,99,177,0.15)', background: 'rgba(20,18,28,0.7)' }}>
+                    <div className="flex items-center gap-4 text-[10px]" style={{ color: 'rgba(245,245,247,0.25)' }}>
+                        {CVD_ESTADOS.slice(1).map(e => (
+                            <span key={e.key}><span style={{ color: e.color }}>■</span> {e.label}: {counts[e.key] || 0}</span>
+                        ))}
+                    </div>
+                    <button onClick={onClose}
+                        className="text-xs font-semibold px-4 py-2 rounded-lg transition-all"
+                        style={{ background: 'rgba(245,245,247,0.07)', color: 'rgba(245,245,247,0.45)', border: '1px solid rgba(245,245,247,0.1)' }}
+                        onMouseEnter={e => e.currentTarget.style.background = 'rgba(245,245,247,0.12)'}
+                        onMouseLeave={e => e.currentTarget.style.background = 'rgba(245,245,247,0.07)'}>
+                        Cerrar
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
 // ─── Reporte Riesgo Modal ────────────────────────────────────────────────────
 function ReporteRiesgoModal({ onClose }) {
     const [year, setYear] = useState(new Date().getFullYear());
@@ -792,15 +1091,18 @@ function ReporteRiesgoModal({ onClose }) {
     const handleExportCSV = () => {
         if (!pacientesFiltrados.length) return;
         const meses = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
-        const headers = ['Cédula','Nombre','Nivel Riesgo','EPS','Fecha Valoración','En Control','Última Cita CVD'];
+        const headers = ['Cédula','Nombre','Nivel Riesgo','EPS','Tipo EPS','Período Control (meses)','Fecha Valoración','En Control','Último Control CVD','Meses sin control'];
         const rows = pacientesFiltrados.map(p => [
             p.codigo,
             p.nombre,
             p.nivelRiesgo,
             p.eps,
+            p.tipoEps === 'NUEVA_EPS' ? 'Nueva EPS' : p.tipoEps === 'SAVIA' ? 'Savia Salud' : 'Otra',
+            p.periodoControlMeses || 3,
             formatDate(p.fechaValoracion),
             p.enControl ? 'SÍ' : 'NO',
-            p.ultimaCitaCVD ? formatDate(p.ultimaCitaCVD) : '—'
+            p.ultimaCitaCVD ? formatDate(p.ultimaCitaCVD) : '—',
+            p.mesesSinCita !== null && p.mesesSinCita !== undefined ? p.mesesSinCita : '—'
         ]);
         const csvContent = [headers, ...rows].map(row =>
             row.map(v => `"${String(v).replace(/"/g,'""')}"`).join(',')
@@ -828,16 +1130,23 @@ function ReporteRiesgoModal({ onClose }) {
             return { bg: '#f3f0ff', color: '#4a3b72' };
         };
 
+        const epsLabel = (p) => p.tipoEps === 'NUEVA_EPS' ? 'Nueva EPS' : p.tipoEps === 'SAVIA' ? 'Savia Salud' : (p.eps || 'Otra');
+        const epsColor = (p) => p.tipoEps === 'NUEVA_EPS' ? { bg: '#fffde7', color: '#e65100' } : p.tipoEps === 'SAVIA' ? { bg: '#e0f7f4', color: '#00695c' } : { bg: '#f3f0ff', color: '#4a3b72' };
         const tableRows = pacientesFiltrados.map(p => {
             const rc = riesgoColor(p.nivelRiesgo);
+            const ec = epsColor(p);
+            const mesesText = p.mesesSinCita !== null && p.mesesSinCita !== undefined
+                ? (p.mesesSinCita === 0 ? 'Este mes' : `${p.mesesSinCita} mes${p.mesesSinCita !== 1 ? 'es' : ''}`)
+                : '—';
             return `<tr>
                 <td>${p.codigo}</td>
                 <td>${p.nombre}</td>
                 <td><span style="background:${rc.bg};color:${rc.color};padding:2px 8px;border-radius:4px;font-size:10px;font-weight:700">${p.nivelRiesgo}</span></td>
-                <td>${p.eps}</td>
+                <td><span style="background:${ec.bg};color:${ec.color};padding:2px 7px;border-radius:12px;font-size:9px;font-weight:700">${epsLabel(p)}</span><br/><span style="color:#999;font-size:9px">c/${p.periodoControlMeses || 3}m</span></td>
                 <td>${formatDate(p.fechaValoracion)}</td>
                 <td style="color:${p.enControl ? '#00695c' : '#b71c1c'};font-weight:700">${p.enControl ? 'SÍ ✓' : 'NO ✗'}</td>
                 <td>${p.ultimaCitaCVD ? formatDate(p.ultimaCitaCVD) : '—'}</td>
+                <td>${mesesText}</td>
             </tr>`;
         }).join('');
 
@@ -896,7 +1205,7 @@ footer { margin-top:24px; padding-top:12px; border-top:2px solid #e8e3f5; displa
   </div>
 </div>
 <table>
-<thead><tr><th>Cédula</th><th>Nombre</th><th>Riesgo</th><th>EPS</th><th>Valoración</th><th>En Control</th><th>Última Cita CVD</th></tr></thead>
+<thead><tr><th>Cédula</th><th>Nombre</th><th>Riesgo</th><th>EPS / Período</th><th>Valoración</th><th>En Control</th><th>Último Control</th><th>Hace cuánto</th></tr></thead>
 <tbody>${tableRows}</tbody>
 </table>
 <footer>
@@ -1146,8 +1455,8 @@ footer { margin-top:24px; padding-top:12px; border-top:2px solid #e8e3f5; displa
                                     <table className="w-full" style={{ borderCollapse: 'collapse' }}>
                                         <thead>
                                             <tr style={{ background: 'rgba(130,99,177,0.1)', borderBottom: '1px solid rgba(130,99,177,0.15)' }}>
-                                                {['Cédula','Nombre','Riesgo','EPS','Fecha Valoración','Control','Última Cita CVD'].map(h => (
-                                                    <th key={h} className="px-4 py-3 text-left text-[10px] font-bold tracking-widest uppercase"
+                                                {['Cédula','Nombre','Riesgo','EPS / Período','Valoración','Control','Último Control','Hace cuánto'].map(h => (
+                                                    <th key={h} className="px-3 py-3 text-left text-[9px] font-bold tracking-widest uppercase"
                                                         style={{ color: 'rgba(196,175,237,0.6)', whiteSpace: 'nowrap' }}>{h}</th>
                                                 ))}
                                             </tr>
@@ -1155,30 +1464,39 @@ footer { margin-top:24px; padding-top:12px; border-top:2px solid #e8e3f5; displa
                                         <tbody>
                                             {pacientesFiltrados.map((p, i) => {
                                                 const rc = colorRiesgo(p.nivelRiesgo);
+                                                const epsStyle = getEpsStyle(p.tipoEps);
                                                 return (
                                                     <tr key={`${p.codigo}-${i}`}
                                                         style={{ borderBottom: '1px solid rgba(130,99,177,0.08)', transition: 'background 0.15s' }}
                                                         onMouseEnter={e => e.currentTarget.style.background = 'rgba(130,99,177,0.08)'}
                                                         onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-                                                        <td className="px-4 py-3">
+                                                        <td className="px-3 py-2.5">
                                                             <span className="text-xs font-mono" style={{ color: '#C4AFED' }}>{p.codigo}</span>
                                                         </td>
-                                                        <td className="px-4 py-3">
+                                                        <td className="px-3 py-2.5">
                                                             <span className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>{p.nombre}</span>
                                                         </td>
-                                                        <td className="px-4 py-3">
-                                                            <span className="text-[10px] font-bold px-2 py-1 rounded"
+                                                        <td className="px-3 py-2.5">
+                                                            <span className="text-[10px] font-bold px-2 py-0.5 rounded"
                                                                 style={{ background: rc.bg, color: rc.color, border: `1px solid ${rc.border}` }}>
                                                                 {p.nivelRiesgo}
                                                             </span>
                                                         </td>
-                                                        <td className="px-4 py-3">
-                                                            <span className="text-[11px]" style={{ color: 'rgba(245,245,247,0.6)' }}>{p.eps}</span>
+                                                        <td className="px-3 py-2.5">
+                                                            <div className="flex flex-col gap-0.5">
+                                                                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full w-fit"
+                                                                    style={{ background: epsStyle.bg, color: epsStyle.color, border: `1px solid ${epsStyle.border}` }}>
+                                                                    {epsStyle.label}
+                                                                </span>
+                                                                <span className="text-[9px]" style={{ color: 'rgba(245,245,247,0.3)' }}>
+                                                                    Control cada {p.periodoControlMeses || epsStyle.meses} meses
+                                                                </span>
+                                                            </div>
                                                         </td>
-                                                        <td className="px-4 py-3">
+                                                        <td className="px-3 py-2.5">
                                                             <span className="text-[11px]" style={{ color: 'rgba(245,245,247,0.55)' }}>{formatDate(p.fechaValoracion)}</span>
                                                         </td>
-                                                        <td className="px-4 py-3">
+                                                        <td className="px-3 py-2.5">
                                                             <span className="text-[11px] font-bold flex items-center gap-1"
                                                                 style={{ color: p.enControl ? '#A1E3D8' : '#F9A8A8' }}>
                                                                 {p.enControl
@@ -1187,10 +1505,13 @@ footer { margin-top:24px; padding-top:12px; border-top:2px solid #e8e3f5; displa
                                                                 }
                                                             </span>
                                                         </td>
-                                                        <td className="px-4 py-3">
+                                                        <td className="px-3 py-2.5">
                                                             <span className="text-[11px]" style={{ color: p.ultimaCitaCVD ? 'rgba(161,227,216,0.7)' : 'rgba(245,245,247,0.25)' }}>
                                                                 {p.ultimaCitaCVD ? formatDate(p.ultimaCitaCVD) : '— Sin cita'}
                                                             </span>
+                                                        </td>
+                                                        <td className="px-3 py-2.5">
+                                                            <MesesBadge mesesSinCita={p.mesesSinCita} periodoControlMeses={p.periodoControlMeses || epsStyle.meses} />
                                                         </td>
                                                     </tr>
                                                 );

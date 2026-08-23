@@ -464,7 +464,7 @@ app.get('/api/cardiovascular/indicadores', async (req, res) => {
 });
 
 // ─── GET /api/cardiovascular/reporte-riesgo — Informe poblacional de riesgo CVD ──
-// Consulta TQVALORACIONRIESGO y determina cuántos pacientes están en control
+// Consulta VIQ_ALTO_COSTO y determina cuántos pacientes están en control según su EPS
 // Parámetros (query): riesgo, enControl, year, month
 app.get('/api/cardiovascular/reporte-riesgo', async (req, res) => {
     try {
@@ -506,45 +506,67 @@ app.get('/api/cardiovascular/reporte-riesgo', async (req, res) => {
         if (!valoraciones || valoraciones.length === 0) {
             return res.json({
                 resumen: { total: 0, enControl: 0, sinControl: 0, porRiesgo: {}, porEps: [] },
-                pacientes: []
+                pacientes: [],
+                filtros: { epsUnicas: [], riesgosUnicos: [] }
             });
         }
 
-        // ─── 2. Para cada paciente, verificar si tiene cita CVD reciente (últimos 3 meses) ─
-        const hoy = new Date();
-        const hace3Meses = new Date(hoy);
-        hace3Meses.setMonth(hace3Meses.getMonth() - 3);
-        const fechaControl3M = parseInt(
-            `${hace3Meses.getFullYear()}${String(hace3Meses.getMonth() + 1).padStart(2,'0')}${String(hace3Meses.getDate()).padStart(2,'0')}`
-        );
+        // ─── Helper: determinar tipo de EPS y período de control ─────────────────
+        // Nueva EPS = 2 meses, Savia Salud y otras = 3 meses
+        function getEpsInfo(epsNombre) {
+            const n = String(epsNombre || '').toUpperCase().trim();
+            if (n.includes('NUEVA EPS')) {
+                return { tipoEps: 'NUEVA_EPS', periodoControlMeses: 2, label: 'Nueva EPS' };
+            }
+            if (n.includes('SAVIA')) {
+                return { tipoEps: 'SAVIA', periodoControlMeses: 3, label: 'Savia Salud' };
+            }
+            return { tipoEps: 'OTRA', periodoControlMeses: 3, label: epsNombre || 'SIN EPS' };
+        }
 
-        // Obtener el conjunto de cédulas únicas para hacer la consulta masiva
+        // ─── Helper: calcular meses transcurridos desde una fecha Xenco (YYYYMMDD) ─
+        function mesesDesde(fechaXencoStr, hastaDate) {
+            if (!fechaXencoStr) return null;
+            const s = String(fechaXencoStr);
+            if (s.length !== 8) return null;
+            const d = new Date(
+                parseInt(s.substring(0, 4)),
+                parseInt(s.substring(4, 6)) - 1,
+                parseInt(s.substring(6, 8))
+            );
+            if (isNaN(d.getTime())) return null;
+            const meses = (hastaDate.getFullYear() - d.getFullYear()) * 12
+                + (hastaDate.getMonth() - d.getMonth())
+                + (hastaDate.getDate() < d.getDate() ? -1 : 0);
+            return Math.max(0, meses);
+        }
+
+        // ─── 2. Buscar la última cita CVD por paciente (sin restricción de fecha) ──
+        const hoy = new Date();
         const cedulas = [...new Set(valoraciones.map(v => v.codigo).filter(Boolean))];
         const cedulasSql = cedulas.map(c => `'${c.replace(/'/g, "''")}'`).join(',');
 
-        let citasRecientes = [];
+        let ultimasCitas = [];
         if (cedulasSql.length > 0) {
-            citasRecientes = await medicalPrisma.$queryRawUnsafe(`
+            ultimasCitas = await medicalPrisma.$queryRawUnsafe(`
                 SELECT
                     LTRIM(RTRIM(KC3_COD)) AS codigo,
                     MAX(KC3_FCH) AS ultimaCita
                 FROM TMCITASUSUARIOS
                 WHERE LTRIM(RTRIM(KC3_COD)) IN (${cedulasSql})
-                  AND KC3_FCH >= ${fechaControl3M}
                   AND KC3_NUM > 0
                   AND LTRIM(RTRIM(KC3_ARTIC)) IN ('890301-7','890301-8','890301-12','890301-13','890301-14','890301-15','890301-16')
                 GROUP BY LTRIM(RTRIM(KC3_COD))
             `);
         }
 
-        // Mapa: código → última cita CVD
+        // Mapa: código → fecha de última cita CVD (formato YYYYMMDD como número)
         const citasMap = {};
-        for (const c of citasRecientes) {
+        for (const c of ultimasCitas) {
             if (c.codigo) citasMap[c.codigo.trim()] = c.ultimaCita;
         }
 
-        // ─── 3. Construir lista de pacientes enriquecida ──────────────────────────
-        // Deduplicar por código (quedarse con la valoración más reciente por paciente)
+        // ─── 3. Deduplicar valoraciones (más reciente por paciente) ──────────────
         const pacientesMap = {};
         for (const v of valoraciones) {
             const cod = (v.codigo || '').trim();
@@ -554,25 +576,35 @@ app.get('/api/cardiovascular/reporte-riesgo', async (req, res) => {
             }
         }
 
+        const mapaRiesgo = { '0': 'BAJO', '1': 'MEDIO', '2': 'ALTO', '3': 'MUY ALTO' };
+
+        // ─── 4. Construir lista de pacientes enriquecida ──────────────────────────
         let pacientes = Object.values(pacientesMap).map(v => {
             const cod = (v.codigo || '').trim();
             const ultimaCita = citasMap[cod] || null;
-            const estaEnControl = !!ultimaCita;
-            const nombreFinal = (v.nombre && v.nombre.trim()) || 'Sin nombre';
-            const mapaRiesgo = { '0': 'BAJO', '1': 'MEDIO', '2': 'ALTO', '3': 'MUY ALTO' };
+            const epsData = getEpsInfo(v.eps);
+            // Meses transcurridos desde la última cita CVD hasta hoy
+            const mesesSinCita = mesesDesde(ultimaCita ? String(ultimaCita) : null, hoy);
+            // En control = tiene cita registrada Y no ha superado el período según su EPS
+            const estaEnControl = ultimaCita !== null
+                && mesesSinCita !== null
+                && mesesSinCita <= epsData.periodoControlMeses;
             const nivelRiesgo = mapaRiesgo[v.nivelRiesgoOriginal] || 'DESCONOCIDO';
             return {
                 codigo: cod,
-                nombre: nombreFinal,
+                nombre: (v.nombre && v.nombre.trim()) || 'Sin nombre',
                 nivelRiesgo,
                 eps: (v.eps || 'SIN EPS').trim(),
+                tipoEps: epsData.tipoEps,              // 'NUEVA_EPS' | 'SAVIA' | 'OTRA'
+                periodoControlMeses: epsData.periodoControlMeses, // 2 o 3
                 fechaValoracion: String(v.fechaValoracion),
                 enControl: estaEnControl,
                 ultimaCitaCVD: ultimaCita ? String(ultimaCita) : null,
+                mesesSinCita: mesesSinCita,             // null si nunca tuvo cita
             };
         });
 
-        // ─── 4. Aplicar filtros opcionales ──────────────────────────────────────
+        // ─── 5. Aplicar filtros opcionales ──────────────────────────────────────
         if (riesgo && riesgo !== 'TODOS') {
             pacientes = pacientes.filter(p => p.nivelRiesgo === riesgo.toUpperCase());
         }
@@ -582,7 +614,7 @@ app.get('/api/cardiovascular/reporte-riesgo', async (req, res) => {
             pacientes = pacientes.filter(p => !p.enControl);
         }
 
-        // ─── 5. Calcular resumen ─────────────────────────────────────────────────
+        // ─── 6. Calcular resumen ─────────────────────────────────────────────────
         const total = pacientes.length;
         const enControlCount = pacientes.filter(p => p.enControl).length;
         const sinControlCount = total - enControlCount;
@@ -598,17 +630,20 @@ app.get('/api/cardiovascular/reporte-riesgo', async (req, res) => {
         const epsMap = {};
         for (const p of pacientes) {
             const eps = p.eps || 'SIN EPS';
-            if (!epsMap[eps]) epsMap[eps] = { nombre: eps, total: 0, enControl: 0, sinControl: 0 };
+            if (!epsMap[eps]) epsMap[eps] = {
+                nombre: eps, tipoEps: p.tipoEps,
+                periodoControlMeses: p.periodoControlMeses,
+                total: 0, enControl: 0, sinControl: 0
+            };
             epsMap[eps].total++;
             if (p.enControl) epsMap[eps].enControl++;
             else epsMap[eps].sinControl++;
         }
         const porEps = Object.values(epsMap).sort((a, b) => b.total - a.total);
 
-        // ─── 6. Obtener lista de EPS y riesgos únicos para los filtros UI ────────
-        const allPacientesRaw = Object.values(pacientesMap);
-        const epsUnicas = [...new Set(allPacientesRaw.map(p => (p.eps || 'SIN EPS').trim()))].sort();
-        const riesgosUnicos = [...new Set(allPacientesRaw.map(p => (p.nivelRiesgo || 'DESCONOCIDO').toUpperCase().trim()))].sort();
+        // ─── 7. Listas únicas para filtros UI ────────────────────────────────────
+        const epsUnicas = [...new Set(Object.values(pacientesMap).map(p => (p.eps || 'SIN EPS').trim()))].sort();
+        const riesgosUnicos = [...new Set(pacientes.map(p => p.nivelRiesgo))].sort();
 
         res.json({
             resumen: {
