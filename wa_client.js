@@ -1,135 +1,238 @@
 ﻿/**
- * CLIENTE WHATSAPP — whatsapp-web.js (QR + LocalAuth)
+ * CLIENTE WHATSAPP — @whiskeysockets/baileys
  * ─────────────────────────────────────────────────────────────
- * Reemplaza meta_wa_client.js usando whatsapp-web.js con Puppeteer.
+ * Sin Chrome, sin Puppeteer. Conexion directa via WebSocket.
  *
- * Características:
- *  - Muestra QR en terminal al primer arranque
- *  - Guarda sesión en disco (.wwebjs_auth/) — no pide QR al reiniciar
- *  - Compatible con Linux headless (--no-sandbox, --disable-gpu)
+ * Caracteristicas:
+ *  - QR en terminal al primer arranque
+ *  - Sesion persistente en .baileys_auth/ (no pide QR al reiniciar)
+ *  - Solo procesa mensajes NUEVOS (>= timestamp de arranque)
  *  - Exporta la misma interfaz que meta_wa_client.js
- *
- * En el servidor Linux instalar Chromium antes de correr:
- *   sudo apt-get install -y chromium-browser
  */
 
-const { Client, LocalAuth } = require('whatsapp-web.js');
-const qrcode  = require('qrcode-terminal');
-const logger  = require('./logger');
+const {
+    default: makeWASocket,
+    useMultiFileAuthState,
+    DisconnectReason,
+    fetchLatestBaileysVersion,
+    downloadMediaMessage,
+    isJidGroup,
+} = require('@whiskeysockets/baileys');
+const { Boom }   = require('@hapi/boom');
+const qrcode     = require('qrcode-terminal');
+const EventEmitter = require('events');
+const logger     = require('./logger');
 
-// ─── Crear cliente ─────────────────────────────────────────────────────────────
-const client = new Client({
-    authStrategy: new LocalAuth({ dataPath: '.wwebjs_auth' }),
-    puppeteer: {
-        headless: true,
-        args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-gpu',
-            '--no-first-run',
-            '--no-zygote',
-            '--single-process',
-        ],
-    },
-});
+// Timestamp de arranque (segundos Unix) — ignoramos mensajes anteriores
+const startupTimestamp = Math.floor(Date.now() / 1000);
 
-// ─── Eventos del ciclo de vida ─────────────────────────────────────────────────
+// Cache de mensajes raw para descarga de media
+const rawMessageCache = new Map();
 
-client.on('qr', (qr) => {
-    logger.info('[WA] Escanea el codigo QR con tu WhatsApp:');
-    qrcode.generate(qr, { small: true });
-});
+// Emitter interno de mensajes nuevos — index.js se suscribe aqui
+const messageEmitter = new EventEmitter();
+messageEmitter.setMaxListeners(20);
 
-client.on('authenticated', () => {
-    logger.info('[WA] Autenticado correctamente.');
-});
+// Socket activo y estado de conexion
+let sock = null;
+let isConnected = false;
 
-client.on('auth_failure', (msg) => {
-    logger.error(`[WA] Fallo de autenticacion: ${msg}`);
-});
+// Promesa que se resuelve cuando el cliente esta listo
+let readyResolve;
+const readyPromise = new Promise(resolve => { readyResolve = resolve; });
 
-client.on('ready', () => {
-    logger.info('[WA] Cliente WhatsApp listo y conectado.');
-});
+// Logger silencioso para Baileys (evita spam de pino en consola)
+const baileysLogger = {
+    level: 'silent',
+    fatal : () => {}, error : () => {}, warn  : () => {},
+    info  : () => {}, debug : () => {}, trace : () => {},
+    child : () => baileysLogger,
+};
 
-client.on('disconnected', (reason) => {
-    logger.warn(`[WA] Desconectado: ${reason}. Reiniciando...`);
-    client.initialize().catch(e =>
-        logger.error('[WA] Error al reiniciar tras desconexion:', e.message)
-    );
-});
+// ─── Conexion ──────────────────────────────────────────────────────────────────
+async function connect() {
+    const { state, saveCreds } = await useMultiFileAuthState('.baileys_auth');
+    const { version }          = await fetchLatestBaileysVersion();
 
-// ─── Inicializar ───────────────────────────────────────────────────────────────
-client.initialize();
+    sock = makeWASocket({
+        version,
+        auth             : state,
+        logger           : baileysLogger,
+        printQRInTerminal: false,   // manejamos el QR manualmente
+        markOnlineOnConnect: false,
+    });
 
-// ─── Promesa "ready" — para esperar antes de usar el cliente ──────────────────
-const readyPromise = new Promise((resolve) => {
-    client.once('ready', resolve);
-});
+    // Guardar credenciales cada vez que cambian
+    sock.ev.on('creds.update', saveCreds);
+
+    // ── Ciclo de vida de la conexion ──
+    sock.ev.on('connection.update', async (update) => {
+        const { connection, lastDisconnect, qr } = update;
+
+        if (qr) {
+            logger.info('[WA] Escanea el QR con WhatsApp:');
+            qrcode.generate(qr, { small: true });
+        }
+
+        if (connection === 'open') {
+            logger.info('[WA] Conectado a WhatsApp.');
+            isConnected = true;
+            if (readyResolve) { readyResolve(); readyResolve = null; }
+        }
+
+        if (connection === 'close') {
+            isConnected = false;
+            const code = lastDisconnect?.error instanceof Boom
+                ? lastDisconnect.error.output?.statusCode
+                : null;
+            const shouldReconnect = code !== DisconnectReason.loggedOut;
+            logger.warn(`[WA] Conexion cerrada (codigo ${code}). Reconectar: ${shouldReconnect}`);
+            if (shouldReconnect) {
+                setTimeout(connect, 3000);  // reintento tras 3 seg
+            } else {
+                logger.error('[WA] Sesion cerrada. Elimina .baileys_auth/ y reinicia para escanear QR nuevo.');
+            }
+        }
+    });
+
+    // ── Mensajes entrantes ──
+    sock.ev.on('messages.upsert', ({ messages, type }) => {
+        // 'append'  = historial al conectar   → ignorar
+        // 'notify'  = mensajes nuevos en tiempo real → procesar
+        if (type !== 'notify') return;
+
+        for (const msg of messages) {
+            // Ignorar mensajes propios
+            if (msg.key.fromMe) continue;
+
+            // Ignorar grupos
+            if (isJidGroup(msg.key.remoteJid)) continue;
+
+            // Ignorar mensajes anteriores al arranque del bot
+            const msgTs = Number(msg.messageTimestamp);
+            if (msgTs < startupTimestamp) {
+                logger.debug(`[WA] Mensaje ignorado (antes del arranque): ${msgTs} < ${startupTimestamp}`);
+                continue;
+            }
+
+            // Guardar en cache para posible descarga de media
+            if (msg.message) {
+                rawMessageCache.set(msg.key.id, msg);
+                // Limitar cache a 200 mensajes
+                if (rawMessageCache.size > 200) {
+                    const firstKey = rawMessageCache.keys().next().value;
+                    rawMessageCache.delete(firstKey);
+                }
+            }
+
+            // Emitir mensaje para que index.js lo procese
+            messageEmitter.emit('message', msg);
+        }
+    });
+}
+
+// Arrancar conexion
+connect().catch(e => logger.error('[WA] Error al iniciar conexion:', e.message));
 
 // ─── Interfaz compatible con meta_wa_client.js ─────────────────────────────────
 
+/**
+ * Normaliza numero/JID al formato Baileys: 57XXXXXXXXXX@s.whatsapp.net
+ */
 function normalizePhone(phone) {
     if (!phone) return null;
-    if (typeof phone === 'string' && phone.includes('@')) return phone;
+    // Si ya es un JID valido, devolverlo
+    if (typeof phone === 'string' && phone.includes('@')) {
+        // Asegurar sufijo correcto para Baileys
+        return phone.replace('@c.us', '@s.whatsapp.net');
+    }
     const digits = String(phone).replace(/\D/g, '').replace(/^0+/, '');
     if (!digits || digits.length < 7) return null;
     const phone10 = digits.length >= 10 ? digits.slice(-10) : digits;
-    const full = digits.length >= 12 ? digits : `57${phone10}`;
-    return `${full}@c.us`;
+    const full = digits.startsWith('57') && digits.length >= 12 ? digits : `57${phone10}`;
+    return `${full}@s.whatsapp.net`;
 }
 
+/**
+ * Envia un mensaje de texto.
+ */
 async function sendMessage(to, text) {
-    const waId = normalizePhone(to);
-    if (!waId) {
-        logger.warn(`[WA] Numero invalido para sendMessage: ${to}`);
-        return false;
-    }
+    if (!sock) { logger.warn('[WA] sendMessage: socket no disponible.'); return false; }
+    const jid = normalizePhone(to);
+    if (!jid) { logger.warn(`[WA] Numero invalido: ${to}`); return false; }
     try {
-        await client.sendMessage(waId, text);
-        logger.info(`[WA] Enviado a ${waId}: "${text.substring(0, 60)}${text.length > 60 ? '...' : ''}"`);
+        await sock.sendMessage(jid, { text });
+        logger.info(`[WA] Enviado a ${jid}: "${text.substring(0, 60)}${text.length > 60 ? '...' : ''}"`);
         return true;
     } catch (e) {
-        logger.error(`[WA] Error sendMessage a ${waId}: ${e.message}`);
+        logger.error(`[WA] Error sendMessage a ${jid}: ${e.message}`);
         return false;
     }
 }
 
-async function sendTemplate(to, templateName, params = []) {
-    let text = `[${templateName}]`;
-    if (params.length > 0) text += ' ' + params.join(' | ');
-    return sendMessage(to, text);
-}
-
-async function markAsRead(messageId) {
-    if (!messageId) return;
+/**
+ * Marca un mensaje como leido (doble check azul).
+ * @param {string|object} keyOrId - key del mensaje o su ID
+ */
+async function markAsRead(keyOrId) {
+    if (!sock || !keyOrId) return;
     try {
-        const chat = await client.getChatById(messageId).catch(() => null);
-        if (chat) await chat.sendSeen();
+        // Si recibimos el key completo lo usamos; si es un ID string buscamos en cache
+        let key = null;
+        if (typeof keyOrId === 'object' && keyOrId.remoteJid) {
+            key = keyOrId;
+        } else {
+            const cached = rawMessageCache.get(String(keyOrId));
+            if (cached) key = cached.key;
+        }
+        if (key) await sock.readMessages([key]);
     } catch (_) {}
 }
 
-async function downloadMedia(mediaId) {
-    logger.warn('[WA] downloadMedia() — descarga directamente en el handler con msg.downloadMedia().');
-    return null;
-}
-
-async function getState() {
+/**
+ * Descarga media de un mensaje.
+ * @param {string} msgId - ID del mensaje (buscado en cache)
+ */
+async function downloadMedia(msgId) {
+    const rawMsg = rawMessageCache.get(String(msgId));
+    if (!rawMsg) {
+        logger.warn(`[WA] downloadMedia: no hay cache para msgId=${msgId}`);
+        return null;
+    }
     try {
-        return await client.getState();
-    } catch (_) {
-        return 'DISCONNECTED';
+        const buffer = await downloadMediaMessage(rawMsg, 'buffer', {});
+        return buffer;
+    } catch (e) {
+        logger.error(`[WA] Error descargando media: ${e.message}`);
+        return null;
     }
 }
 
+/**
+ * Retorna el estado de conexion.
+ */
+async function getState() {
+    return isConnected ? 'CONNECTED' : 'DISCONNECTED';
+}
+
+/**
+ * Permite cachear manualmente un mensaje raw (para media).
+ */
+function cacheRawMessage(msgId, rawMsg) {
+    rawMessageCache.set(msgId, rawMsg);
+}
+
 module.exports = {
-    client,
+    sock: new Proxy({}, {
+        get: (_, prop) => sock ? sock[prop] : undefined,
+    }),
+    messageEmitter,
     readyPromise,
     sendMessage,
-    sendTemplate,
+    sendTemplate  : async (to, name, params = []) => sendMessage(to, params.join(' ')),
     markAsRead,
     downloadMedia,
     normalizePhone,
     getState,
+    cacheRawMessage,
 };

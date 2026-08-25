@@ -2249,31 +2249,49 @@ async function processIncomingMessage({ from, msgId, text: rawText, type, mediaI
 
 // ─── INICIO ────────────────────────────────────────────────────────────────────
 (async () => {
-    console.log('🚀 Iniciando Aurora Bot con whatsapp-web.js (QR)...');
+    console.log('🚀 Iniciando Aurora Bot con Baileys (sin Chrome)...');
     console.log('📱 Escanea el QR cuando aparezca en pantalla.');
 
     // Arrancar servidor Express + Socket.IO
     server.start(metaClient);
 
-    // Registrar handler de mensajes entrantes del webhook (Meta API — por si acaso)
+    // Registrar handler del webhook (por compatibilidad, no recibe mensajes WA aqui)
     server.setMessageHandler(processIncomingMessage);
 
-    // Handler de mensajes entrantes via whatsapp-web.js
-    waClient.client.on('message', async (msg) => {
-        // Ignorar mensajes de grupos
-        if (msg.from.endsWith('@g.us')) return;
+    // ── Handler de mensajes entrantes via Baileys ──
+    // wa_client.js ya filtra: type='notify', no propios, no grupos, timestamp >= arranque
+    waClient.messageEmitter.on('message', async (msg) => {
+        // Extraer texto segun tipo de mensaje Baileys
+        const m = msg.message || {};
+        const rawText =
+            m.conversation ||
+            m.extendedTextMessage?.text ||
+            m.imageMessage?.caption ||
+            m.videoMessage?.caption ||
+            m.documentMessage?.caption ||
+            '';
 
-        // Mapear msg de whatsapp-web.js al formato esperado por processIncomingMessage
-        const contact = await msg.getContact().catch(() => null);
+        // Detectar tipo de media
+        let msgType = 'chat';
+        if (m.audioMessage || m.pttMessage)          msgType = 'audio';
+        else if (m.imageMessage)                     msgType = 'image';
+        else if (m.videoMessage)                     msgType = 'video';
+        else if (m.documentMessage)                  msgType = 'document';
+
+        const hasMedia = msgType !== 'chat';
+        const msgId    = msg.key.id;
+
+        // Cachear mensaje raw para posible descarga de media
+        if (hasMedia) waClient.cacheRawMessage(msgId, msg);
+
         await processIncomingMessage({
-            from        : msg.from,
-            msgId       : msg.id?._serialized || msg.id?.id || null,
-            text        : msg.body || '',
-            type        : msg.type,           // 'chat', 'audio', 'ptt', 'image', etc.
-            mediaId     : msg.hasMedia ? msg.id?._serialized : null,
-            timestamp   : msg.timestamp,
-            profileName : contact?.pushname || contact?.name || '',
-            _rawMsg     : msg,                // referencia cruda para downloadMedia si se necesita
+            from        : msg.key.remoteJid,
+            msgId       : msgId,
+            text        : rawText,
+            type        : msgType,
+            mediaId     : hasMedia ? msgId : null,
+            timestamp   : Number(msg.messageTimestamp),
+            profileName : msg.pushName || '',
         }).catch(e =>
             console.error('[WA MSG] Error procesando mensaje:', e.message)
         );
