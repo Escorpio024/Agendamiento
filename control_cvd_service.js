@@ -15,8 +15,9 @@ class ControlCVDService {
 
     init(whatsappClient) {
         this.client = whatsappClient;
-        if (!whatsappClient) {
-            logger.warn('[Control CVD] NO_WHATSAPP=true — scheduler desactivado.');
+        const noWhatsapp = (process.env.NO_WHATSAPP || 'false').toLowerCase() === 'true';
+        if (noWhatsapp) {
+            logger.warn('[Control CVD] NO_WHATSAPP=true — scheduler CVD desactivado (solo SMS de citas activo).');
             return;
         }
 

@@ -16,9 +16,10 @@ const NUMEROS_PRUEBA = [
 ];
 
 const MENSAJE_PRUEBA =
-    'PRUEBA - Hospital San Rafael de Ebejico: ' +
-    'Este es un mensaje de prueba del sistema de recordatorios de citas medicas. ' +
-    'Si lo recibio correctamente, el sistema esta funcionando. Gracias.';
+    'RECORDATORIO: Hola Angel, tiene cita medica manana ' +
+    'martes, 26 de agosto de 2026 a las 9:00 AM con Dr. Juan Perez. ' +
+    'Llegue 15 min antes. Cancelaciones: escriba a nuestro WhatsApp. ' +
+    'ESE Hospital San Rafael de Ebejico.';
 
 function normalizarNumero(num) {
     const digits = num.replace(/\D/g, '');
