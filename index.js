@@ -272,7 +272,7 @@ async function processIncomingMessage({ from, msgId, text: rawText, type, mediaI
             }
             console.log(`[BOT] 💬 Enviando respuesta (${txt.length} chars): "${txt.substring(0,80)}..."`);
             // Meta API no tiene typing indicator, pero añadimos un pequeño delay natural
-            const delay = Math.min(Math.max(txt.length * 15, 500), 2500);
+            const delay = Math.min(Math.max(txt.length * 15, 5000), 10000);
             await new Promise(r => setTimeout(r, delay));
             const sent = await metaClient.sendMessage(sender, txt);
             if (sent) {
