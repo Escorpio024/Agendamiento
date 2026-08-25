@@ -1,4 +1,4 @@
-﻿/**
+/**
  * CLIENTE WHATSAPP — @whiskeysockets/baileys
  * ─────────────────────────────────────────────────────────────
  * Sin Chrome, sin Puppeteer. Conexion directa via WebSocket.
@@ -154,16 +154,25 @@ function normalizePhone(phone) {
 }
 
 /**
- * Envia un mensaje de texto.
+ * Envia un mensaje de texto o un payload completo de Baileys.
+ * @param {string} to              - Numero/JID destino
+ * @param {string|object} content  - Texto plano o payload Baileys ({ text, image, document, ... })
  */
-async function sendMessage(to, text) {
+async function sendMessage(to, content) {
     if (!sock) { logger.warn('[WA] sendMessage: socket no disponible.'); return false; }
     const jid = normalizePhone(to);
     if (!jid) { logger.warn(`[WA] Numero invalido: ${to}`); return false; }
+
+    // Normalizar: string → { text: string }, objeto → pasar directo
+    const payload = typeof content === 'string' ? { text: content } : content;
+
     try {
-        await sock.sendMessage(jid, { text });
-        logger.info(`[WA] Enviado a ${jid}: "${text.substring(0, 60)}${text.length > 60 ? '...' : ''}"`);
-        return true;
+        const result = await sock.sendMessage(jid, payload);
+        const preview = typeof content === 'string'
+            ? `"${content.substring(0, 60)}${content.length > 60 ? '...' : ''}"`
+            : `[${Object.keys(payload).join('/')}]`;
+        logger.info(`[WA] Enviado a ${jid}: ${preview}`);
+        return result;
     } catch (e) {
         logger.error(`[WA] Error sendMessage a ${jid}: ${e.message}`);
         return false;
