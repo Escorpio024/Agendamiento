@@ -10,7 +10,8 @@ process.on('uncaughtException', (error) => {
 });
 const audioService = require('./audio_service');
 
-const metaClient  = require('./meta_wa_client');
+const waClient    = require('./wa_client');
+const metaClient  = waClient; // alias de compatibilidad — mismo API
 const prisma      = require('./db');
 const botPrisma   = require('./dbBot');
 const path        = require('path');
@@ -2248,16 +2249,42 @@ async function processIncomingMessage({ from, msgId, text: rawText, type, mediaI
 
 // ─── INICIO ────────────────────────────────────────────────────────────────────
 (async () => {
-    console.log('🚀 Iniciando Aurora Bot con Meta WhatsApp Cloud API...');
-    console.log('ℹ️  Sin Puppeteer. Sin QR. Sin desconexiones.');
+    console.log('🚀 Iniciando Aurora Bot con whatsapp-web.js (QR)...');
+    console.log('📱 Escanea el QR cuando aparezca en pantalla.');
 
-    // Arrancar servidor Express + Socket.IO + Webhook /webhook
+    // Arrancar servidor Express + Socket.IO
     server.start(metaClient);
 
-    // Registrar handler de mensajes entrantes en el webhook
+    // Registrar handler de mensajes entrantes del webhook (Meta API — por si acaso)
     server.setMessageHandler(processIncomingMessage);
 
-    // Inicializar servicios con metaClient
+    // Handler de mensajes entrantes via whatsapp-web.js
+    waClient.client.on('message', async (msg) => {
+        // Ignorar mensajes de grupos
+        if (msg.from.endsWith('@g.us')) return;
+
+        // Mapear msg de whatsapp-web.js al formato esperado por processIncomingMessage
+        const contact = await msg.getContact().catch(() => null);
+        await processIncomingMessage({
+            from        : msg.from,
+            msgId       : msg.id?._serialized || msg.id?.id || null,
+            text        : msg.body || '',
+            type        : msg.type,           // 'chat', 'audio', 'ptt', 'image', etc.
+            mediaId     : msg.hasMedia ? msg.id?._serialized : null,
+            timestamp   : msg.timestamp,
+            profileName : contact?.pushname || contact?.name || '',
+            _rawMsg     : msg,                // referencia cruda para downloadMedia si se necesita
+        }).catch(e =>
+            console.error('[WA MSG] Error procesando mensaje:', e.message)
+        );
+    });
+
+    // Esperar a que el cliente WA esté listo antes de iniciar servicios
+    console.log('[STARTUP] Esperando conexión WhatsApp...');
+    await waClient.readyPromise;
+    console.log('[STARTUP] WhatsApp conectado. Iniciando servicios...');
+
+    // Inicializar servicios
     reminderService.init();
     controlCvdService.init(metaClient);
     campaignService.init(metaClient);
@@ -2267,8 +2294,7 @@ async function processIncomingMessage({ from, msgId, text: rawText, type, mediaI
         console.warn('[STARTUP] recoverOnStartup error:', e.message)
     );
 
-    console.log('✅ Aurora lista. Esperando mensajes vía webhook en /webhook...');
-    console.log(`📋 Webhook verify token: ${process.env.WEBHOOK_VERIFY_TOKEN || 'aurora_webhook_2026'}`);
+    console.log('✅ Aurora lista. Escuchando mensajes WhatsApp...');
 })();
 
 
