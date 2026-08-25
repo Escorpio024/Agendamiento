@@ -267,18 +267,23 @@ app.post('/api/messages/send', upload.single('file'), async (req, res) => {
         let sentMsg;
         let mediaUrl = null;
         if (file) {
-            const media = MessageMedia.fromFilePath(file.path);
-            sentMsg = await whatsappClient.sendMessage(conversationId, media, { caption: text });
+            // Baileys: enviar archivo como buffer con tipo correcto
+            const fileBuffer  = fs.readFileSync(file.path);
+            const mimetype    = file.mimetype || 'application/octet-stream';
+            const isImage     = mimetype.startsWith('image/');
+            const mediaPayload = isImage
+                ? { image: fileBuffer, caption: text || '' }
+                : { document: fileBuffer, mimetype, fileName: file.originalname, caption: text || '' };
+            sentMsg = await whatsappClient.sendMessage(conversationId, mediaPayload);
             mediaUrl = `/media/${path.basename(file.path)}`;
         } else if (text) {
-            sentMsg = await whatsappClient.sendMessage(conversationId, text);
+            sentMsg = await whatsappClient.sendMessage(conversationId, { text });
         } else {
             return res.status(400).json({ error: 'Message or file required' });
         }
 
-        // Save to DB immediately so the UI reflects the sent message in real-time.
-        // The 'message_create' event in index.js will try to upsert and skip the duplicate.
-        const msgId = sentMsg?.id?._serialized || `meta_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+        // Baileys devuelve { key: { id } }
+        const msgId = sentMsg?.key?.id || `sent_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
         const timestamp = new Date();
         let savedMsg;
         try {
@@ -1273,16 +1278,16 @@ app.post('/api/cardiovascular/remind/:id', async (req, res) => {
         }
 
         // Construir JID de WhatsApp (formato Colombia: 57 + 10 dígitos)
-        // Si el número tiene 10 dígitos, agregar prefijo país
+        // Baileys usa @s.whatsapp.net (no @c.us)
         const digits = rawPhone.length === 10 ? `57${rawPhone}` : rawPhone;
-        const waId   = `${digits}@c.us`;
+        const waId   = `${digits}@s.whatsapp.net`;
 
         const ochoDias = new Date();
         ochoDias.setDate(ochoDias.getDate() + 8);
         const fechaDeseada = ochoDias.toLocaleDateString('es-CO', { day: '2-digit', month: 'long', year: 'numeric' });
 
         const msg = `🔔 *RECORDATORIO — Exámenes de Riesgo Cardiovascular*\n\nHola, te recordamos que tienes exámenes pendientes por realizar:\n\n🧪 *${examen || 'Exámenes cardiovasculares'}*\n\n⚠️ *IMPORTANTE:* Recuerda que *TODOS* los exámenes te los debes realizar el *mismo día*.\n\n📅 Te sugerimos acercarte a nuestra institución para realizarlos en aproximadamente 8 días, es decir, alrededor del *${fechaDeseada}*. 😊\n\n_ESE Hospital San Rafael de Ebéjico_`;
-        await whatsappClient.sendMessage(waId, msg);
+        await whatsappClient.sendMessage(waId, { text: msg });
         logger.info(`[CARDIOVASCULAR] ✅ Recordatorio enviado a ${waId} — examen: ${examId}`);
         res.json({ success: true });
     } catch (error) {
