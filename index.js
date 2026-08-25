@@ -1486,7 +1486,7 @@ async function processIncomingMessage({ from, msgId, text: rawText, type, mediaI
                 }
 
                 // ── FREE-FORM MESSAGE (no active context) ────────────────────
-                if (chat) chat.sendStateTyping();
+                // Nota: typing indicator eliminado (era de whatsapp-web.js, no aplica en Baileys)
                 const extracted = await aiService.extractAll(message, historyStr);
                 const intent = extracted.intent;
                 const entities = extracted.entities || {};
