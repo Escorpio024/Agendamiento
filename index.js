@@ -785,7 +785,19 @@ async function processIncomingMessage({ from, msgId, text: rawText, type, mediaI
                 // Usar el número en DB en vez del ID de Meta (sender) que a veces es erróneo ej 2360...
                 const realPhone = pacienteExiste.KC_TEL1 || pacienteExiste.KC0_RES_TEL || sender.replace(/@(c\.us|lid|s\.whatsapp\.net)/gi, '').replace(/\D/g, '');
 
-                console.log(`[BOT] Sesión por cédula: nombre=${nombre}, cod=${pacienteExiste.KC_COD}, tel=${realPhone}, zona=${pacienteExiste.KC_ZONA}`);
+                // ── BUG FIX: Obtener KC0_ENTIDAD (EPS) real del paciente buscando por cédula ──
+                // Al llegar por este flujo, pacienteExiste no incluye la entidad. Usamos findPaciente
+                // con la cédula (que la función ya soporta) para obtener todos los datos incluyendo EPS.
+                let entidadReal = null;
+                try {
+                    const pacienteCompleto = await findPaciente(cedula);
+                    entidadReal = pacienteCompleto?.KC0_ENTIDAD ?? null;
+                    console.log(`[BOT] Sesión por cédula: entidad resueltas → KC0_ENTIDAD=${entidadReal}`);
+                } catch (_) {
+                    console.warn('[BOT] No se pudo resolver KC0_ENTIDAD por cédula, quedará null.');
+                }
+
+                console.log(`[BOT] Sesión por cédula: nombre=${nombre}, cod=${pacienteExiste.KC_COD}, tel=${realPhone}, zona=${pacienteExiste.KC_ZONA}, entidad=${entidadReal}`);
                 activeSessions.set(sender, {
                     step: 'ASK_SEDE', mode: 'NATURAL',
                     sede: 'Ebejico', // Sede por defecto
@@ -793,7 +805,7 @@ async function processIncomingMessage({ from, msgId, text: rawText, type, mediaI
                     phone: realPhone,
                     id: pacienteExiste.KC_COD,
                     zona: pacienteExiste.KC_ZONA || '001',
-                    entidad: null,
+                    entidad: entidadReal,
                     history: [], doctorPreferido: null, doctorIdSeleccionado: null
                 });
                 await reply(`¡Hola ${nombre}! 👋\n\nPara continuar, por favor selecciona la sede donde deseas consultar:\n\n1️⃣ Sede Ebejico\n2️⃣ Sede Sevilla`);
@@ -824,7 +836,7 @@ async function processIncomingMessage({ from, msgId, text: rawText, type, mediaI
                     "¡Perfecto! Has seleccionado *Sede Sevilla*. 🏥\n\n" +
                     "¿Qué tipo de cita deseas agendar?\n\n" +
                     "1️⃣ *Medicina General*\n" +
-                    "2️⃣ *Odontología* _(solo miércoles y sábados, 7 AM – 1 PM)_"
+                    "2️⃣ *Odontología* _(próximamente disponible)_"
                 );
             } else {
                 await reply("⚠️ Por favor selecciona una opción válida:\n\n1️⃣ Sede Ebejico\n2️⃣ Sede Sevilla");
@@ -840,22 +852,23 @@ async function processIncomingMessage({ from, msgId, text: rawText, type, mediaI
                 session.step = 'WELCOME';
                 await reply(`¡Perfecto! Bienvenido a *Sede ${session.sede} — Medicina General*. 🩺\n\n¿Te gustaría agendar, cancelar o consultar una cita?`);
             } else if (txt === '2' || txt.includes('odont') || txt.includes('dental') || txt.includes('dent')) {
-                session.tipoCita = 'odontologia';
-                session.step = 'WELCOME';
+                // ── BUG FIX: Odontología Sevilla aún no está habilitada ──
                 if (session.sede === 'Sevilla') {
                     await reply(
-                        "¡Perfecto! Has seleccionado *Odontología* en Sede Sevilla. 🦷\n\n" +
-                        "Recuerda que las citas de odontología son:\n" +
-                        "📅 *Días:* Miércoles y Sábados\n" +
-                        "🕐 *Horario:* 7:00 AM – 1:00 PM\n\n" +
-                        "¿Deseas agendar, cancelar o consultar una cita de odontología?"
+                        "⚠️ El servicio de *Odontología* en la Sede Sevilla aún no está disponible para agendamiento por WhatsApp.\n\n" +
+                        "Próximamente podrás agendar tus citas odontológicas por este medio. 🦷\n\n" +
+                        "Por favor comunícate directamente con la clínica para agendar tu cita de odontología.\n\n" +
+                        "¿Te puedo ayudar con algo más? Por ejemplo, una cita de *Medicina General*."
                     );
-                } else {
-                    await reply(
-                        "¡Perfecto! Has seleccionado *Odontología* en Sede Ebejico. 🦷\n\n" +
-                        "¿Deseas agendar, cancelar o consultar una cita de odontología?"
-                    );
+                    // No avanzar de paso — dejar al usuario elegir de nuevo
+                    return;
                 }
+                session.tipoCita = 'odontologia';
+                session.step = 'WELCOME';
+                await reply(
+                    "¡Perfecto! Has seleccionado *Odontología* en Sede Ebejico. 🦷\n\n" +
+                    "¿Deseas agendar, cancelar o consultar una cita de odontología?"
+                );
             } else {
                 if (session.sede === 'Sevilla') {
                     await reply(
