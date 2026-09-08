@@ -73,7 +73,7 @@ export default function Sidebar({ conversations, activeId, onSelect, filter, set
                     {/* Fila 1: Logo + Título */}
                     <div className="px-4 pt-3 pb-2 flex items-center gap-2">
                         <span className="text-[#A1E3D8] text-xl">🤖</span>
-                        <h1 className="text-base font-bold tracking-tight whitespace-nowrap">Chat bot Aurora</h1>
+                        <h1 className="text-base font-bold tracking-tight whitespace-nowrap">Agente Aurora</h1>
                     </div>
                     {/* Fila 2: Botones de acción */}
                     <div className="px-3 pb-3 flex items-center gap-2">

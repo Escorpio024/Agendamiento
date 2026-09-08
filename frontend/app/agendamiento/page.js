@@ -6,6 +6,7 @@ import Sidebar from '../../components/Sidebar';
 import MessageList from '../../components/MessageList';
 import InputArea from '../../components/InputArea';
 import VisorAgenda from '../../components/VisorAgenda';
+import AgendamientoDashboard from '../../components/AgendamientoDashboard';
 import { useChat } from '../../hooks/useChat';
 import {
     User, UserPlus, Bot, MessageCircle,
@@ -521,6 +522,17 @@ export default function AgendamientoPage() {
                                         Devolver al Bot
                                     </button>
                                 )}
+                                <div className="w-px h-5 mx-1" style={{ background: 'rgba(130,99,177,0.3)' }}></div>
+                                <button
+                                    onClick={() => setActiveConversationId(null)}
+                                    className="p-1.5 rounded-full transition-colors flex items-center justify-center"
+                                    style={{ color: 'rgba(245,245,247,0.5)' }}
+                                    onMouseEnter={e => { e.currentTarget.style.color = '#F9A8A8'; e.currentTarget.style.background = 'rgba(177,64,64,0.2)'; }}
+                                    onMouseLeave={e => { e.currentTarget.style.color = 'rgba(245,245,247,0.5)'; e.currentTarget.style.background = 'transparent'; }}
+                                    title="Cerrar chat"
+                                >
+                                    <X size={16} />
+                                </button>
                             </div>
                         </div>
 
@@ -532,35 +544,7 @@ export default function AgendamientoPage() {
                     </>
                 ) : (
                     /* Empty state */
-                    <div className="flex-1 flex flex-col items-center justify-center chat-bg">
-                        <div className="text-center max-w-sm px-8 select-none">
-                            <div
-                                className="w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-6 shadow-xl"
-                                style={{ background: 'linear-gradient(135deg, #8263B1 0%, #2D283E 100%)' }}
-                            >
-                                <MessageCircle size={44} style={{ color: '#A1E3D8' }} />
-                            </div>
-                            <h1 className="text-2xl font-bold mb-3" style={{ color: 'var(--text-primary)' }}>
-                                Auditoría de Conversaciones
-                            </h1>
-                            <p className="text-sm leading-relaxed" style={{ color: 'var(--text-muted)' }}>
-                                Selecciona una conversación de la lista para revisar el historial completo de mensajes y citas del paciente.
-                            </p>
-                            <button
-                                onClick={() => setShowAppointments(true)}
-                                className="mt-6 flex items-center gap-2 mx-auto px-4 py-2.5 rounded-xl text-sm font-semibold transition-all shadow"
-                                style={{ background: '#8263B1', color: '#F5F5F7' }}
-                            >
-                                <CalendarCheck2 size={16} style={{ color: '#A1E3D8' }} />
-                                Ver Citas Agendadas
-                                {appointmentsCount > 0 && (
-                                    <span className="ml-1 bg-[#A1E3D8] text-[#0F0E13] text-[10px] font-bold px-1.5 py-0.5 rounded-full">
-                                        {appointmentsCount}
-                                    </span>
-                                )}
-                            </button>
-                        </div>
-                    </div>
+                    <AgendamientoDashboard />
                 )}
             </div>
 

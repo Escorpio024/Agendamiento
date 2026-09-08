@@ -132,7 +132,11 @@ async function connect() {
 }
 
 // Arrancar conexion
-connect().catch(e => logger.error('[WA] Error al iniciar conexion:', e.message));
+if (process.env.NO_WHATSAPP === 'true') {
+    logger.warn('[WA] Módulo WhatsApp deshabilitado por variable de entorno NO_WHATSAPP=true.');
+} else {
+    connect().catch(e => logger.error('[WA] Error al iniciar conexion:', e.message));
+}
 
 // ─── Interfaz compatible con meta_wa_client.js ─────────────────────────────────
 

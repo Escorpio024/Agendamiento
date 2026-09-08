@@ -1,5 +1,6 @@
 import './globals.css';
 import Script from 'next/script';
+import AuthProvider from '../components/AuthProvider';
 
 export const metadata = {
     title: 'Auro Bot',
@@ -34,7 +35,11 @@ export default function RootLayout({ children }) {
                     `}
                 </Script>
             </head>
-            <body>{children}</body>
+            <body>
+                <AuthProvider>
+                    {children}
+                </AuthProvider>
+            </body>
         </html>
     );
 }
