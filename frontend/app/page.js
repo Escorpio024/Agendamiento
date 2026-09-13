@@ -168,7 +168,7 @@ export default function SelectorPage() {
 
     return (
         <div
-            className="min-h-screen flex flex-col items-center py-10 relative overflow-y-auto"
+            className="h-screen flex flex-col items-center py-10 relative overflow-y-auto"
             style={{ background: 'var(--chat-bg)' }}
         >
             {/* ── Subtle grid background ── */}
@@ -211,7 +211,7 @@ export default function SelectorPage() {
             </div>
 
             {/* ── Top Row: Cards ── */}
-            <div className={`relative z-10 grid grid-cols-1 md:grid-cols-${isSpaceguard ? '3' : '2'} gap-6 px-6 w-full max-w-[1200px] mb-8`}>
+            <div className={`relative z-10 grid grid-cols-1 ${isSpaceguard ? 'md:grid-cols-3' : 'md:grid-cols-2'} gap-6 px-6 w-full max-w-[1200px] mb-8`}>
                 {mainModules.map((mod) => {
                     if (mod.id === 'campaigns' && !isSpaceguard) return null;
 
