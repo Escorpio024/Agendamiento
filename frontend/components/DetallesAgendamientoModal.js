@@ -1,6 +1,6 @@
 "use client";
 
-import { X, CalendarCheck2, Heart, Search, FileText } from 'lucide-react';
+import { X, CalendarCheck2, Heart, Search, FileText, Download, Loader2 } from 'lucide-react';
 import { useState } from 'react';
 
 export default function DetallesAgendamientoModal({ onClose, data }) {
@@ -19,6 +19,65 @@ export default function DetallesAgendamientoModal({ onClose, data }) {
         }
         return true;
     });
+
+    const [isDownloading, setIsDownloading] = useState(false);
+
+    const handleDownloadPDF = async () => {
+        setIsDownloading(true);
+        try {
+            const html2pdf = (await import('html2pdf.js')).default;
+            
+            const element = document.createElement('div');
+            element.innerHTML = `
+                <div style="padding: 20px; font-family: Arial, sans-serif; color: #333;">
+                    <div style="text-align: center; margin-bottom: 25px;">
+                        <h2 style="margin: 0; color: #1e1b26;">Reporte de Agendamientos</h2>
+                        <p style="margin: 5px 0 0 0; color: #666; font-size: 14px;">Generado el ${new Date().toLocaleString('es-CO')}</p>
+                        <p style="margin: 5px 0 0 0; color: #666; font-size: 14px;">Total de registros: ${filteredData.length}</p>
+                    </div>
+                    <table style="width: 100%; border-collapse: collapse; font-size: 11px;">
+                        <thead>
+                            <tr style="background-color: #f3f4f6; text-align: left;">
+                                <th style="padding: 10px; border: 1px solid #ddd; font-weight: bold;">Módulo</th>
+                                <th style="padding: 10px; border: 1px solid #ddd; font-weight: bold;">Paciente</th>
+                                <th style="padding: 10px; border: 1px solid #ddd; font-weight: bold;">Cédula</th>
+                                <th style="padding: 10px; border: 1px solid #ddd; font-weight: bold;">Fecha Cita</th>
+                                <th style="padding: 10px; border: 1px solid #ddd; font-weight: bold;">Especialista</th>
+                                <th style="padding: 10px; border: 1px solid #ddd; font-weight: bold;">Servicio/Examen</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${filteredData.map(item => `
+                                <tr>
+                                    <td style="padding: 8px 10px; border: 1px solid #ddd;">${item.modulo}</td>
+                                    <td style="padding: 8px 10px; border: 1px solid #ddd;">${item.paciente || '—'}</td>
+                                    <td style="padding: 8px 10px; border: 1px solid #ddd;">${item.documento || '—'}</td>
+                                    <td style="padding: 8px 10px; border: 1px solid #ddd;">${item.fecha ? `${item.fecha} ${item.hora || ''}` : '—'}</td>
+                                    <td style="padding: 8px 10px; border: 1px solid #ddd;">${item.doctor || '—'}</td>
+                                    <td style="padding: 8px 10px; border: 1px solid #ddd;">${item.servicio || '—'}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+
+            const opt = {
+                margin:       10,
+                filename:     `reporte_agendamientos_${new Date().getTime()}.pdf`,
+                image:        { type: 'jpeg', quality: 0.98 },
+                html2canvas:  { scale: 2 },
+                jsPDF:        { unit: 'mm', format: 'a4', orientation: 'landscape' }
+            };
+
+            await html2pdf().set(opt).from(element).save();
+        } catch (error) {
+            console.error("Error generating PDF:", error);
+            alert("Hubo un error al generar el PDF.");
+        } finally {
+            setIsDownloading(false);
+        }
+    };
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
@@ -48,14 +107,25 @@ export default function DetallesAgendamientoModal({ onClose, data }) {
                             </h2>
                         </div>
                     </div>
-                    <button onClick={onClose}
-                        className="w-8 h-8 rounded-lg flex items-center justify-center transition-all"
-                        style={{ background: 'rgba(245,245,247,0.06)', color: 'rgba(245,245,247,0.5)' }}
-                        onMouseEnter={e => e.currentTarget.style.background = 'rgba(177,64,64,0.2)'}
-                        onMouseLeave={e => e.currentTarget.style.background = 'rgba(245,245,247,0.06)'}
-                    >
-                        <X size={15} />
-                    </button>
+                    <div className="flex items-center gap-2">
+                        <button 
+                            onClick={handleDownloadPDF}
+                            disabled={isDownloading || filteredData.length === 0}
+                            className="h-8 px-3 rounded-lg flex items-center gap-2 text-xs font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                            style={{ background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)', color: '#fff', border: '1px solid rgba(16,185,129,0.4)', boxShadow: '0 2px 8px rgba(16,185,129,0.2)' }}
+                        >
+                            {isDownloading ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
+                            Descargar PDF
+                        </button>
+                        <button onClick={onClose}
+                            className="w-8 h-8 rounded-lg flex items-center justify-center transition-all"
+                            style={{ background: 'rgba(245,245,247,0.06)', color: 'rgba(245,245,247,0.5)' }}
+                            onMouseEnter={e => e.currentTarget.style.background = 'rgba(177,64,64,0.2)'}
+                            onMouseLeave={e => e.currentTarget.style.background = 'rgba(245,245,247,0.06)'}
+                        >
+                            <X size={15} />
+                        </button>
+                    </div>
                 </div>
 
                 {/* Filters */}
