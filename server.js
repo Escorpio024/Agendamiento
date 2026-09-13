@@ -255,6 +255,98 @@ app.get('/api/appointments', async (req, res) => {
     }
 });
 
+// ⚡ GET /api/dashboard/stats — Endpoint optimizado para el dashboard principal.
+// Devuelve en una sola llamada el conteo de citas del mes actual (General + CVD)
+// sin hacer lookups de WhatsApp ni cargar datos históricos completos.
+app.get('/api/dashboard/stats', async (req, res) => {
+    try {
+        const now = new Date();
+        const year  = now.getFullYear();
+        const month = now.getMonth(); // 0-indexed
+
+        // Inicio y fin del mes actual como strings YYYYMMDD para comparar con campos de Xenco/SQLite
+        const mesStr = String(month + 1).padStart(2, '0');
+        const prefixMes = `${year}${mesStr}`; // ej: "202609"
+
+        // ── 1. Citas generales del mes (desde AppointmentLog en SQLite) ──────────
+        const appointmentsRaw = await botPrisma.appointmentLog.findMany({
+            select: {
+                appointmentDate: true,
+                createdAt:       true,
+                patientName:     true,
+                doctorName:      true,
+                serviceType:     true,
+                whatsappId:      true,
+            },
+            orderBy: { createdAt: 'desc' }
+        });
+
+        const generalItems = [];
+        let countGen = 0;
+        for (const item of appointmentsRaw) {
+            const d = item.appointmentDate
+                ? new Date(item.appointmentDate + 'T12:00:00')
+                : new Date(item.createdAt);
+            if (!isNaN(d.getTime()) && d.getMonth() === month && d.getFullYear() === year) {
+                countGen++;
+                generalItems.push({
+                    modulo:    'General',
+                    paciente:  item.patientName,
+                    documento: item.whatsappId ? item.whatsappId.replace('@c.us','').replace('@s.whatsapp.net','') : '—',
+                    fecha:     d.toLocaleDateString('es-CO', { year: 'numeric', month: '2-digit', day: '2-digit' }),
+                    hora:      null,
+                    doctor:    item.doctorName || '—',
+                    servicio:  item.serviceType || 'Agendamiento',
+                    rawDate:   d.toISOString(),
+                });
+            }
+        }
+
+        // ── 2. Controles CVD del mes (BOOKED / BOOKED_PRESENCIAL con fechaControl en el mes) ──
+        const cvdRaw = await botPrisma.$queryRawUnsafe(`
+            SELECT cedula, paciente, fechaControl, citaHora, citaMedico, articuloCita, epsInfo
+            FROM ControlReminder
+            WHERE estado IN ('BOOKED','BOOKED_PRESENCIAL')
+              AND fechaControl LIKE '${prefixMes}%'
+        `);
+
+        const cvdItems = [];
+        for (const item of cvdRaw) {
+            const f = item.fechaControl;
+            const d = (f && /^\d{8}$/.test(f))
+                ? new Date(`${f.slice(0,4)}-${f.slice(4,6)}-${f.slice(6,8)}T12:00:00`)
+                : null;
+            if (!d || isNaN(d.getTime())) continue;
+
+            cvdItems.push({
+                modulo:    'CVD',
+                paciente:  item.paciente || '—',
+                documento: item.cedula || '—',
+                fecha:     d.toLocaleDateString('es-CO', { year: 'numeric', month: '2-digit', day: '2-digit' }),
+                hora:      item.citaHora || '—',
+                doctor:    item.citaMedico || '—',
+                servicio:  item.articuloCita || 'Control CVD',
+                rawDate:   d.toISOString(),
+            });
+        }
+
+        // ── 3. Combinar, ordenar y responder ──────────────────────────────────────
+        const combined = [...generalItems, ...cvdItems]
+            .sort((a, b) => new Date(b.rawDate) - new Date(a.rawDate));
+
+        res.json({
+            mes:   `${year}-${mesStr}`,
+            stats: { general: countGen, cvd: cvdItems.length, total: countGen + cvdItems.length },
+            items: combined,
+        });
+
+    } catch (error) {
+        logger.error('[DASHBOARD] Error en /api/dashboard/stats:', error.message);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+
 // Send Message
 app.post('/api/messages/send', upload.single('file'), async (req, res) => {
     try {

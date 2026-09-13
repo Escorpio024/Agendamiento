@@ -2,10 +2,9 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { MessageCircle, Heart, ArrowRight, Activity, Bot, FileText, Loader2, CalendarCheck2, Megaphone } from 'lucide-react';
+import { MessageCircle, Heart, ArrowRight, Activity, Bot, FileText, Loader2, CalendarCheck2 } from 'lucide-react';
 import PieChart from '../components/PieChart';
 import DetallesAgendamientoModal from '../components/DetallesAgendamientoModal';
-import { useAuth } from '../components/AuthProvider';
 
 const IS_PROD = typeof window !== 'undefined' && window.location.hostname !== 'localhost';
 const SERVER_HOST = IS_PROD ? window.location.hostname : 'localhost';
@@ -44,29 +43,11 @@ const mainModules = [
         tag: 'Activo',
         href: '/agendamiento',
         features: ['Auditoría', 'Citas'],
-    },
-    {
-        id: 'campaigns',
-        title: 'Campañas',
-        subtitle: 'Difusión Masiva',
-        description: 'Envío masivo de mensajes (WhatsApp y SMS Onurix).',
-        icon: Megaphone,
-        iconBg: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
-        accentColor: '#93c5fd',
-        badgeColor: '#3b82f6',
-        badgeBg: 'rgba(59,130,246,0.18)',
-        badgeBorder: 'rgba(59,130,246,0.35)',
-        badgeText: '#bfdbfe',
-        tag: 'Beta',
-        href: '/campaigns',
-        features: ['WhatsApp', 'SMS', 'BD Pacientes'],
     }
 ];
 
 export default function SelectorPage() {
     const router = useRouter();
-    const { username } = useAuth();
-    const isSpaceguard = username === 'spaceguard';
     const [hoveredId, setHoveredId] = useState(null);
     
     // Estados para el Dashboard consolidado
@@ -79,76 +60,18 @@ export default function SelectorPage() {
         const fetchMonthData = async () => {
             setLoadingData(true);
             try {
-                const now = new Date();
-                const currentMonth = now.getMonth();
-                const currentYear = now.getFullYear();
+                // ⚡ Una sola llamada al endpoint optimizado que ya filtra por mes
+                // y combina General + CVD en el servidor
+                const res = await fetch(`${API_BASE}/api/dashboard/stats`);
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
 
-                // 1. Fetch General Appointments
-                const resGen = await fetch(`${API_BASE}/api/appointments`);
-                const generalRaw = resGen.ok ? await resGen.json() : [];
-
-                // 2. Fetch CVD Appointments (Controles)
-                const resCvd = await fetch(`${API_BASE}/api/cardiovascular/controles`);
-                const cvdRaw = resCvd.ok ? await resCvd.json() : [];
-
-                const processed = [];
-                let countGen = 0;
-                let countCvd = 0;
-
-                // Process General
-                generalRaw.forEach(item => {
-                    const d = item.appointmentDate ? new Date(item.appointmentDate + 'T12:00:00') : new Date(item.createdAt);
-                    if (!isNaN(d.getTime()) && d.getMonth() === currentMonth && d.getFullYear() === currentYear) {
-                        countGen++;
-                        processed.push({
-                            modulo: 'GENERAL',
-                            paciente: item.patientName,
-                            documento: item.patientDocument,
-                            fecha: item.appointmentDate || d.toLocaleDateString('es-CO'),
-                            hora: item.appointmentTime,
-                            doctor: item.doctorName,
-                            servicio: item.serviceType || 'Agendamiento',
-                            rawDate: d
-                        });
-                    }
-                });
-
-                // Process CVD
-                cvdRaw.forEach(item => {
-                    // Solo agendados
-                    if (item.estado === 'BOOKED' || item.estado === 'BOOKED_PRESENCIAL') {
-                        let d = null;
-                        // Usar fechaControl (YYYYMMDD) como fecha principal; fallback a citaFch
-                        const fechaRef = item.fechaControl || item.citaFch || item.fechaStr;
-                        if (fechaRef && /^\d{8}$/.test(fechaRef)) {
-                            d = new Date(`${fechaRef.slice(0, 4)}-${fechaRef.slice(4, 6)}-${fechaRef.slice(6, 8)}T12:00:00`);
-                        } else if (fechaRef) {
-                            d = new Date(fechaRef.includes('T') ? fechaRef : fechaRef + 'T12:00:00');
-                        }
-                        
-                        if (d && !isNaN(d.getTime()) && d.getMonth() === currentMonth && d.getFullYear() === currentYear) {
-                            countCvd++;
-                            processed.push({
-                                modulo: 'CVD',
-                                paciente: item.paciente || item.pacienteNombre,
-                                documento: item.cedula,
-                                fecha: d.toLocaleDateString('es-CO', { year: 'numeric', month: '2-digit', day: '2-digit' }),
-                                hora: item.citaHora || item.horaStr || '—',
-                                doctor: item.citaMedico || item.doctor || '—',
-                                servicio: item.articuloCita || item.tipoExamen || 'Control CVD',
-                                rawDate: d
-                            });
-                        }
-                    }
-                });
-
-                processed.sort((a, b) => b.rawDate - a.rawDate);
-
-                setCombinedData(processed);
-                setStats({ general: countGen, cvd: countCvd, total: countGen + countCvd });
+                // El servidor ya hizo todo el trabajo: solo asignamos los valores
+                setCombinedData(data.items || []);
+                setStats(data.stats || { general: 0, cvd: 0, total: 0 });
 
             } catch (err) {
-                console.error("Error fetching combined stats:", err);
+                console.error("Error fetching dashboard stats:", err);
             } finally {
                 setLoadingData(false);
             }
@@ -170,7 +93,7 @@ export default function SelectorPage() {
 
     return (
         <div
-            className="h-screen flex flex-col items-center py-10 relative overflow-y-auto"
+            className="min-h-screen flex flex-col items-center py-10 relative overflow-y-auto"
             style={{ background: 'var(--chat-bg)' }}
         >
             {/* ── Subtle grid background ── */}
@@ -213,10 +136,8 @@ export default function SelectorPage() {
             </div>
 
             {/* ── Top Row: Cards ── */}
-            <div className={`relative z-10 grid grid-cols-1 ${isSpaceguard ? 'md:grid-cols-3' : 'md:grid-cols-2'} gap-6 px-6 w-full max-w-[1200px] mb-8`}>
+            <div className="relative z-10 grid grid-cols-1 md:grid-cols-2 gap-6 px-6 w-full max-w-[1000px] mb-8">
                 {mainModules.map((mod) => {
-                    if (mod.id === 'campaigns' && !isSpaceguard) return null;
-
                     const Icon = mod.icon;
                     const isHovered = hoveredId === mod.id;
 
