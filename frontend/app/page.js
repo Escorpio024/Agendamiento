@@ -2,9 +2,10 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { MessageCircle, Heart, ArrowRight, Activity, Bot, FileText, Loader2, CalendarCheck2 } from 'lucide-react';
+import { MessageCircle, Heart, ArrowRight, Activity, Bot, FileText, Loader2, CalendarCheck2, Megaphone } from 'lucide-react';
 import PieChart from '../components/PieChart';
 import DetallesAgendamientoModal from '../components/DetallesAgendamientoModal';
+import { useAuth } from '../components/AuthProvider';
 
 const IS_PROD = typeof window !== 'undefined' && window.location.hostname !== 'localhost';
 const SERVER_HOST = IS_PROD ? window.location.hostname : 'localhost';
@@ -43,11 +44,29 @@ const mainModules = [
         tag: 'Activo',
         href: '/agendamiento',
         features: ['Auditoría', 'Citas'],
+    },
+    {
+        id: 'campaigns',
+        title: 'Campañas',
+        subtitle: 'Difusión Masiva',
+        description: 'Envío masivo de mensajes (WhatsApp y SMS Onurix).',
+        icon: Megaphone,
+        iconBg: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
+        accentColor: '#93c5fd',
+        badgeColor: '#3b82f6',
+        badgeBg: 'rgba(59,130,246,0.18)',
+        badgeBorder: 'rgba(59,130,246,0.35)',
+        badgeText: '#bfdbfe',
+        tag: 'Beta',
+        href: '/campaigns',
+        features: ['WhatsApp', 'SMS', 'BD Pacientes'],
     }
 ];
 
 export default function SelectorPage() {
     const router = useRouter();
+    const { username } = useAuth();
+    const isSpaceguard = username === 'spaceguard';
     const [hoveredId, setHoveredId] = useState(null);
     
     // Estados para el Dashboard consolidado
@@ -192,8 +211,10 @@ export default function SelectorPage() {
             </div>
 
             {/* ── Top Row: Cards ── */}
-            <div className="relative z-10 grid grid-cols-1 md:grid-cols-2 gap-6 px-6 w-full max-w-[1000px] mb-8">
+            <div className={`relative z-10 grid grid-cols-1 md:grid-cols-${isSpaceguard ? '3' : '2'} gap-6 px-6 w-full max-w-[1200px] mb-8`}>
                 {mainModules.map((mod) => {
+                    if (mod.id === 'campaigns' && !isSpaceguard) return null;
+
                     const Icon = mod.icon;
                     const isHovered = hoveredId === mod.id;
 
