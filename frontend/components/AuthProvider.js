@@ -1,9 +1,13 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, createContext, useContext } from 'react';
 import Image from 'next/image';
 import { Lock, User, ArrowRight } from 'lucide-react';
 import logoImg from '../img/AURORA.IA png-07.png';
+
+/** Contexto de autenticación — expone { username } para toda la app */
+export const AuthContext = createContext({ username: '' });
+export const useAuth = () => useContext(AuthContext);
 
 const USERS = {
     'agendamiento!26': '28*14.22',
@@ -14,19 +18,23 @@ const USERS = {
 export default function AuthProvider({ children }) {
     const [isAuthenticated, setIsAuthenticated] = useState(false);
     const [isChecking, setIsChecking] = useState(true);
-    const [username, setUsername] = useState('');
+    const [loggedUser, setLoggedUser] = useState('');  // usuario que inició sesión
+    const [username, setUsername] = useState('');       // campo del formulario
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
 
     const handleLogout = () => {
         localStorage.removeItem('auro_auth_v1');
+        localStorage.removeItem('auro_user_v1');
         setIsAuthenticated(false);
+        setLoggedUser('');
     };
 
     useEffect(() => {
         const auth = localStorage.getItem('auro_auth_v1');
         if (auth === 'true') {
             setIsAuthenticated(true);
+            setLoggedUser(localStorage.getItem('auro_user_v1') || '');
         }
         setIsChecking(false);
     }, []);
@@ -67,7 +75,9 @@ export default function AuthProvider({ children }) {
         e.preventDefault();
         if (USERS[username] && USERS[username] === password) {
             localStorage.setItem('auro_auth_v1', 'true');
+            localStorage.setItem('auro_user_v1', username);
             setIsAuthenticated(true);
+            setLoggedUser(username);
             setError('');
         } else {
             setError('Credenciales incorrectas');
@@ -209,5 +219,9 @@ export default function AuthProvider({ children }) {
         );
     }
 
-    return <>{children}</>;
+    return (
+        <AuthContext.Provider value={{ username: loggedUser }}>
+            {children}
+        </AuthContext.Provider>
+    );
 }

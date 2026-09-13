@@ -2320,9 +2320,13 @@ async function processIncomingMessage({ from, msgId, text: rawText, type, mediaI
     controlCvdService.init(metaClient);
     campaignService.init(metaClient);
 
-    // Recuperar campañas huérfanas
+    // Recuperar campañas huérfanas (WA y SMS)
     await campaignService.recoverOnStartup().catch(e =>
-        console.warn('[STARTUP] recoverOnStartup error:', e.message)
+        console.warn('[STARTUP] recoverOnStartup (WA) error:', e.message)
+    );
+    const smsCampaignService = require('./sms_campaign_service');
+    await smsCampaignService.recoverOnStartup().catch(e =>
+        console.warn('[STARTUP] recoverOnStartup (SMS) error:', e.message)
     );
 
     console.log('✅ Aurora lista. Escuchando mensajes WhatsApp...');

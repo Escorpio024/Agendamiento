@@ -92,14 +92,16 @@ model ControlReminder {
 }
 
 model Campaign {
-  id          String        @id @default(cuid())
-  name        String
-  messageBody String
-  status      String        @default("DRAFT") // DRAFT, SENDING, COMPLETED
-  sentCount   Int           @default(0)
-  totalCount  Int           @default(0)
-  createdAt   DateTime      @default(now())
-  logs        CampaignLog[]
+  id             String        @id @default(cuid())
+  name           String
+  messageBody    String
+  status         String        @default("DRAFT") // DRAFT, SENDING, PAUSED, COMPLETED
+  channel        String        @default("WA")    // WA | SMS
+  recipientsJson String?                          // JSON array de teléfonos para campañas SMS
+  sentCount      Int           @default(0)
+  totalCount     Int           @default(0)
+  createdAt      DateTime      @default(now())
+  logs           CampaignLog[]
 }
 
 model CampaignLog {

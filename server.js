@@ -11,6 +11,7 @@ const medicalPrisma = require('./db');
 const logger = require('./logger');
 const controlCVDService = require('./control_cvd_service');
 const campaignService = require('./campaign_service');
+const smsCampaignService = require('./sms_campaign_service');
 
 // ─── CORS: Configurable desde .env ────────────────────────────────────────────
 // En desarrollo: CORS_ORIGIN=* (permisivo)
@@ -972,8 +973,197 @@ app.post('/api/campaigns/:id/resume', async (req, res) => {
 });
 
 
+// ==========================================
+// RUTAS DE CAMPAÑAS SMS (ONURIX)
+// ==========================================
 
-// Códigos CUPS de exámenes cardiovasculares (exactos tal como aparecen en Xenco)
+/**
+ * GET /api/sms-campaigns/patients?q=busqueda&limit=100
+ * Busca pacientes con número de celular en la BD médica (Xenco).
+ * Usa SQL directo — misma estrategia que el resto del servidor.
+ */
+app.get('/api/sms-campaigns/patients', async (req, res) => {
+    if (!medicalPrisma) {
+        return res.status(503).json({ error: 'BD médica no disponible' });
+    }
+    try {
+        const q = (req.query.q || '').trim().replace(/'/g, "''"); // sanitizar comillas simples
+        const limit = Math.min(parseInt(req.query.limit) || 100, 500);
+
+        let rows;
+
+        if (q && q.length >= 2) {
+            // Búsqueda por nombre (TMUSUARIOSASEGURAMIENTO) o código
+            rows = await medicalPrisma.$queryRawUnsafe(`
+                SELECT TOP ${limit}
+                    k.KC5_RACOD_CLI   AS cod,
+                    LTRIM(RTRIM(a.KC0_NOM))     AS nombre,
+                    LTRIM(RTRIM(k.KC5_TEL_CEL)) AS celular
+                FROM TKCLIENTESANEXO5 k
+                LEFT JOIN TMUSUARIOSASEGURAMIENTO a ON a.KC0_COD = k.KC5_RACOD_CLI
+                WHERE k.KC5_TEL_CEL IS NOT NULL
+                  AND LEN(LTRIM(RTRIM(k.KC5_TEL_CEL))) >= 7
+                  AND (
+                      a.KC0_NOM LIKE '%${q}%'
+                   OR k.KC5_RACOD_CLI LIKE '%${q}%'
+                  )
+                ORDER BY a.KC0_NOM
+            `);
+        } else {
+            // Sin filtro: retornar los primeros N pacientes con celular
+            rows = await medicalPrisma.$queryRawUnsafe(`
+                SELECT TOP ${limit}
+                    k.KC5_RACOD_CLI             AS cod,
+                    LTRIM(RTRIM(a.KC0_NOM))     AS nombre,
+                    LTRIM(RTRIM(k.KC5_TEL_CEL)) AS celular
+                FROM TKCLIENTESANEXO5 k
+                LEFT JOIN TMUSUARIOSASEGURAMIENTO a ON a.KC0_COD = k.KC5_RACOD_CLI
+                WHERE k.KC5_TEL_CEL IS NOT NULL
+                  AND LEN(LTRIM(RTRIM(k.KC5_TEL_CEL))) >= 7
+                ORDER BY a.KC0_NOM
+            `);
+        }
+
+        // Deduplicar por código de paciente y limpiar datos
+        const seen = new Set();
+        const patients = (rows || [])
+            .filter(r => r.celular && r.celular.trim().length >= 7)
+            .map(r => ({
+                cod: String(r.cod || '').trim(),
+                nombre: r.nombre ? String(r.nombre).trim() : (String(r.cod || '').trim() || 'Sin nombre'),
+                celular: String(r.celular).trim(),
+            }))
+            .filter(r => {
+                if (!r.cod || seen.has(r.cod)) return false;
+                seen.add(r.cod);
+                return true;
+            });
+
+        res.json({ patients, total: patients.length });
+    } catch (error) {
+        logger.error('[API] Error buscando pacientes para SMS:', error.message);
+        res.status(500).json({ error: 'Error consultando pacientes', detail: error.message });
+    }
+});
+
+
+/** GET /api/sms-campaigns — lista campañas SMS */
+app.get('/api/sms-campaigns', async (req, res) => {
+    try {
+        const campaigns = await smsCampaignService.getCampaigns();
+        res.json(campaigns);
+    } catch (error) {
+        logger.error('[API] Error listando campañas SMS:', error.message);
+        res.status(500).json({ error: 'Error listando campañas SMS' });
+    }
+});
+
+/** POST /api/sms-campaigns — crear campaña SMS */
+app.post('/api/sms-campaigns', async (req, res) => {
+    try {
+        const { name, messageBody, phones } = req.body;
+        if (!name || !messageBody) {
+            return res.status(400).json({ error: 'Falta name o messageBody' });
+        }
+        if (!Array.isArray(phones) || phones.length === 0) {
+            return res.status(400).json({ error: 'Debe seleccionar al menos un destinatario' });
+        }
+        const campaign = await smsCampaignService.createCampaign(name, messageBody, phones);
+        res.json(campaign);
+    } catch (error) {
+        logger.error('[API] Error creando campaña SMS:', error.message);
+        res.status(400).json({ error: error.message });
+    }
+});
+
+/** GET /api/sms-campaigns/status */
+app.get('/api/sms-campaigns/status', (req, res) => {
+    res.json(smsCampaignService.getStatus());
+});
+
+/** POST /api/sms-campaigns/:id/send */
+app.post('/api/sms-campaigns/:id/send', async (req, res) => {
+    try {
+        const result = await smsCampaignService.startCampaign(req.params.id);
+        res.json(result);
+    } catch (error) {
+        logger.error(`[API] Error iniciando campaña SMS ${req.params.id}:`, error.message);
+        res.status(400).json({ error: error.message });
+    }
+});
+
+/** POST /api/sms-campaigns/:id/pause */
+app.post('/api/sms-campaigns/:id/pause', async (req, res) => {
+    try {
+        const result = await smsCampaignService.pauseCampaign(req.params.id);
+        res.json(result);
+    } catch (error) {
+        logger.error(`[API] Error pausando campaña SMS ${req.params.id}:`, error.message);
+        res.status(400).json({ error: error.message });
+    }
+});
+
+/** POST /api/sms-campaigns/:id/resume */
+app.post('/api/sms-campaigns/:id/resume', async (req, res) => {
+    try {
+        const result = await smsCampaignService.resumeCampaign(req.params.id);
+        res.json(result);
+    } catch (error) {
+        logger.error(`[API] Error reanudando campaña SMS ${req.params.id}:`, error.message);
+        res.status(400).json({ error: error.message });
+    }
+});
+
+/**
+ * POST /api/sms-campaigns/test
+ * Envía un SMS de prueba a números escritos manualmente.
+ * No crea ningún registro de campaña — solo verifica conectividad con Onurix.
+ * Body: { phones: ["3001234567", "3009876543"], message: "Texto de prueba" }
+ */
+app.post('/api/sms-campaigns/test', async (req, res) => {
+    const { sendSMS } = require('./sms_service');
+    try {
+        const { phones, message } = req.body;
+        if (!Array.isArray(phones) || phones.length === 0) {
+            return res.status(400).json({ error: 'Debes indicar al menos un número.' });
+        }
+        if (!message || !message.trim()) {
+            return res.status(400).json({ error: 'El mensaje no puede estar vacío.' });
+        }
+        if (phones.length > 10) {
+            return res.status(400).json({ error: 'Máximo 10 números en una prueba.' });
+        }
+
+        const results = [];
+        for (let i = 0; i < phones.length; i++) {
+            const cleaned = String(phones[i]).replace(/\D/g, '');
+            if (cleaned.length < 7) {
+                results.push({ phone: String(phones[i]), status: 'INVALID', error: 'Número muy corto' });
+                continue;
+            }
+            const r = await sendSMS(cleaned, message.trim());
+            results.push({
+                phone: cleaned,
+                status: r.success ? 'SENT' : (r.skipped ? 'SKIPPED' : 'FAILED'),
+                messageId: r.messageId || null,
+                error: r.error || null,
+            });
+            // Pequeño delay entre envíos de prueba
+            if (i < phones.length - 1) {
+                await new Promise(resolve => setTimeout(resolve, 1500));
+            }
+        }
+
+        const sentCount = results.filter(r => r.status === 'SENT').length;
+        logger.info(`[API] SMS de prueba: ${sentCount}/${phones.length} enviados`);
+        res.json({ results, sentCount, total: phones.length });
+    } catch (error) {
+        logger.error('[API] Error en SMS de prueba:', error.message);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+
 const CVD_CODES = [
     // Creatinina en suero / orina
     '903895', '*903895', '903876', '*903876',
