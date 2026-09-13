@@ -118,22 +118,24 @@ export default function SelectorPage() {
                     // Solo agendados
                     if (item.estado === 'BOOKED' || item.estado === 'BOOKED_PRESENCIAL') {
                         let d = null;
-                        if (item.fechaStr && /^\d{8}$/.test(item.fechaStr)) {
-                            d = new Date(`${item.fechaStr.slice(0, 4)}-${item.fechaStr.slice(4, 6)}-${item.fechaStr.slice(6, 8)}T12:00:00`);
-                        } else if (item.fechaStr) {
-                            d = new Date(item.fechaStr.includes('T') ? item.fechaStr : item.fechaStr + 'T12:00:00');
+                        // Usar fechaControl (YYYYMMDD) como fecha principal; fallback a citaFch
+                        const fechaRef = item.fechaControl || item.citaFch || item.fechaStr;
+                        if (fechaRef && /^\d{8}$/.test(fechaRef)) {
+                            d = new Date(`${fechaRef.slice(0, 4)}-${fechaRef.slice(4, 6)}-${fechaRef.slice(6, 8)}T12:00:00`);
+                        } else if (fechaRef) {
+                            d = new Date(fechaRef.includes('T') ? fechaRef : fechaRef + 'T12:00:00');
                         }
                         
                         if (d && !isNaN(d.getTime()) && d.getMonth() === currentMonth && d.getFullYear() === currentYear) {
                             countCvd++;
                             processed.push({
                                 modulo: 'CVD',
-                                paciente: item.pacienteNombre,
+                                paciente: item.paciente || item.pacienteNombre,
                                 documento: item.cedula,
                                 fecha: d.toLocaleDateString('es-CO', { year: 'numeric', month: '2-digit', day: '2-digit' }),
-                                hora: item.horaStr,
-                                doctor: item.doctor,
-                                servicio: item.tipoExamen || 'Control',
+                                hora: item.citaHora || item.horaStr || '—',
+                                doctor: item.citaMedico || item.doctor || '—',
+                                servicio: item.articuloCita || item.tipoExamen || 'Control CVD',
                                 rawDate: d
                             });
                         }
