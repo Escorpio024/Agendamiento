@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { MessageCircle, Heart, ArrowRight, Activity, Bot, FileText, Loader2, CalendarCheck2 } from 'lucide-react';
+import { MessageCircle, Heart, ArrowRight, Activity, Bot, FileText, Loader2, CalendarCheck2, Megaphone, Smartphone } from 'lucide-react';
+import { useAuth } from '../components/AuthProvider';
 import PieChart from '../components/PieChart';
 import DetallesAgendamientoModal from '../components/DetallesAgendamientoModal';
 
@@ -46,8 +47,45 @@ const mainModules = [
     }
 ];
 
+const adminModules = [
+    {
+        id: 'campaigns',
+        title: 'Marketing',
+        subtitle: 'Campañas SMS',
+        description: 'Gestión y envío masivo de campañas de mensajería.',
+        icon: Megaphone,
+        iconBg: 'linear-gradient(135deg, #2E7D52 0%, #1A5C38 100%)',
+        accentColor: '#6EE7A0',
+        badgeColor: '#2E7D52',
+        badgeBg: 'rgba(46,125,82,0.18)',
+        badgeBorder: 'rgba(46,125,82,0.35)',
+        badgeText: '#A7F3C4',
+        tag: 'Admin',
+        href: '/campaigns',
+        features: ['Envío Masivo', 'Reportes'],
+    },
+    {
+        id: 'mobile-monitor',
+        title: 'Monitor',
+        subtitle: 'App Móvil',
+        description: 'Supervisión en tiempo real de la app móvil.',
+        icon: Smartphone,
+        iconBg: 'linear-gradient(135deg, #1A5F8A 0%, #0D3F5F 100%)',
+        accentColor: '#7DD3F7',
+        badgeColor: '#1A6EA8',
+        badgeBg: 'rgba(26,110,168,0.18)',
+        badgeBorder: 'rgba(26,110,168,0.35)',
+        badgeText: '#A5D8F7',
+        tag: 'Admin',
+        href: '/mobile-monitor',
+        features: ['Tiempo Real', 'Estadísticas'],
+    }
+];
+
 export default function SelectorPage() {
     const router = useRouter();
+    const { username } = useAuth();
+    const isAdmin = username === 'spaceguard';
     const [hoveredId, setHoveredId] = useState(null);
     
     // Estados para el Dashboard consolidado
@@ -233,6 +271,73 @@ export default function SelectorPage() {
                     );
                 })}
             </div>
+
+            {/* ── Admin Modules (solo spaceguard) ── */}
+            {isAdmin && (
+                <div className="relative z-10 w-full max-w-[1000px] px-6 mb-6">
+                    <div className="flex items-center gap-2 mb-4">
+                        <div className="h-px flex-1" style={{ background: 'rgba(130,99,177,0.2)' }} />
+                        <span className="text-[10px] font-bold tracking-[0.2em] uppercase px-3" style={{ color: 'rgba(161,227,216,0.5)' }}>Panel Administrador</span>
+                        <div className="h-px flex-1" style={{ background: 'rgba(130,99,177,0.2)' }} />
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        {adminModules.map((mod) => {
+                            const Icon = mod.icon;
+                            const isHovered = hoveredId === mod.id;
+                            return (
+                                <button
+                                    key={mod.id}
+                                    onClick={() => router.push(mod.href)}
+                                    onMouseEnter={() => setHoveredId(mod.id)}
+                                    onMouseLeave={() => setHoveredId(null)}
+                                    className="w-full flex flex-col text-left rounded-2xl p-6 border transition-all duration-300 group relative overflow-hidden"
+                                    style={{
+                                        background: isHovered ? 'rgba(45,40,62,0.8)' : 'rgba(30,27,38,0.85)',
+                                        borderColor: isHovered ? mod.badgeColor : 'var(--border)',
+                                        boxShadow: isHovered ? `0 0 0 1px ${mod.badgeColor}40, 0 20px 60px rgba(0,0,0,0.4)` : '0 4px 24px rgba(0,0,0,0.3)',
+                                        cursor: 'pointer',
+                                        backdropFilter: 'blur(12px)',
+                                        transform: isHovered ? 'translateY(-4px)' : 'translateY(0)',
+                                    }}
+                                >
+                                    <div className="absolute inset-0 rounded-2xl pointer-events-none transition-opacity duration-300"
+                                        style={{ background: `radial-gradient(ellipse at top left, ${mod.badgeColor}14 0%, transparent 60%)`, opacity: isHovered ? 1 : 0 }}
+                                    />
+                                    <div className="flex items-center justify-between mb-5">
+                                        <div className="w-12 h-12 rounded-xl flex items-center justify-center shadow-lg flex-shrink-0" style={{ background: mod.iconBg }}>
+                                            <Icon size={22} color={mod.accentColor} />
+                                        </div>
+                                        <span className="text-[10px] font-bold px-2.5 py-1 rounded-full"
+                                            style={{ background: mod.badgeBg, color: mod.badgeText, border: `1px solid ${mod.badgeBorder}` }}>
+                                            {mod.tag}
+                                        </span>
+                                    </div>
+                                    <div className="mb-3">
+                                        <p className="text-[11px] font-semibold tracking-widest uppercase mb-0.5" style={{ color: mod.accentColor, opacity: 0.7 }}>{mod.title}</p>
+                                        <h2 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>{mod.subtitle}</h2>
+                                    </div>
+                                    <p className="text-sm leading-relaxed mb-5 h-[40px]" style={{ color: 'var(--text-muted)' }}>{mod.description}</p>
+                                    <div className="grid grid-cols-2 gap-2 mb-6 flex-1">
+                                        {mod.features.map((f) => (
+                                            <span key={f} className="text-xs font-semibold px-3 py-2 rounded-lg text-center"
+                                                style={{ background: `${mod.badgeColor}18`, color: mod.badgeText, border: `1px solid ${mod.badgeColor}35` }}>
+                                                {f}
+                                            </span>
+                                        ))}
+                                    </div>
+                                    <div className="flex items-center pt-5" style={{ borderTop: `1px solid ${mod.badgeColor}20` }}>
+                                        <div className="w-full flex items-center justify-center gap-2 text-sm font-bold px-5 py-3 rounded-xl transition-all duration-200"
+                                            style={{ background: isHovered ? `${mod.badgeColor}25` : `${mod.badgeColor}12`, color: mod.accentColor, border: `1px solid ${mod.badgeColor}40`, transform: isHovered ? 'translateX(3px)' : 'translateX(0)' }}>
+                                            <span>Ingresar</span>
+                                            <ArrowRight size={15} />
+                                        </div>
+                                    </div>
+                                </button>
+                            );
+                        })}
+                    </div>
+                </div>
+            )}
 
             {/* ── Bottom Row: Big Dashboard Card ── */}
             <div className="relative z-10 w-full max-w-[1000px] px-6">
