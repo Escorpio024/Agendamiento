@@ -21,6 +21,13 @@ class ControlCVDService {
             return;
         }
 
+        // Escuchar el evento de sesion cerrada para loggear advertencia
+        if (this.client?.messageEmitter) {
+            this.client.messageEmitter.on('session_closed', ({ code }) => {
+                logger.warn(`[Control CVD] ⚠️  Sesión WA cerrada (código ${code}). Los envíos de WA quedarán en pausa hasta reconexión.`);
+            });
+        }
+
         this.startScheduler();
         logger.info('✅ Servicio Control CVD iniciado. Flujo: 8 PM Detección → 9 AM Agendamiento Inmediato + Aviso → 8 días antes Recordatorio.');
     }
@@ -50,6 +57,47 @@ class ControlCVDService {
         });
 
         this.isRunning = true;
+    }
+
+    /**
+     * Helper interno: intenta enviar un mensaje de WhatsApp.
+     * Verifica que el cliente esté conectado antes de enviar.
+     * @param {string} waId - JID del destinatario
+     * @param {string} msg  - Texto del mensaje
+     * @param {string} logId - Identificador para logs (cédula o similar)
+     * @param {string} context - Nombre del flujo para el log
+     * @returns {Promise<boolean>}
+     */
+    async _sendWA(waId, msg, logId, context = 'Control CVD') {
+        // Verificar que el cliente WA esté disponible y conectado
+        if (!this.client) {
+            logger.warn(`[${context}] Cliente WA no inicializado. No se enviará mensaje a ${logId}.`);
+            return false;
+        }
+        // isReady() verifica isConnected && sock !== null en wa_client.js
+        if (typeof this.client.isReady === 'function' && !this.client.isReady()) {
+            logger.warn(`[${context}] Cliente WA desconectado (sesión cerrada). No se enviará mensaje a ${logId}.`);
+            return false;
+        }
+        try {
+            // Verificar si el número tiene WhatsApp activo
+            const isRegistered = await Promise.race([
+                this.client.isRegisteredUser(waId),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout isRegisteredUser')), 5000))
+            ]);
+            if (!isRegistered) {
+                logger.warn(`[${context}] Número sin WhatsApp activo para ${logId}.`);
+                return false;
+            }
+            await Promise.race([
+                this.client.sendMessage(waId, msg),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout sendMessage')), 10000))
+            ]);
+            return true;
+        } catch (e) {
+            logger.warn(`[${context}] No se pudo enviar WhatsApp a ${logId}: ${e.message}`);
+            return false;
+        }
     }
 
     /** Formato AAAAMMDD para Xenco como número */
@@ -462,25 +510,15 @@ class ControlCVDService {
                         });
 
                         if (enviarMensaje) {
-                            try {
-                                const isRegistered = await Promise.race([
-                                    this.client.isRegisteredUser(waId),
-                                    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000))
-                                ]);
-                                if (isRegistered) {
-                                    await Promise.race([
-                                        this.client.sendMessage(waId,
-                                            `🏥 *ESE Hospital San Rafael de Ebéjico*\n\n` +
-                                            `Hola ${record.paciente}, 😊\n\n` +
-                                            `Intentamos apartarte tu cita de control de Riesgo Cardiovascular automáticamente, pero por el momento no encontramos horarios disponibles en la agenda.\n\n` +
-                                            `Por favor, comunícate con nosotros para programar tu cita de seguimiento. 📞`
-                                        ),
-                                        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000))
-                                    ]);
-                                }
-                            } catch (sendErr) {
-                                logger.warn(`[Control CVD] No se pudo enviar WhatsApp SIN CUPO a ${record.cedula}: ${sendErr.message}`);
-                            }
+                            await this._sendWA(
+                                waId,
+                                `🏥 *ESE Hospital San Rafael de Ebéjico*\n\n` +
+                                `Hola ${record.paciente}, 😊\n\n` +
+                                `Intentamos apartarte tu cita de control de Riesgo Cardiovascular automáticamente, pero por el momento no encontramos horarios disponibles en la agenda.\n\n` +
+                                `Por favor, comunícate con nosotros para programar tu cita de seguimiento. 📞`,
+                                record.cedula,
+                                'Control CVD'
+                            );
                         }
                         continue;
                     }
@@ -561,22 +599,7 @@ class ControlCVDService {
                             `Te enviaremos un recordatorio 8 días antes con las instrucciones sobre tus exámenes de laboratorio. 🔬\n\n` +
                             `Si necesitas cambiar esta cita, escríbenos o comunícate con la clínica. 📞`;
 
-                        try {
-                            const isRegistered = await Promise.race([
-                                this.client.isRegisteredUser(waId),
-                                new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout isRegisteredUser')), 5000))
-                            ]);
-                            if (isRegistered) {
-                                await Promise.race([
-                                    this.client.sendMessage(waId, msgConfirmacion),
-                                    new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout sendMessage')), 5000))
-                                ]);
-                            } else {
-                                logger.warn(`[Control CVD] No se pudo enviar WhatsApp CONFIRMACIÓN a ${record.cedula}: El número no tiene WhatsApp activo.`);
-                            }
-                        } catch (sendErr) {
-                            logger.warn(`[Control CVD] No se pudo enviar WhatsApp CONFIRMACIÓN a ${record.cedula}: ${sendErr.message}`);
-                        }
+                        await this._sendWA(waId, msgConfirmacion, record.cedula, 'Control CVD');
 
                     } else {
                         logger.warn(`[Control CVD] Falló reserva en Xenco para ${record.cedula}.`);
@@ -585,27 +608,15 @@ class ControlCVDService {
                             data: { estado: 'BOOKING_FAILED_XENCO' }
                         });
 
-                        try {
-                            const isRegistered = await Promise.race([
-                                this.client.isRegisteredUser(waId),
-                                new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout isRegisteredUser')), 5000))
-                            ]);
-                            if (isRegistered) {
-                                await Promise.race([
-                                    this.client.sendMessage(waId,
-                                        `🏥 *ESE Hospital San Rafael de Ebéjico*\n\n` +
-                                        `Hola ${record.paciente}, 😊\n\n` +
-                                        `Ayer asististe a tu control de Riesgo Cardiovascular.\n\n` +
-                                        `Intentamos apartar tu cita de seguimiento automáticamente pero ocurrió un inconveniente técnico. Por favor comunícate con la clínica para programarla. 📞`
-                                    ),
-                                    new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout sendMessage')), 5000))
-                                ]);
-                            } else {
-                                logger.warn(`[Control CVD] No se pudo enviar WhatsApp ERROR XENCO a ${record.cedula}: El número no tiene WhatsApp activo.`);
-                            }
-                        } catch (sendErr) {
-                            logger.warn(`[Control CVD] No se pudo enviar WhatsApp ERROR XENCO a ${record.cedula}: ${sendErr.message}`);
-                        }
+                        await this._sendWA(
+                            waId,
+                            `🏥 *ESE Hospital San Rafael de Ebéjico*\n\n` +
+                            `Hola ${record.paciente}, 😊\n\n` +
+                            `Ayer asististe a tu control de Riesgo Cardiovascular.\n\n` +
+                            `Intentamos apartar tu cita de seguimiento automáticamente pero ocurrió un inconveniente técnico. Por favor comunícate con la clínica para programarla. 📞`,
+                            record.cedula,
+                            'Control CVD'
+                        );
                     }
 
                     // Pausa entre pacientes aleatoria (15s a 25s) para no saturar WhatsApp y evadir filtros Anti-Spam
@@ -662,22 +673,7 @@ class ControlCVDService {
                     `⚠️ *Por favor ten listos tus exámenes de laboratorio antes de esa fecha.*\n\n` +
                     `Si quieres reagendar o cancelar tu cita comunicate a este numero de telefono (310) 519-1482 📞`;
 
-                try {
-                    const isRegistered = await Promise.race([
-                        this.client.isRegisteredUser(waId),
-                        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000))
-                    ]);
-                    if (isRegistered) {
-                        await Promise.race([
-                            this.client.sendMessage(waId, msgRecordatorio),
-                            new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000))
-                        ]);
-                    } else {
-                        logger.warn(`[Control CVD] Recordatorio CVD: número sin WhatsApp activo para ${record.cedula}.`);
-                    }
-                } catch (sendErr) {
-                    logger.warn(`[Control CVD] No se pudo enviar recordatorio CVD a ${record.cedula}: ${sendErr.message}`);
-                }
+                await this._sendWA(waId, msgRecordatorio, record.cedula, 'Control CVD');
 
                 await botPrisma.controlReminder.update({
                     where: { id: record.id },

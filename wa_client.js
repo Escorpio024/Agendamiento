@@ -91,6 +91,8 @@ async function connect() {
                 setTimeout(connect, 3000);  // reintento tras 3 seg
             } else {
                 logger.error('[WA] Sesion cerrada. Elimina .baileys_auth/ y reinicia para escanear QR nuevo.');
+                // Notificar a los servicios que dependen del cliente WA
+                messageEmitter.emit('session_closed', { code });
             }
         }
     });
@@ -229,6 +231,34 @@ async function getState() {
 }
 
 /**
+ * Verifica si el cliente está conectado y listo para enviar mensajes.
+ */
+function isReady() {
+    return isConnected && sock !== null;
+}
+
+/**
+ * Verifica si un número de teléfono/JID tiene WhatsApp activo.
+ * Equivalente a isRegisteredUser() de whatsapp-web.js.
+ * Usa onWhatsApp() de Baileys.
+ * @param {string} phoneOrJid - Número o JID del contacto
+ * @returns {Promise<boolean>}
+ */
+async function isRegisteredUser(phoneOrJid) {
+    if (!sock || !isConnected) return false;
+    try {
+        const jid = normalizePhone(phoneOrJid);
+        if (!jid) return false;
+        const [result] = await sock.onWhatsApp(jid);
+        return !!(result?.exists);
+    } catch (e) {
+        logger.debug(`[WA] isRegisteredUser error para ${phoneOrJid}: ${e.message}`);
+        // Si falla la verificación, asumir que sí tiene WA para no perder el mensaje
+        return true;
+    }
+}
+
+/**
  * Permite cachear manualmente un mensaje raw (para media).
  */
 function cacheRawMessage(msgId, rawMsg) {
@@ -247,5 +277,7 @@ module.exports = {
     downloadMedia,
     normalizePhone,
     getState,
+    isReady,
+    isRegisteredUser,
     cacheRawMessage,
 };
