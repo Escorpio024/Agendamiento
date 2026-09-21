@@ -36,6 +36,8 @@ messageEmitter.setMaxListeners(20);
 // Socket activo y estado de conexion
 let sock = null;
 let isConnected = false;
+let isReconnecting = false;  // lock para evitar reconexiones simultaneas
+let qrCount = 0;             // contador de QRs generados sin exito
 
 // Promesa que se resuelve cuando el cliente esta listo
 let readyResolve;
@@ -51,86 +53,126 @@ const baileysLogger = {
 
 // ─── Conexion ──────────────────────────────────────────────────────────────────
 async function connect() {
-    const { state, saveCreds } = await useMultiFileAuthState('.baileys_auth');
-    const { version }          = await fetchLatestBaileysVersion();
+    // Evitar multiples conexiones simultaneas
+    if (isReconnecting) {
+        logger.warn('[WA] connect() ignorado: ya hay una reconexion en curso.');
+        return;
+    }
+    isReconnecting = true;
 
-    sock = makeWASocket({
-        version,
-        auth             : state,
-        logger           : baileysLogger,
-        printQRInTerminal: false,   // manejamos el QR manualmente
-        markOnlineOnConnect: false,
-    });
+    try {
+        const { state, saveCreds } = await useMultiFileAuthState('.baileys_auth');
 
-    // Guardar credenciales cada vez que cambian
-    sock.ev.on('creds.update', saveCreds);
-
-    // ── Ciclo de vida de la conexion ──
-    sock.ev.on('connection.update', async (update) => {
-        const { connection, lastDisconnect, qr } = update;
-
-        if (qr) {
-            logger.info('[WA] Escanea el QR con WhatsApp:');
-            qrcode.generate(qr, { small: true });
+        // Intentar obtener la ultima version; si falla, usar version estable conocida
+        let version;
+        try {
+            const result = await fetchLatestBaileysVersion();
+            version = result.version;
+            logger.info(`[WA] Version Baileys: ${version.join('.')}`);
+        } catch (vErr) {
+            version = [2, 3000, 1015901307];  // version estable de fallback
+            logger.warn(`[WA] No se pudo obtener version de Baileys (${vErr.message}). Usando fallback: ${version.join('.')}`);
         }
 
-        if (connection === 'open') {
-            logger.info('[WA] Conectado a WhatsApp.');
-            isConnected = true;
-            if (readyResolve) { readyResolve(); readyResolve = null; }
+        // Cerrar socket anterior si existe (evita listeners duplicados)
+        if (sock) {
+            try { sock.ev.removeAllListeners(); sock.end(); } catch (_) {}
+            sock = null;
         }
 
-        if (connection === 'close') {
-            isConnected = false;
-            const code = lastDisconnect?.error instanceof Boom
-                ? lastDisconnect.error.output?.statusCode
-                : null;
-            const shouldReconnect = code !== DisconnectReason.loggedOut;
-            logger.warn(`[WA] Conexion cerrada (codigo ${code}). Reconectar: ${shouldReconnect}`);
-            if (shouldReconnect) {
-                setTimeout(connect, 3000);  // reintento tras 3 seg
-            } else {
-                logger.error('[WA] Sesion cerrada. Elimina .baileys_auth/ y reinicia para escanear QR nuevo.');
-                // Notificar a los servicios que dependen del cliente WA
-                messageEmitter.emit('session_closed', { code });
-            }
-        }
-    });
+        sock = makeWASocket({
+            version,
+            auth              : state,
+            logger            : baileysLogger,
+            printQRInTerminal : false,   // manejamos el QR manualmente
+            markOnlineOnConnect: false,
+            syncFullHistory   : false,   // no descargar historial completo
+            connectTimeoutMs  : 30000,   // 30s timeout de conexion
+            defaultQueryTimeoutMs: 15000,
+        });
 
-    // ── Mensajes entrantes ──
-    sock.ev.on('messages.upsert', ({ messages, type }) => {
-        // 'append'  = historial al conectar   → ignorar
-        // 'notify'  = mensajes nuevos en tiempo real → procesar
-        if (type !== 'notify') return;
+        // Guardar credenciales cada vez que cambian
+        sock.ev.on('creds.update', saveCreds);
 
-        for (const msg of messages) {
-            // Ignorar mensajes propios
-            if (msg.key.fromMe) continue;
+        // ── Ciclo de vida de la conexion ──
+        sock.ev.on('connection.update', async (update) => {
+            const { connection, lastDisconnect, qr } = update;
 
-            // Ignorar grupos
-            if (isJidGroup(msg.key.remoteJid)) continue;
-
-            // Ignorar mensajes anteriores al arranque del bot
-            const msgTs = Number(msg.messageTimestamp);
-            if (msgTs < startupTimestamp) {
-                logger.debug(`[WA] Mensaje ignorado (antes del arranque): ${msgTs} < ${startupTimestamp}`);
-                continue;
+            if (qr) {
+                qrCount++;
+                if (qrCount > 3) {
+                    logger.warn(`[WA] ⚠️  QR generado ${qrCount} veces sin exito. Posible problema de red o instancias duplicadas. Verifica: pm2 list`);
+                }
+                logger.info(`[WA] QR #${qrCount} — Escanea rapidamente con WhatsApp (expira en ~20s):`);
+                qrcode.generate(qr, { small: true });
             }
 
-            // Guardar en cache para posible descarga de media
-            if (msg.message) {
-                rawMessageCache.set(msg.key.id, msg);
-                // Limitar cache a 200 mensajes
-                if (rawMessageCache.size > 200) {
-                    const firstKey = rawMessageCache.keys().next().value;
-                    rawMessageCache.delete(firstKey);
+            if (connection === 'open') {
+                logger.info('[WA] ✅ Conectado a WhatsApp.');
+                isConnected = true;
+                isReconnecting = false;
+                qrCount = 0;  // resetear contador al conectar exitosamente
+                if (readyResolve) { readyResolve(); readyResolve = null; }
+            }
+
+            if (connection === 'close') {
+                isConnected = false;
+                isReconnecting = false;  // liberar lock para permitir reintento
+                const code = lastDisconnect?.error instanceof Boom
+                    ? lastDisconnect.error.output?.statusCode
+                    : null;
+                const shouldReconnect = code !== DisconnectReason.loggedOut;
+                logger.warn(`[WA] Conexion cerrada (codigo ${code}). Reconectar: ${shouldReconnect}`);
+                if (shouldReconnect) {
+                    const delay = qrCount > 0 ? 5000 : 3000; // mas espera si estaba en flujo QR
+                    setTimeout(connect, delay);
+                } else {
+                    logger.error('[WA] Sesion cerrada (logged out). Elimina .baileys_auth/ y reinicia.');
+                    // Notificar a los servicios que dependen del cliente WA
+                    messageEmitter.emit('session_closed', { code });
                 }
             }
+        });
 
-            // Emitir mensaje para que index.js lo procese
-            messageEmitter.emit('message', msg);
-        }
-    });
+        // ── Mensajes entrantes ──
+        sock.ev.on('messages.upsert', ({ messages, type }) => {
+            // 'append'  = historial al conectar   → ignorar
+            // 'notify'  = mensajes nuevos en tiempo real → procesar
+            if (type !== 'notify') return;
+
+            for (const msg of messages) {
+                // Ignorar mensajes propios
+                if (msg.key.fromMe) continue;
+
+                // Ignorar grupos
+                if (isJidGroup(msg.key.remoteJid)) continue;
+
+                // Ignorar mensajes anteriores al arranque del bot
+                const msgTs = Number(msg.messageTimestamp);
+                if (msgTs < startupTimestamp) {
+                    logger.debug(`[WA] Mensaje ignorado (antes del arranque): ${msgTs} < ${startupTimestamp}`);
+                    continue;
+                }
+
+                // Guardar en cache para posible descarga de media
+                if (msg.message) {
+                    rawMessageCache.set(msg.key.id, msg);
+                    // Limitar cache a 200 mensajes
+                    if (rawMessageCache.size > 200) {
+                        const firstKey = rawMessageCache.keys().next().value;
+                        rawMessageCache.delete(firstKey);
+                    }
+                }
+
+                // Emitir mensaje para que index.js lo procese
+                messageEmitter.emit('message', msg);
+            }
+        });
+
+    } catch (err) {
+        isReconnecting = false;  // liberar lock en caso de error
+        throw err;
+    }
 }
 
 // Arrancar conexion
@@ -231,17 +273,17 @@ async function getState() {
 }
 
 /**
- * Verifica si el cliente está conectado y listo para enviar mensajes.
+ * Verifica si el cliente esta conectado y listo para enviar mensajes.
  */
 function isReady() {
     return isConnected && sock !== null;
 }
 
 /**
- * Verifica si un número de teléfono/JID tiene WhatsApp activo.
+ * Verifica si un numero de telefono/JID tiene WhatsApp activo.
  * Equivalente a isRegisteredUser() de whatsapp-web.js.
  * Usa onWhatsApp() de Baileys.
- * @param {string} phoneOrJid - Número o JID del contacto
+ * @param {string} phoneOrJid - Numero o JID del contacto
  * @returns {Promise<boolean>}
  */
 async function isRegisteredUser(phoneOrJid) {
@@ -253,7 +295,7 @@ async function isRegisteredUser(phoneOrJid) {
         return !!(result?.exists);
     } catch (e) {
         logger.debug(`[WA] isRegisteredUser error para ${phoneOrJid}: ${e.message}`);
-        // Si falla la verificación, asumir que sí tiene WA para no perder el mensaje
+        // Si falla la verificacion, asumir que si tiene WA para no perder el mensaje
         return true;
     }
 }
