@@ -73,6 +73,21 @@ export default function AgendamientoDashboard() {
         return true;
     });
 
+    // Helper: convierte appointmentTime a hora en formato 24h
+    // Soporta "5:00 PM", "5:00 p.m.", "17:00", "09:30 AM", etc.
+    const parseHour24 = (timeStr) => {
+        if (!timeStr) return null;
+        const t = timeStr.trim();
+        // Detectar AM/PM (inglés y variantes con puntos)
+        const match = t.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)?/i);
+        if (!match) return null;
+        let h = parseInt(match[1], 10);
+        const period = (match[3] || '').replace(/\./g, '').toLowerCase();
+        if (period === 'pm' && h < 12) h += 12;
+        if (period === 'am' && h === 12) h = 0;
+        return h;
+    };
+
     // Generate Chart Data
     let chartData = [];
     if (filterView === 'Dia') {
@@ -88,11 +103,12 @@ export default function AgendamientoDashboard() {
         filteredAppointments.forEach(app => {
             let hour = null;
             if (app.appointmentTime) {
-                hour = parseInt(app.appointmentTime.split(':')[0], 10);
+                // parseHour24 maneja "5:00 PM" → 17, "17:00" → 17, "09:30 AM" → 9
+                hour = parseHour24(app.appointmentTime);
             } else {
                 hour = new Date(app.createdAt).getHours();
             }
-            if (hour >= 6 && hour <= 20) {
+            if (hour !== null && hour >= 6 && hour <= 20) {
                 const bin = chartData.find(d => d.key === hour);
                 if (bin) bin.value += 1;
             }
