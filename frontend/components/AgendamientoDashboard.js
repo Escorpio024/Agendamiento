@@ -76,9 +76,14 @@ export default function AgendamientoDashboard() {
     // Generate Chart Data
     let chartData = [];
     if (filterView === 'Dia') {
-        // Horas (6am a 6pm)
-        const hours = Array.from({ length: 13 }, (_, i) => i + 6);
-        chartData = hours.map(h => ({ label: `${h}:00`, value: 0, key: h }));
+        // Horas (6am a 8pm) — rango extendido para cubrir citas de tarde
+        const hours = Array.from({ length: 15 }, (_, i) => i + 6); // 6 a 20
+        chartData = hours.map(h => {
+            // Etiqueta en formato 12h para mayor claridad
+            const suffix = h < 12 ? 'am' : 'pm';
+            const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+            return { label: `${h12}${suffix}`, value: 0, key: h };
+        });
         
         filteredAppointments.forEach(app => {
             let hour = null;
@@ -87,7 +92,7 @@ export default function AgendamientoDashboard() {
             } else {
                 hour = new Date(app.createdAt).getHours();
             }
-            if (hour >= 6 && hour <= 18) {
+            if (hour >= 6 && hour <= 20) {
                 const bin = chartData.find(d => d.key === hour);
                 if (bin) bin.value += 1;
             }
@@ -136,7 +141,7 @@ export default function AgendamientoDashboard() {
 
     const maxValue = Math.max(...chartData.map(d => d.value), 1); // evite divide by zero
     const chartHeight = 180;
-    const barWidth = filterView === 'Mes' ? 40 : filterView === 'Semana' ? 30 : 20;
+    const barWidth = filterView === 'Mes' ? 40 : filterView === 'Semana' ? 30 : 16;
 
     return (
         <div className="flex-1 flex flex-col items-center justify-start p-8 chat-bg h-full overflow-y-auto w-full">
