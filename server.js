@@ -1070,6 +1070,116 @@ app.post('/api/campaigns/:id/resume', async (req, res) => {
 // ==========================================
 
 /**
+ * GET /api/sms-campaigns/patients-by-appointment?period=today|week&q=&limit=200
+ * Retorna pacientes que agendaron una cita hoy o esta semana (AppointmentLog del bot),
+ * enriquecidos con su celular registrado en la BD médica Xenco (TKCLIENTESANEXO5).
+ * El campo `tipoTelefono` indica si es 'CELULAR' (empieza por 3, 10 dígitos) o 'FIJO'.
+ */
+app.get('/api/sms-campaigns/patients-by-appointment', async (req, res) => {
+    try {
+        const period = (req.query.period || 'today').toLowerCase(); // 'today' | 'week'
+        const q      = (req.query.q || '').trim().toLowerCase();
+        const limit  = Math.min(parseInt(req.query.limit) || 200, 500);
+
+        // Calcular rango de fechas según período
+        const now   = new Date();
+        const start = new Date(now);
+        start.setHours(0, 0, 0, 0);
+
+        if (period === 'week') {
+            const day = start.getDay();
+            const diff = day === 0 ? -6 : 1 - day; // lunes de esta semana
+            start.setDate(start.getDate() + diff);
+        }
+
+        const end = new Date(now.getTime() + 86400000); // hasta mañana 00:00
+
+        // 1. Obtener citas del período desde AppointmentLog (BD del bot)
+        const logs = await botPrisma.appointmentLog.findMany({
+            where: {
+                createdAt: { gte: start, lt: end }
+            },
+            orderBy: { createdAt: 'desc' },
+            take: 500,
+        });
+
+        if (logs.length === 0) {
+            return res.json({ patients: [], total: 0 });
+        }
+
+        // 2. Deduplicar por documento, aplicar búsqueda por nombre
+        const seen = new Set();
+        let filtered = logs.filter(l => {
+            if (!l.patientDocument || seen.has(l.patientDocument)) return false;
+            seen.add(l.patientDocument);
+            if (q && !l.patientName?.toLowerCase().includes(q)) return false;
+            return true;
+        }).slice(0, limit);
+
+        // 3. Buscar celulares en Xenco por cédula (patientDocument)
+        let patientsWithPhone = filtered;
+
+        if (medicalPrisma) {
+            try {
+                const docs = filtered.map(l => l.patientDocument.trim());
+                const rows = await medicalPrisma.$queryRawUnsafe(`
+                    SELECT
+                        k.KC5_RACOD_CLI             AS cod,
+                        LTRIM(RTRIM(k.KC5_TEL_CEL)) AS celular
+                    FROM TKCLIENTESANEXO5 k
+                    WHERE k.KC5_RACOD_CLI IN (${docs.map(d => `'${d.replace(/'/g, "''")}'`).join(',')})
+                      AND k.KC5_TEL_CEL IS NOT NULL
+                      AND LEN(LTRIM(RTRIM(k.KC5_TEL_CEL))) >= 7
+                `);
+
+                const phoneMap = {};
+                (rows || []).forEach(r => {
+                    if (r.cod && r.celular) phoneMap[String(r.cod).trim()] = String(r.celular).trim();
+                });
+
+                patientsWithPhone = filtered.map(l => ({
+                    ...l,
+                    telefono: phoneMap[l.patientDocument?.trim()] || null,
+                }));
+            } catch (xencoErr) {
+                logger.warn('[API] No se pudo consultar Xenco para celulares:', xencoErr.message);
+                // continuar sin teléfono
+            }
+        }
+
+        // 4. Detectar tipo de número (CELULAR vs FIJO)
+        const classifyPhone = (tel) => {
+            if (!tel) return null;
+            const clean = tel.replace(/\D/g, ''); // solo dígitos
+            if (clean.length === 10 && clean.startsWith('3')) return { numero: clean, tipo: 'CELULAR' };
+            if (clean.length === 7 || clean.length === 8 || (clean.length === 10 && !clean.startsWith('3'))) {
+                return { numero: clean, tipo: 'FIJO' };
+            }
+            return { numero: clean, tipo: clean.length >= 10 && clean.startsWith('3') ? 'CELULAR' : 'FIJO' };
+        };
+
+        const result = patientsWithPhone.map(l => {
+            const phoneInfo = classifyPhone(l.telefono);
+            return {
+                documento:     l.patientDocument?.trim() || '',
+                nombre:        l.patientName?.trim() || 'Sin nombre',
+                fechaCita:     l.appointmentDate || null,
+                horaCita:      l.appointmentTime || null,
+                medico:        l.doctorName || null,
+                agendadoEn:    l.createdAt,
+                telefono:      phoneInfo?.numero || null,
+                tipoTelefono:  phoneInfo?.tipo || null,
+            };
+        });
+
+        res.json({ patients: result, total: result.length });
+    } catch (error) {
+        logger.error('[API] Error en patients-by-appointment:', error.message);
+        res.status(500).json({ error: 'Error consultando pacientes por cita', detail: error.message });
+    }
+});
+
+/**
  * GET /api/sms-campaigns/patients?q=busqueda&limit=100
  * Busca pacientes con número de celular en la BD médica (Xenco).
  * Usa SQL directo — misma estrategia que el resto del servidor.
