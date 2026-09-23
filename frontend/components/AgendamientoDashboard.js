@@ -52,19 +52,25 @@ export default function AgendamientoDashboard() {
 
     // Filter appointments based on selected view
     const filteredAppointments = allAppointments.filter(app => {
-        const targetDate = app.appointmentDate 
-            ? new Date(app.appointmentDate + 'T12:00:00') 
-            : new Date(app.createdAt);
-            
-        if (isNaN(targetDate.getTime())) return false;
-
         const today = getStartOfToday();
         const startWeek = getStartOfWeek();
         const startMonth = getStartOfMonth();
 
         if (filterView === 'Dia') {
-            return targetDate >= today && targetDate < new Date(today.getTime() + 86400000);
-        } else if (filterView === 'Semana') {
+            // "Día" filtra por cuándo SE AGENDÓ la cita (createdAt),
+            // así aparecen citas agendadas hoy aunque sean para fechas futuras.
+            const bookedAt = new Date(app.createdAt);
+            if (isNaN(bookedAt.getTime())) return false;
+            return bookedAt >= today && bookedAt < new Date(today.getTime() + 86400000);
+        }
+
+        // "Semana" y "Mes" filtran por la fecha programada de la cita (appointmentDate)
+        const targetDate = app.appointmentDate 
+            ? new Date(app.appointmentDate + 'T12:00:00') 
+            : new Date(app.createdAt);
+        if (isNaN(targetDate.getTime())) return false;
+
+        if (filterView === 'Semana') {
             return targetDate >= startWeek && targetDate < new Date(startWeek.getTime() + 7 * 86400000);
         } else if (filterView === 'Mes') {
             const endMonth = new Date(startMonth.getFullYear(), startMonth.getMonth() + 1, 0, 23, 59, 59);
