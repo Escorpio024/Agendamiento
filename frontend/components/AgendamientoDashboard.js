@@ -101,14 +101,9 @@ export default function AgendamientoDashboard() {
         });
         
         filteredAppointments.forEach(app => {
-            let hour = null;
-            if (app.appointmentTime) {
-                // parseHour24 maneja "5:00 PM" → 17, "17:00" → 17, "09:30 AM" → 9
-                hour = parseHour24(app.appointmentTime);
-            } else {
-                hour = new Date(app.createdAt).getHours();
-            }
-            if (hour !== null && hour >= 6 && hour <= 20) {
+            // Hora en que el paciente agendó la cita (no la hora de la cita)
+            const hour = new Date(app.createdAt).getHours();
+            if (hour >= 6 && hour <= 20) {
                 const bin = chartData.find(d => d.key === hour);
                 if (bin) bin.value += 1;
             }
@@ -209,6 +204,7 @@ export default function AgendamientoDashboard() {
                             </h2>
                             <p className="text-xs text-[#A1E3D8]/70 font-semibold uppercase tracking-widest mt-0.5">
                                 Total periodo: {filteredAppointments.length} citas
+                                {filterView === 'Dia' && <span className="ml-2 text-[#F5F5F7]/40 normal-case tracking-normal font-normal">· barras = hora en que se agendó</span>}
                             </p>
                         </div>
                     </div>
