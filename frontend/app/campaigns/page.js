@@ -169,8 +169,8 @@ function SmsCampaignsTab() {
         setSelectedPhones(new Set());
         try {
             const url = period === 'all'
-                ? `${API_BASE}/api/sms-campaigns/patients?q=${encodeURIComponent(q)}&limit=200`
-                : `${API_BASE}/api/sms-campaigns/patients-by-appointment?period=${period}&q=${encodeURIComponent(q)}&limit=200`;
+                ? `${API_BASE}/api/sms-campaigns/patients?q=${encodeURIComponent(q)}&limit=500`
+                : `${API_BASE}/api/sms-campaigns/patients-by-appointment?period=${period}&q=${encodeURIComponent(q)}&limit=500`;
             const res = await fetch(url);
             if (res.ok) {
                 const data = await res.json();
@@ -261,7 +261,7 @@ function SmsCampaignsTab() {
     const periodOptions = [
         { key: 'today', label: 'Hoy', Icon: Clock },
         { key: 'week',  label: 'Esta semana', Icon: CalendarDays },
-        { key: 'all',   label: 'Todos', Icon: Users },
+        { key: 'all',   label: 'Todos en BD', Icon: Users },
     ];
 
     return (
@@ -427,19 +427,30 @@ function SmsCampaignsTab() {
                                                 <Icon size={12} /> {label}
                                             </button>
                                         ))}
-                                        <span className="ml-auto text-xs text-gray-500 self-center">{mobilePatientsCount} con celular</span>
+                                        <span className="ml-auto text-xs text-gray-500 self-center">{mobilePatientsCount} celulares</span>
                                     </div>
 
-                                    {/* Seleccionar todos */}
-                                    <div className="flex items-center gap-3 mb-2">
-                                        <button type="button" onClick={selectAllMobile}
-                                            className="text-xs text-blue-400 hover:text-blue-300 transition-colors flex items-center gap-1">
-                                            <CheckSquare size={12} /> Todos los celulares ({mobilePatientsCount})
-                                        </button>
-                                        {selectedPhones.size > 0 && (
-                                            <button type="button" onClick={clearAll}
-                                                className="text-xs text-gray-500 hover:text-gray-300 transition-colors">Limpiar</button>
-                                        )}
+                                    {/* Seleccionar todos — botón prominente */}
+                                    <div className="rounded-xl p-3 mb-3 flex items-center justify-between gap-3"
+                                        style={{ background: 'rgba(52,211,153,0.06)', border: '1px solid rgba(52,211,153,0.2)' }}>
+                                        <div className="flex items-center gap-2">
+                                            <CheckSquare size={14} className="text-emerald-400" />
+                                            <span className="text-xs text-emerald-300 font-semibold">Seleccionar todos los celulares</span>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <button type="button" onClick={selectAllMobile}
+                                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all"
+                                                style={{ background: 'rgba(52,211,153,0.15)', color: '#34d399', border: '1px solid rgba(52,211,153,0.4)' }}>
+                                                <Smartphone size={11} /> Seleccionar ({mobilePatientsCount})
+                                            </button>
+                                            {selectedPhones.size > 0 && (
+                                                <button type="button" onClick={clearAll}
+                                                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all"
+                                                    style={{ background: 'rgba(239,68,68,0.1)', color: '#f87171', border: '1px solid rgba(239,68,68,0.3)' }}>
+                                                    <X size={11} /> Limpiar
+                                                </button>
+                                            )}
+                                        </div>
                                     </div>
 
                                     {/* Buscador */}
@@ -457,7 +468,8 @@ function SmsCampaignsTab() {
                                             <div className="p-8 text-center text-gray-600 text-sm">
                                                 {filterPeriod === 'today' ? 'No hay citas agendadas hoy.'
                                                     : filterPeriod === 'week' ? 'No hay citas agendadas esta semana.'
-                                                    : searchQ ? 'No se encontraron pacientes.' : 'Cargando...'}
+                                                    : searchQ ? 'No se encontraron pacientes con ese nombre.'
+                                                    : 'Escribe un nombre o cambia el filtro para ver pacientes de la BD.'}
                                             </div>
                                         )}
                                         {patients.map((p, idx) => {

@@ -1190,7 +1190,8 @@ app.get('/api/sms-campaigns/patients', async (req, res) => {
     }
     try {
         const q = (req.query.q || '').trim().replace(/'/g, "''"); // sanitizar comillas simples
-        const limit = Math.min(parseInt(req.query.limit) || 100, 500);
+        const limit = Math.min(parseInt(req.query.limit) || 200, 1000);
+        const mobileOnly = req.query.mobileOnly !== 'false'; // por defecto solo celulares
 
         let rows;
 
