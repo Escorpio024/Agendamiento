@@ -74,12 +74,14 @@ model ControlReminder {
   cedula            String
   paciente          String
   medicoOriginal    String?
-  fechaCitaOriginal String
+  sedeOrigen        String?  // 'Sevilla' | 'Ebejico' — sede determinada en la detección (Fase 1)
+  fechaCitaOriginal String?
   articuloCita      String?
   fechaControl      String
-  fechaRecordatorio String
+  fechaRecordatorio String?
   estado            String   @default("PENDING")
   epsInfo           String?
+  entidad           String?  // Nombre de entidad (usado por detectHighRiskPatients)
   entidadCod        Int?
   citaMedico        String?
   citaFch           String?

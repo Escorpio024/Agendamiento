@@ -231,6 +231,7 @@ class ControlCVDService {
 
             // Buscar citas de CVD de control válido, facturadas hoy
             // Se incluye KC3_ENTIDAD para guardar el código numérico de la EPS del paciente
+            // Se incluye también KC3_CONSULTORIO para ayudar a determinar la sede si KC3_MEDICO no es 888/111
             const citasCvd = await prisma.$queryRaw`
                 SELECT c.KC3_MEDICO, c.KC3_FCH, c.KC3_COD, c.KC3_ARTIC, c.KC3_ENTIDAD, e.ENT_NOMBRE
                 FROM TMCITASUSUARIOS c
@@ -325,6 +326,30 @@ class ControlCVDService {
 
                 const articuloValido = String(cita.KC3_ARTIC || '').trim();
 
+                // ── Determinar sede en tiempo de detección (FASE 1) ──────────────────────
+                // Se calcula aquí para almacenarla y no depender del médico en la Fase 2.
+                // 888 = PYP MEDICO SEVILLA, 111 = P Y P MEDICOS (Ebejico)
+                let sedeDetectada = 'Ebejico'; // valor por defecto
+                const medCod = String(cita.KC3_MEDICO || '').trim();
+                if (medCod === '888') {
+                    sedeDetectada = 'Sevilla';
+                } else if (medCod !== '111') {
+                    // El médico no es el PYP conocido: buscar zona del paciente como desempate
+                    try {
+                        const pacInfo = await prisma.pacienteNUI.findFirst({
+                            where: { OR: [{ KCN_COD: cedula }, { KCN_COD_NUI: cedula }] }
+                        });
+                        if (pacInfo && String(pacInfo.KCN_ZONA) === '002') {
+                            sedeDetectada = 'Sevilla';
+                            logger.info(`[Control CVD] Paciente ${cedula}: médico ${medCod} no es PYP estándar → sede determinada por KCN_ZONA=002 → Sevilla.`);
+                        } else {
+                            logger.warn(`[Control CVD] Paciente ${cedula}: médico ${medCod} no es PYP estándar y zona=${pacInfo?.KCN_ZONA || 'N/A'} → defaulting a Ebejico. Revisar si es correcto.`);
+                        }
+                    } catch (zErr) {
+                        logger.warn(`[Control CVD] No se pudo consultar zona para ${cedula} (médico ${medCod}): ${zErr.message} → defaulting a Ebejico.`);
+                    }
+                }
+
                 // ── Verificar si el paciente YA tiene cita agendada en Xenco ──
                 const citaExistente = await this.hasExistingControlCita(cedula);
 
@@ -335,7 +360,8 @@ class ControlCVDService {
                         data: {
                             cedula,
                             paciente: nombre,
-                            medicoOriginal: String(cita.KC3_MEDICO),
+                            medicoOriginal: medCod,
+                            sedeOrigen: sedeDetectada,
                             fechaCitaOriginal: String(cita.KC3_FCH),
                             articuloCita: articuloValido,
                             fechaControl: citaExistente.fecha,   // fecha real en Xenco
@@ -347,14 +373,15 @@ class ControlCVDService {
                             citaFch: citaExistente.fecha,
                         }
                     });
-                    logger.info(`[Control CVD] Presencial registrado: ${cedula} | Cita Xenco: ${citaExistente.fecha} | Artículo: ${citaExistente.artic}`);
+                    logger.info(`[Control CVD] Presencial registrado: ${cedula} | Sede: ${sedeDetectada} | Cita Xenco: ${citaExistente.fecha} | Artículo: ${citaExistente.artic}`);
                 } else {
                     // No tiene cita → el bot la intentará agendar mañana a las 9 AM
                     await botPrisma.controlReminder.create({
                         data: {
                             cedula,
                             paciente: nombre,
-                            medicoOriginal: String(cita.KC3_MEDICO),
+                            medicoOriginal: medCod,
+                            sedeOrigen: sedeDetectada,
                             fechaCitaOriginal: String(cita.KC3_FCH),
                             articuloCita: articuloValido,
                             fechaControl: fechaControlStr,
@@ -364,7 +391,7 @@ class ControlCVDService {
                             entidadCod: entidadCodOrig,
                         }
                     });
-                    logger.info(`[Control CVD] Pendiente para bot: ${cedula} | EPS: ${epsLabel} (ENT_COD=${entidadCodOrig}) | Control: ${fechaControlStr}`);
+                    logger.info(`[Control CVD] Pendiente para bot: ${cedula} | Sede: ${sedeDetectada} | EPS: ${epsLabel} (ENT_COD=${entidadCodOrig}) | Control: ${fechaControlStr}`);
                 }
             }
         } catch (e) {
@@ -423,22 +450,34 @@ class ControlCVDService {
                     const dd   = record.fechaControl.substring(6, 8);
                     const fechaFormat = `${yyyy}-${mm}-${dd}`;
                     
-                    // Determinar la sede original de forma estricta para CVD
-                    // 888 es el médico PYP de Sevilla, 111 es de Ebéjico.
-                    let sedeObjetivo = 'Ebejico';
-                    if (String(record.medicoOriginal) === '888') {
+                    // ── Determinar sede objetivo ──────────────────────────────────────────
+                    // Prioridad 1: sedeOrigen guardado en la Fase 1 (fuente más confiable).
+                    // Prioridad 2: medicoOriginal (888=Sevilla, 111=Ebejico).
+                    // Prioridad 3: KCN_ZONA del paciente (fallback).
+                    let sedeObjetivo = 'Ebejico'; // valor por defecto
+
+                    if (record.sedeOrigen === 'Sevilla' || record.sedeOrigen === 'Ebejico') {
+                        // Usar la sede calculada y almacenada en la detección (Fase 1)
+                        sedeObjetivo = record.sedeOrigen;
+                        logger.info(`[Control CVD] Paciente ${record.cedula}: sede tomada de sedeOrigen='${sedeObjetivo}'.`);
+                    } else if (String(record.medicoOriginal) === '888') {
                         sedeObjetivo = 'Sevilla';
                     } else if (String(record.medicoOriginal) !== '111') {
-                        // Fallback: si fue agendado por otro especialista, buscar la zona del paciente
+                        // Fallback: si sedeOrigen no está definido y el médico no es PYP conocido
+                        logger.warn(`[Control CVD] Paciente ${record.cedula}: sin sedeOrigen y médico '${record.medicoOriginal}' no es 888/111. Intentando zona...`);
                         try {
                             const pacInfo = await prisma.pacienteNUI.findFirst({
                                 where: { OR: [{ KCN_COD: record.cedula }, { KCN_COD_NUI: record.cedula }] }
                             });
-                            // Si la zona es 002 (Sevilla)
                             if (pacInfo && String(pacInfo.KCN_ZONA) === '002') {
                                 sedeObjetivo = 'Sevilla';
+                                logger.info(`[Control CVD] Paciente ${record.cedula}: sede determinada por KCN_ZONA=002 → Sevilla.`);
+                            } else {
+                                logger.warn(`[Control CVD] Paciente ${record.cedula}: zona=${pacInfo?.KCN_ZONA || 'N/A'} → usando Ebejico por defecto. ¡Verificar manualmente!`);
                             }
-                        } catch(e) { }
+                        } catch(zErr) {
+                            logger.warn(`[Control CVD] Paciente ${record.cedula}: error consultando zona: ${zErr.message} → usando Ebejico por defecto.`);
+                        }
                     }
                     // ── BÚSQUEDA BI-DIRECCIONAL DE CUPOS CVD ──────────────────────────────────────
                     // 1. Busca desde la fecha objetivo → hacia adelante (máx 7 días)
@@ -824,11 +863,29 @@ class ControlCVDService {
                 }
 
                 // Si no tiene seguimiento y es de riesgo, lo insertamos como PENDING
-                // El Phase 2 lo agendará mañana a las 7:30 AM
+                // El Phase 2 lo agendará mañana.
+                // IMPORTANTE: guardar medicoOriginal y sedeOrigen para que la Fase 2
+                // pueda determinar correctamente la sede sin depender de KCN_ZONA.
+                const medCodHR = String(paciente.KC3_MEDICO || '').trim();
+                let sedeHR = 'Ebejico';
+                if (medCodHR === '888') {
+                    sedeHR = 'Sevilla';
+                } else if (medCodHR && medCodHR !== '111') {
+                    // Intentar resolver por zona
+                    try {
+                        const cedulaHR = String(paciente.KC3_COD).trim().replace(/^0+/, '');
+                        const pacInfoHR = await prisma.pacienteNUI.findFirst({
+                            where: { OR: [{ KCN_COD: cedulaHR }, { KCN_COD_NUI: cedulaHR }] }
+                        });
+                        if (pacInfoHR && String(pacInfoHR.KCN_ZONA) === '002') sedeHR = 'Sevilla';
+                    } catch (_) {}
+                }
                 await botPrisma.controlReminder.create({
                     data: {
                         cedula: cedulaRaw,
                         entidad: String(paciente.ENT_NOMBRE || 'SIN EPS'),
+                        medicoOriginal: medCodHR,
+                        sedeOrigen: sedeHR,
                         estado: 'PENDING',
                         fechaControl: this.dateToString(new Date(today.getTime() + 90 * 24 * 60 * 60 * 1000)) // 3 meses
                     }
