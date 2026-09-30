@@ -2192,7 +2192,7 @@ async function processIncomingMessage({ from, msgId, text: rawText, type, mediaI
                 `📱 *Contacto:* ${phoneDisplay}\n\n` +
                 `Te enviaremos un recordatorio antes de la cita. 😊\n\n` +
                 `¿Necesitas agendar otra cita? Puedo hacerlo para ti o para alguien más de la clínica. Solo escríbeme cuando quieras.\n\n` +
-                `⚠️ *¡Atención!* Por favor llena esta encuesta de satisfacción antes o despues de tu cita : https://tally.so/r/vGRZQ0`
+                `⚠️ *¡Atención!* Por favor llena esta encuesta de satisfacción despues de tu cita : https://tally.so/r/vGRZQ0`
             );
 
             // Restaurar datos del dueño si se agendó para un tercero
