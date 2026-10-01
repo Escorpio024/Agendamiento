@@ -269,7 +269,7 @@ app.get('/api/dashboard/stats', async (req, res) => {
         const prefixMes = `${year}${mesStr}`; // ej: "202609"
 
         // ── 1. Citas generales del mes (desde AppointmentLog en SQLite) ──────────
-        const appointmentsRaw = await botPrisma.appointmentLog.findMany({
+        const appointmentsQ = botPrisma.appointmentLog.findMany({
             select: {
                 appointmentDate: true,
                 createdAt:       true,
@@ -280,6 +280,15 @@ app.get('/api/dashboard/stats', async (req, res) => {
             },
             orderBy: { createdAt: 'desc' }
         });
+
+        // ── 2. Controles CVD del mes (BOOKED / BOOKED_PRESENCIAL con fechaControl en el mes) ──
+        const cvdQ = botPrisma.$queryRawUnsafe(`
+            SELECT cedula, paciente, fechaControl, citaHora, citaMedico, articuloCita, epsInfo
+            FROM ControlReminder
+            WHERE estado IN ('BOOKED','BOOKED_PRESENCIAL')
+              AND fechaControl LIKE '${prefixMes}%'
+        `);
+        const [appointmentsRaw, cvdRaw] = await Promise.all([appointmentsQ, cvdQ]);
 
         const generalItems = [];
         let countGen = 0;
@@ -301,14 +310,6 @@ app.get('/api/dashboard/stats', async (req, res) => {
                 });
             }
         }
-
-        // ── 2. Controles CVD del mes (BOOKED / BOOKED_PRESENCIAL con fechaControl en el mes) ──
-        const cvdRaw = await botPrisma.$queryRawUnsafe(`
-            SELECT cedula, paciente, fechaControl, citaHora, citaMedico, articuloCita, epsInfo
-            FROM ControlReminder
-            WHERE estado IN ('BOOKED','BOOKED_PRESENCIAL')
-              AND fechaControl LIKE '${prefixMes}%'
-        `);
 
         const cvdItems = [];
         for (const item of cvdRaw) {
@@ -1458,7 +1459,7 @@ app.get('/api/cardiovascular/patient/:id', async (req, res) => {
         // ── 2. PROGRAMADOS: médico ordenó el examen (con fecha de conducta/orden médica)
         //       Se muestran AUNQUE ya hayan pasado por facturación/TYORDENESLABENVIADAS,
         //       porque la fecha de la orden médica ES la fecha programada del examen.
-        const programadosRows = await medicalPrisma.$queryRawUnsafe(`
+        const programadosQ = medicalPrisma.$queryRawUnsafe(`
             WITH TodasLasOrdenes AS (
                 SELECT
                     QLO_COD_ARTIC                   AS codigo,
@@ -1517,17 +1518,9 @@ app.get('/api/cardiovascular/patient/:id', async (req, res) => {
             ORDER BY MAX(o.fecha) DESC
         `);
 
-        const programados = programadosRows.map(r => ({
-            id: `prog-${r.codigo}`,
-            codigo: r.codigo,
-            tipoExamen: r.tipoExamen || r.codigo,
-            fecha: r.fecha ? String(r.fecha).replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3') : null,
-            doctor: r.doctor?.trim() || null
-        }));
-
         // ── 3. PENDIENTES: en TYORDENESLABENVIADAS sin procesar, Y que NO tienen
         //       origen en una conducta/orden médica reciente (esos ya van en Programados).
-        const pendientesRows = await medicalPrisma.$queryRawUnsafe(`
+        const pendientesQ = medicalPrisma.$queryRawUnsafe(`
             SELECT
                 y.YKL_ARTIC AS codigo,
                 MAX(LTRIM(RTRIM(y.YKL_NOM_ARTIC))) AS tipoExamen,
@@ -1580,16 +1573,8 @@ app.get('/api/cardiovascular/patient/:id', async (req, res) => {
             ORDER BY MAX(y.YKL_FECHA) DESC
         `);
 
-        const pendientes = pendientesRows.map(r => ({
-            id: `pend-${r.codigo}`,
-            codigo: r.codigo,
-            tipoExamen: r.tipoExamen || r.codigo,
-            fecha: r.fecha ? String(r.fecha).replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3') : null,
-            doctor: r.doctor?.trim() || null
-        }));
-
         // ── 4. REALIZADOS: lab ya los procesó (una fila por tipo de examen) ──
-        const realizadosRows = await medicalPrisma.$queryRawUnsafe(`
+        const realizadosQ = medicalPrisma.$queryRawUnsafe(`
             SELECT
                 y.YKL_ARTIC AS codigo,
                 MAX(LTRIM(RTRIM(y.YKL_NOM_ARTIC))) AS tipoExamen,
@@ -1613,6 +1598,25 @@ app.get('/api/cardiovascular/patient/:id', async (req, res) => {
             GROUP BY y.YKL_ARTIC
             ORDER BY MAX(y.YKL_FECHA) DESC
         `);
+
+        // Las tres consultas son independientes: se ejecutan en paralelo
+        const [programadosRows, pendientesRows, realizadosRows] = await Promise.all([programadosQ, pendientesQ, realizadosQ]);
+
+        const programados = programadosRows.map(r => ({
+            id: `prog-${r.codigo}`,
+            codigo: r.codigo,
+            tipoExamen: r.tipoExamen || r.codigo,
+            fecha: r.fecha ? String(r.fecha).replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3') : null,
+            doctor: r.doctor?.trim() || null
+        }));
+
+        const pendientes = pendientesRows.map(r => ({
+            id: `pend-${r.codigo}`,
+            codigo: r.codigo,
+            tipoExamen: r.tipoExamen || r.codigo,
+            fecha: r.fecha ? String(r.fecha).replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3') : null,
+            doctor: r.doctor?.trim() || null
+        }));
 
         const realizados = realizadosRows.map(r => ({
             id: `real-${r.codigo}`,
