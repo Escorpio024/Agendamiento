@@ -31,7 +31,7 @@ export default function DetallesAgendamientoModal({ onClose, data: initialData, 
     const [filterModule, setFilterModule] = useState('ALL'); // ALL | GENERAL | CVD
 
     const filteredData = data.filter(item => {
-        if (filterModule !== 'ALL' && item.modulo !== filterModule) return false;
+        if (filterModule !== 'ALL' && item.modulo?.toUpperCase() !== filterModule) return false;
         if (searchTerm) {
             const term = searchTerm.toLowerCase();
             return (
@@ -59,8 +59,8 @@ export default function DetallesAgendamientoModal({ onClose, data: initialData, 
                         <p style="margin: 5px 0 0 0; color: #666; font-size: 14px;">Periodo: ${periodLabel}</p>
                         <p style="margin: 5px 0 0 0; color: #666; font-size: 14px;">${[
                             filterModule === 'ALL' ? `Total: ${filteredData.length}` : `Total de registros: ${filteredData.length}`,
-                            ...(filterModule !== 'GENERAL' ? [`CVD: ${filteredData.filter(i => i.modulo === 'CVD').length}`] : []),
-                            ...(filterModule !== 'CVD' ? [`General: ${filteredData.filter(i => i.modulo === 'GENERAL').length}`] : [])
+                            ...(filterModule !== 'GENERAL' ? [`CVD: ${filteredData.filter(i => i.modulo?.toUpperCase() === 'CVD').length}`] : []),
+                            ...(filterModule !== 'CVD' ? [`General: ${filteredData.filter(i => i.modulo?.toUpperCase() === 'GENERAL').length}`] : [])
                         ].join(' | ')}</p>
                     </div>
                     <table style="width: 100%; border-collapse: collapse; font-size: 11px;">
