@@ -19,7 +19,7 @@ frontend/node_modules
 .next
 *.db
 
-# Scripts de diagnóstico y pruebas locales (no forman parte del bot)
+# Scripts de diagnÃ³stico y pruebas locales (no forman parte del bot)
 prueba_cardio.js
 prueba_cardio_final.js
 init_botdb.js
@@ -38,6 +38,9 @@ diagnostico_citas.js
 find_phone.js
 phone_results.txt
 
-# Resúmenes y documentación de sesiones
+# ResÃºmenes y documentaciÃ³n de sesiones
 Resumen*.md
 ResumenChat*.md
+
+# Carpeta de scripts locales y temporales
+scratch/
