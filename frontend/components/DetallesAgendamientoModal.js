@@ -57,7 +57,11 @@ export default function DetallesAgendamientoModal({ onClose, data: initialData, 
                         <h2 style="margin: 0; color: #1e1b26;">Reporte de Agendamientos</h2>
                         <p style="margin: 5px 0 0 0; color: #666; font-size: 14px;">Generado el ${new Date().toLocaleString('es-CO')}</p>
                         <p style="margin: 5px 0 0 0; color: #666; font-size: 14px;">Periodo: ${periodLabel}</p>
-                        <p style="margin: 5px 0 0 0; color: #666; font-size: 14px;">Total de registros: ${filteredData.length}</p>
+                        <p style="margin: 5px 0 0 0; color: #666; font-size: 14px;">${[
+                            filterModule === 'ALL' ? `Total: ${filteredData.length}` : `Total de registros: ${filteredData.length}`,
+                            ...(filterModule !== 'GENERAL' ? [`CVD: ${filteredData.filter(i => i.modulo === 'CVD').length}`] : []),
+                            ...(filterModule !== 'CVD' ? [`General: ${filteredData.filter(i => i.modulo === 'GENERAL').length}`] : [])
+                        ].join(' | ')}</p>
                     </div>
                     <table style="width: 100%; border-collapse: collapse; font-size: 11px;">
                         <thead>
