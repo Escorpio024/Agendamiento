@@ -260,7 +260,7 @@ export default function DetallesAgendamientoModal({ onClose, data: initialData, 
                                 filteredData.map((item, i) => (
                                     <tr key={i} className="hover:bg-[rgba(45,40,62,0.3)] transition-colors border-b" style={{ borderColor: 'rgba(130,99,177,0.05)' }}>
                                         <td className="px-6 py-3">
-                                            {item.modulo === 'GENERAL' ? (
+                                            {item.modulo?.toUpperCase() === 'GENERAL' ? (
                                                 <span className="flex items-center gap-1.5 text-[10px] font-bold px-2 py-0.5 rounded-full w-max" style={{ background: 'rgba(130,99,177,0.15)', color: '#C4AFED', border: '1px solid rgba(130,99,177,0.3)' }}>
                                                     <CalendarCheck2 size={10} /> General
                                                 </span>
