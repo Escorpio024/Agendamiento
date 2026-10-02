@@ -1,9 +1,32 @@
 "use client";
 
 import { X, CalendarCheck2, Heart, Search, FileText, Download, Loader2 } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
-export default function DetallesAgendamientoModal({ onClose, data }) {
+const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+
+export default function DetallesAgendamientoModal({ onClose, data: initialData, apiBase = '' }) {
+    const now = new Date();
+    const [year, setYear] = useState(now.getFullYear());
+    const [month, setMonth] = useState(now.getMonth() + 1); // 1-12
+    const [data, setData] = useState(initialData);
+    const [loading, setLoading] = useState(false);
+    const isCurrentMonth = year === now.getFullYear() && month === now.getMonth() + 1;
+    const periodLabel = `${MESES[month - 1]} ${year}`;
+    const years = Array.from({ length: 5 }, (_, i) => now.getFullYear() - i);
+
+    useEffect(() => {
+        if (isCurrentMonth) { setData(initialData); return; }
+        let cancelled = false;
+        setLoading(true);
+        fetch(`${apiBase}/api/dashboard/stats?year=${year}&month=${month}`)
+            .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+            .then(d => { if (!cancelled) setData(d.items || []); })
+            .catch(err => { console.error('Error cargando mes:', err); if (!cancelled) setData([]); })
+            .finally(() => { if (!cancelled) setLoading(false); });
+        return () => { cancelled = true; };
+    }, [year, month, isCurrentMonth, initialData, apiBase]);
+
     const [searchTerm, setSearchTerm] = useState('');
     const [filterModule, setFilterModule] = useState('ALL'); // ALL | GENERAL | CVD
 
@@ -33,6 +56,7 @@ export default function DetallesAgendamientoModal({ onClose, data }) {
                     <div style="text-align: center; margin-bottom: 25px;">
                         <h2 style="margin: 0; color: #1e1b26;">Reporte de Agendamientos</h2>
                         <p style="margin: 5px 0 0 0; color: #666; font-size: 14px;">Generado el ${new Date().toLocaleString('es-CO')}</p>
+                        <p style="margin: 5px 0 0 0; color: #666; font-size: 14px;">Periodo: ${periodLabel}</p>
                         <p style="margin: 5px 0 0 0; color: #666; font-size: 14px;">Total de registros: ${filteredData.length}</p>
                     </div>
                     <table style="width: 100%; border-collapse: collapse; font-size: 11px;">
@@ -64,7 +88,7 @@ export default function DetallesAgendamientoModal({ onClose, data }) {
 
             const opt = {
                 margin:       10,
-                filename:     `reporte_agendamientos_${new Date().getTime()}.pdf`,
+                filename:     `reporte_agendamientos_${year}-${String(month).padStart(2, '0')}_${new Date().getTime()}.pdf`,
                 image:        { type: 'jpeg', quality: 0.98 },
                 html2canvas:  { scale: 2 },
                 jsPDF:        { unit: 'mm', format: 'a4', orientation: 'landscape' }
@@ -100,7 +124,7 @@ export default function DetallesAgendamientoModal({ onClose, data }) {
                         <div>
                             <p className="text-[10px] tracking-widest uppercase font-semibold"
                                 style={{ color: 'rgba(196,175,237,0.6)' }}>
-                                Consolidado del Mes
+                                Consolidado · {periodLabel}
                             </p>
                             <h2 className="text-lg font-bold" style={{ color: '#F5F5F7' }}>
                                 Detalles de Agendamientos
@@ -108,9 +132,22 @@ export default function DetallesAgendamientoModal({ onClose, data }) {
                         </div>
                     </div>
                     <div className="flex items-center gap-2">
-                        <button 
+                        {[
+                            { value: month, set: setMonth, options: MESES.map((m, i) => [i + 1, m]) },
+                            { value: year, set: setYear, options: years.map(y => [y, y]) },
+                        ].map((sel, idx) => (
+                            <select key={idx}
+                                value={sel.value}
+                                onChange={e => sel.set(Number(e.target.value))}
+                                className="h-8 px-2 rounded-lg text-xs font-semibold outline-none"
+                                style={{ background: 'rgba(15,14,19,0.5)', border: '1px solid rgba(130,99,177,0.3)', color: '#F5F5F7' }}
+                            >
+                                {sel.options.map(([v, l]) => <option key={v} value={v} style={{ background: '#1A1721' }}>{l}</option>)}
+                            </select>
+                        ))}
+                        <button
                             onClick={handleDownloadPDF}
-                            disabled={isDownloading || filteredData.length === 0}
+                            disabled={isDownloading || loading || filteredData.length === 0}
                             className="h-8 px-3 rounded-lg flex items-center gap-2 text-xs font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                             style={{ background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)', color: '#fff', border: '1px solid rgba(16,185,129,0.4)', boxShadow: '0 2px 8px rgba(16,185,129,0.2)' }}
                         >
@@ -203,7 +240,13 @@ export default function DetallesAgendamientoModal({ onClose, data }) {
                             </tr>
                         </thead>
                         <tbody>
-                            {filteredData.length === 0 ? (
+                            {loading ? (
+                                <tr>
+                                    <td colSpan="6" className="py-12 text-center text-sm" style={{ color: 'rgba(245,245,247,0.4)' }}>
+                                        Cargando...
+                                    </td>
+                                </tr>
+                            ) : filteredData.length === 0 ? (
                                 <tr>
                                     <td colSpan="6" className="py-12 text-center text-sm" style={{ color: 'rgba(245,245,247,0.4)' }}>
                                         No se encontraron resultados

@@ -469,7 +469,8 @@ export default function SelectorPage() {
 
             {showModal && (
                 <DetallesAgendamientoModal 
-                    data={combinedData} 
+                    data={combinedData}
+                    apiBase={API_BASE}
                     onClose={() => setShowModal(false)} 
                 />
             )}

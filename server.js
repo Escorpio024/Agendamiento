@@ -261,8 +261,13 @@ app.get('/api/appointments', async (req, res) => {
 app.get('/api/dashboard/stats', async (req, res) => {
     try {
         const now = new Date();
-        const year  = now.getFullYear();
-        const month = now.getMonth(); // 0-indexed
+        // Parámetros opcionales ?year=YYYY&month=MM (1-12; 0 se interpreta como enero)
+        const qYear  = parseInt(req.query.year, 10);
+        const qMonth = parseInt(req.query.month, 10);
+        const year  = Number.isInteger(qYear) && qYear >= 2000 && qYear <= 2100 ? qYear : now.getFullYear();
+        const month = Number.isInteger(qMonth) && qMonth >= 0 && qMonth <= 12
+            ? Math.max(qMonth - 1, 0)
+            : now.getMonth(); // 0-indexed
 
         // Inicio y fin del mes actual como strings YYYYMMDD para comparar con campos de Xenco/SQLite
         const mesStr = String(month + 1).padStart(2, '0');
