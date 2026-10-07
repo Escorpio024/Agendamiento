@@ -212,7 +212,129 @@ function SmsCampaignsTab() {
     ));
     const clearAll = () => setSelectedPhones(new Set());
 
-    const exportToExcel = async () => {
+function downloadXlsx(rows, fileName) {
+    const crcTable = new Uint32Array(256);
+    for (let i = 0; i < 256; i++) {
+        let c = i;
+        for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+        crcTable[i] = c >>> 0;
+    }
+    const crc32 = (buf) => {
+        let crc = 0xFFFFFFFF;
+        for (let i = 0; i < buf.length; i++) crc = (crcTable[(crc ^ buf[i]) & 0xFF] ^ (crc >>> 8)) >>> 0;
+        return (crc ^ 0xFFFFFFFF) >>> 0;
+    };
+
+    const encoder = new TextEncoder();
+    const localHeaders = [];
+    const centralHeaders = [];
+    let offset = 0;
+
+    const files = [
+        {
+            name: '[Content_Types].xml',
+            data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">\n  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>\n  <Default Extension="xml" ContentType="application/xml"/>\n  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>\n  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>\n</Types>'
+        },
+        {
+            name: '_rels/.rels',
+            data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">\n  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>\n</Relationships>'
+        },
+        {
+            name: 'xl/workbook.xml',
+            data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">\n  <sheets>\n    <sheet name="Destinatarios" sheetId="1" r:id="rId1"/>\n  </sheets>\n</workbook>'
+        },
+        {
+            name: 'xl/_rels/workbook.xml.rels',
+            data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">\n  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>\n</Relationships>'
+        },
+        {
+            name: 'xl/worksheets/sheet1.xml',
+            data: (() => {
+                const escapeXml = (str) => String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+                let sheetData = '';
+                rows.forEach((row, rIdx) => {
+                    sheetData += `<row r="${rIdx + 1}">`;
+                    row.forEach((cell, cIdx) => {
+                        const colLetter = String.fromCharCode(65 + cIdx);
+                        sheetData += `<c r="${colLetter}${rIdx + 1}" t="inlineStr"><is><t>${escapeXml(cell)}</t></is></c>`;
+                    });
+                    sheetData += '</row>';
+                });
+                return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">\n  <cols>\n    <col min="1" max="1" width="22" customWidth="1"/>\n    <col min="2" max="2" width="18" customWidth="1"/>\n  </cols>\n  <sheetData>${sheetData}</sheetData>\n</worksheet>`;
+            })()
+        }
+    ];
+
+    for (const file of files) {
+        const nameBuf = encoder.encode(file.name);
+        const dataBuf = typeof file.data === 'string' ? encoder.encode(file.data) : file.data;
+        const crc = crc32(dataBuf);
+        const size = dataBuf.length;
+
+        const lh = new Uint8Array(30);
+        const lhView = new DataView(lh.buffer);
+        lhView.setUint32(0, 0x04034b50, true);
+        lhView.setUint16(4, 20, true);
+        lhView.setUint16(6, 0, true);
+        lhView.setUint16(8, 0, true);
+        lhView.setUint16(10, 0, true);
+        lhView.setUint16(12, 0, true);
+        lhView.setUint32(14, crc, true);
+        lhView.setUint32(18, size, true);
+        lhView.setUint32(22, size, true);
+        lhView.setUint16(26, nameBuf.length, true);
+        lhView.setUint16(28, 0, true);
+
+        localHeaders.push(lh, nameBuf, dataBuf);
+
+        const ch = new Uint8Array(46);
+        const chView = new DataView(ch.buffer);
+        chView.setUint32(0, 0x02014b50, true);
+        chView.setUint16(4, 20, true);
+        chView.setUint16(6, 20, true);
+        chView.setUint16(8, 0, true);
+        chView.setUint16(10, 0, true);
+        chView.setUint32(16, crc, true);
+        chView.setUint32(20, size, true);
+        chView.setUint32(24, size, true);
+        chView.setUint16(28, nameBuf.length, true);
+        chView.setUint32(42, offset, true);
+
+        centralHeaders.push(ch, nameBuf);
+        offset += lh.length + nameBuf.length + dataBuf.length;
+    }
+
+    const cdOffset = offset;
+    const cdSize = centralHeaders.reduce((sum, b) => sum + b.length, 0);
+
+    const eocd = new Uint8Array(22);
+    const eocdView = new DataView(eocd.buffer);
+    eocdView.setUint32(0, 0x06054b50, true);
+    eocdView.setUint16(8, files.length, true);
+    eocdView.setUint16(10, files.length, true);
+    eocdView.setUint32(12, cdSize, true);
+    eocdView.setUint32(16, cdOffset, true);
+
+    const totalLength = localHeaders.reduce((a, c) => a + c.length, 0) + cdSize + 22;
+    const zipBytes = new Uint8Array(totalLength);
+    let cur = 0;
+    for (const arr of [...localHeaders, ...centralHeaders, eocd]) {
+        zipBytes.set(arr, cur);
+        cur += arr.length;
+    }
+
+    const blob = new Blob([zipBytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+    const exportToExcel = () => {
         let listToExport = selectedPhones.size > 0
             ? patients.filter(p => selectedPhones.has(p.telefono))
             : patients.filter(p => p.tipoTelefono === "CELULAR" && p.telefono);
@@ -228,7 +350,6 @@ function SmsCampaignsTab() {
 
         setExportingExcel(true);
         try {
-            const XLSX = await import("xlsx");
             const rows = [
                 ["Cédula", "Celular"],
                 ...listToExport.map(p => [
@@ -237,17 +358,12 @@ function SmsCampaignsTab() {
                 ])
             ];
 
-            const ws = XLSX.utils.aoa_to_sheet(rows);
-            ws["!cols"] = [{ wch: 22 }, { wch: 18 }];
-            const wb = XLSX.utils.book_new();
-            XLSX.utils.book_append_sheet(wb, ws, "Destinatarios");
-
             const now = new Date();
             const pad = (n) => String(n).padStart(2, "0");
-            const fechaStr = now.getFullYear() + "-" + pad(now.getMonth() + 1) + "-" + pad(now.getDate());
-            const fileName = "destinatarios_" + filterPeriod + "_" + fechaStr + ".xlsx";
+            const fechaStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+            const fileName = `destinatarios_${filterPeriod}_${fechaStr}.xlsx`;
 
-            XLSX.writeFile(wb, fileName);
+            downloadXlsx(rows, fileName);
         } catch (err) {
             console.error("Error exportando a Excel:", err);
             alert("Error al generar el archivo Excel.");
@@ -256,7 +372,7 @@ function SmsCampaignsTab() {
         }
     };
 
-    const handleCreate = async (e) => {
+        const handleCreate = async (e) => {
         e.preventDefault();
         if (selectedPhones.size === 0) { alert('Selecciona al menos un destinatario.'); return; }
         setCreating(true);
