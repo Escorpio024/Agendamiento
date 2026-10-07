@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import {
     Megaphone, Send, Clock, CheckCircle2, AlertCircle, Plus, RefreshCw,
     ArrowLeft, Pause, Play, Smartphone, Search,
-    Users, X, ChevronDown, CheckSquare, Square, Phone, Calendar, CalendarDays
+    Users, X, ChevronDown, CheckSquare, Square, Phone, Calendar, CalendarDays, FileSpreadsheet
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 
@@ -150,6 +150,7 @@ function SmsCampaignsTab() {
     const [testMessage, setTestMessage] = useState('');
     const [testLoading, setTestLoading] = useState(false);
     const [testResults, setTestResults] = useState(null);
+    const [exportingExcel, setExportingExcel] = useState(false);
 
     const fetchCampaigns = useCallback(async () => {
         try {
@@ -178,13 +179,13 @@ function SmsCampaignsTab() {
                     if (period === 'all') {
                         const clean = (p.celular || '').replace(/\D/g, '');
                         return {
-                            id: p.cod, nombre: p.nombre, telefono: clean,
+                            id: String(p.cod || p.documento || p.nombre || "").trim(), documento: String(p.cod || p.documento || p.nombre || "").trim(), cod: p.cod, nombre: p.nombre, telefono: clean,
                             tipoTelefono: clean.length === 10 && clean.startsWith('3') ? 'CELULAR' : 'FIJO',
                             fechaCita: null, horaCita: null, medico: null,
                         };
                     }
                     return {
-                        id: p.documento, nombre: p.nombre, telefono: p.telefono,
+                        id: p.documento, documento: p.documento, cod: p.documento, nombre: p.nombre, telefono: p.telefono,
                         tipoTelefono: p.tipoTelefono, fechaCita: p.fechaCita,
                         horaCita: p.horaCita, medico: p.medico,
                     };
@@ -210,6 +211,50 @@ function SmsCampaignsTab() {
         patients.filter(p => p.tipoTelefono === 'CELULAR' && p.telefono).map(p => p.telefono)
     ));
     const clearAll = () => setSelectedPhones(new Set());
+
+    const exportToExcel = async () => {
+        let listToExport = selectedPhones.size > 0
+            ? patients.filter(p => selectedPhones.has(p.telefono))
+            : patients.filter(p => p.tipoTelefono === "CELULAR" && p.telefono);
+
+        if (listToExport.length === 0 && selectedPhones.size === 0) {
+            listToExport = patients.filter(p => p.telefono);
+        }
+
+        if (listToExport.length === 0) {
+            alert("No hay destinatarios con celular para exportar.");
+            return;
+        }
+
+        setExportingExcel(true);
+        try {
+            const XLSX = await import("xlsx");
+            const rows = [
+                ["Cédula", "Celular"],
+                ...listToExport.map(p => [
+                    String(p.documento || p.cod || p.id || p.nombre || "").trim(),
+                    String(p.telefono || "").trim()
+                ])
+            ];
+
+            const ws = XLSX.utils.aoa_to_sheet(rows);
+            ws["!cols"] = [{ wch: 22 }, { wch: 18 }];
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "Destinatarios");
+
+            const now = new Date();
+            const pad = (n) => String(n).padStart(2, "0");
+            const fechaStr = now.getFullYear() + "-" + pad(now.getMonth() + 1) + "-" + pad(now.getDate());
+            const fileName = "destinatarios_" + filterPeriod + "_" + fechaStr + ".xlsx";
+
+            XLSX.writeFile(wb, fileName);
+        } catch (err) {
+            console.error("Error exportando a Excel:", err);
+            alert("Error al generar el archivo Excel.");
+        } finally {
+            setExportingExcel(false);
+        }
+    };
 
     const handleCreate = async (e) => {
         e.preventDefault();
@@ -405,16 +450,26 @@ function SmsCampaignsTab() {
 
                                 {/* Destinatarios */}
                                 <div>
-                                    <label className="text-sm font-medium text-gray-300 flex items-center gap-2 mb-3">
-                                        <Users size={15} className="text-blue-400" />
-                                        Destinatarios
-                                        {selectedPhones.size > 0 && (
-                                            <span className="px-2 py-0.5 rounded-full text-xs font-bold text-blue-300"
-                                                style={{ background: 'rgba(59,130,246,0.2)', border: '1px solid rgba(59,130,246,0.4)' }}>
-                                                {selectedPhones.size} sel.
-                                            </span>
-                                        )}
-                                    </label>
+                                    <div className="flex items-center justify-between mb-3">
+                                        <label className="text-sm font-medium text-gray-300 flex items-center gap-2">
+                                            <Users size={15} className="text-blue-400" />
+                                            Destinatarios
+                                            {selectedPhones.size > 0 && (
+                                                <span className="px-2 py-0.5 rounded-full text-xs font-bold text-blue-300"
+                                                    style={{ background: 'rgba(59,130,246,0.2)', border: '1px solid rgba(59,130,246,0.4)' }}>
+                                                    {selectedPhones.size} sel.
+                                                </span>
+                                            )}
+                                        </label>
+                                        <button type="button" onClick={exportToExcel}
+                                            disabled={patientsLoading || patients.length === 0 || exportingExcel}
+                                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all hover:bg-emerald-500/20 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                                            style={{ background: 'rgba(16,185,129,0.15)', color: '#34d399', border: '1px solid rgba(16,185,129,0.35)' }}
+                                            title="Exportar destinatarios a Excel (Cédula y Celular)">
+                                            {exportingExcel ? <RefreshCw size={12} className="animate-spin" /> : <FileSpreadsheet size={13} />}
+                                            {exportingExcel ? 'Exportando...' : `Exportar Excel ${selectedPhones.size > 0 ? `(${selectedPhones.size})` : `(${mobilePatientsCount})`}`}
+                                        </button>
+                                    </div>
 
                                     {/* Filtro periodo */}
                                     <div className="flex gap-2 mb-3 flex-wrap">
@@ -442,6 +497,13 @@ function SmsCampaignsTab() {
                                                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all"
                                                 style={{ background: 'rgba(52,211,153,0.15)', color: '#34d399', border: '1px solid rgba(52,211,153,0.4)' }}>
                                                 <Smartphone size={11} /> Seleccionar ({mobilePatientsCount})
+                                            </button>
+                                            <button type="button" onClick={exportToExcel}
+                                                disabled={patientsLoading || patients.length === 0 || exportingExcel}
+                                                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all hover:bg-emerald-500/25 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
+                                                style={{ background: 'rgba(16,185,129,0.2)', color: '#34d399', border: '1px solid rgba(16,185,129,0.45)' }}
+                                                title="Exportar a Excel (Cédula y Celular)">
+                                                <FileSpreadsheet size={12} /> Exportar Excel
                                             </button>
                                             {selectedPhones.size > 0 && (
                                                 <button type="button" onClick={clearAll}
