@@ -688,11 +688,16 @@ async function getAvailableSlots(fechaStr, tipo = 'medicina general', preferredD
 
                 const currH = Math.floor(tMin / 60);
                 const currM = tMin % 60;
-                // Verificar que no esté ocupado por una cita real
+                // Verificar que no esté ocupado por una cita real EN ESA HORA EXACTA.
+                // TME2 ya es la fuente de verdad del Visor: si el slot aparece libre allí, solo
+                // lo descartamos si KC3 tiene una cita activa en el mismo HH:MM.
+                // (Antes se usaba solapamiento con TME_DUR_CITA, pero en odontología la duración
+                //  configurada es 60 min mientras el Visor genera slots cada 20 min, lo que
+                //  eliminaba todos los huecos libres como 9:20/9:40 cuando había cita a las 9:00.)
                 const isBooked = citasOcupadas.some(c => {
                     if (String(c.KC3_MEDICO).trim() !== doctorKey) return false;
                     const cMin = parseInt(c.KC3_HH) * 60 + parseInt(c.KC3_MM);
-                    return cMin < tMin + dur && tMin < cMin + dur;
+                    return cMin === tMin;
                 });
                 if (!isBooked) {
                     const slotDate = createLocalDate(dateStr, currH, currM);
