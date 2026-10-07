@@ -131,87 +131,6 @@ function CampaignTable({ campaigns, loading, onSend, onPause, onResume, actionLo
     );
 }
 
-function SmsCampaignsTab() {
-    const [campaigns, setCampaigns] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [showModal, setShowModal] = useState(false);
-    const [actionLoading, setActionLoading] = useState({});
-    const [newName, setNewName] = useState('');
-    const [newMessage, setNewMessage] = useState('');
-    const [creating, setCreating] = useState(false);
-    const [filterPeriod, setFilterPeriod] = useState('today');
-    const [patients, setPatients] = useState([]);
-    const [patientsLoading, setPatientsLoading] = useState(false);
-    const [searchQ, setSearchQ] = useState('');
-    const [selectedPhones, setSelectedPhones] = useState(new Set());
-    const searchTimer = useRef(null);
-    const [testOpen, setTestOpen] = useState(false);
-    const [testNumbers, setTestNumbers] = useState('');
-    const [testMessage, setTestMessage] = useState('');
-    const [testLoading, setTestLoading] = useState(false);
-    const [testResults, setTestResults] = useState(null);
-    const [exportingExcel, setExportingExcel] = useState(false);
-
-    const fetchCampaigns = useCallback(async () => {
-        try {
-            const res = await fetch(`${API_BASE}/api/sms-campaigns`);
-            if (res.ok) setCampaigns(await res.json());
-        } catch (_) { } finally { setLoading(false); }
-    }, []);
-
-    useEffect(() => {
-        fetchCampaigns();
-        const iv = setInterval(fetchCampaigns, 10000);
-        return () => clearInterval(iv);
-    }, [fetchCampaigns]);
-
-    const searchPatients = useCallback(async (period, q) => {
-        setPatientsLoading(true);
-        setSelectedPhones(new Set());
-        try {
-            const url = period === 'all'
-                ? `${API_BASE}/api/sms-campaigns/patients?q=${encodeURIComponent(q)}&limit=500`
-                : `${API_BASE}/api/sms-campaigns/patients-by-appointment?period=${period}&q=${encodeURIComponent(q)}&limit=500`;
-            const res = await fetch(url);
-            if (res.ok) {
-                const data = await res.json();
-                const normalized = (data.patients || []).map(p => {
-                    if (period === 'all') {
-                        const clean = (p.celular || '').replace(/\D/g, '');
-                        return {
-                            id: String(p.cod || p.documento || p.nombre || "").trim(), documento: String(p.cod || p.documento || p.nombre || "").trim(), cod: p.cod, nombre: p.nombre, telefono: clean,
-                            tipoTelefono: clean.length === 10 && clean.startsWith('3') ? 'CELULAR' : 'FIJO',
-                            fechaCita: null, horaCita: null, medico: null,
-                        };
-                    }
-                    return {
-                        id: p.documento, documento: p.documento, cod: p.documento, nombre: p.nombre, telefono: p.telefono,
-                        tipoTelefono: p.tipoTelefono, fechaCita: p.fechaCita,
-                        horaCita: p.horaCita, medico: p.medico,
-                    };
-                });
-                setPatients(normalized);
-            }
-        } catch (_) { } finally { setPatientsLoading(false); }
-    }, []);
-
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    useEffect(() => { if (showModal) searchPatients(filterPeriod, ''); }, [showModal]);
-
-    useEffect(() => {
-        if (!showModal) return;
-        clearTimeout(searchTimer.current);
-        searchTimer.current = setTimeout(() => searchPatients(filterPeriod, searchQ), 400);
-    }, [searchQ, filterPeriod, showModal, searchPatients]);
-
-    const togglePatient = (tel) => setSelectedPhones(prev => {
-        const n = new Set(prev); n.has(tel) ? n.delete(tel) : n.add(tel); return n;
-    });
-    const selectAllMobile = () => setSelectedPhones(new Set(
-        patients.filter(p => p.tipoTelefono === 'CELULAR' && p.telefono).map(p => p.telefono)
-    ));
-    const clearAll = () => setSelectedPhones(new Set());
-
 function downloadXlsx(rows, fileName) {
     const crcTable = new Uint32Array(256);
     for (let i = 0; i < 256; i++) {
@@ -334,6 +253,87 @@ function downloadXlsx(rows, fileName) {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+function SmsCampaignsTab() {
+    const [campaigns, setCampaigns] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [showModal, setShowModal] = useState(false);
+    const [actionLoading, setActionLoading] = useState({});
+    const [newName, setNewName] = useState('');
+    const [newMessage, setNewMessage] = useState('');
+    const [creating, setCreating] = useState(false);
+    const [filterPeriod, setFilterPeriod] = useState('today');
+    const [patients, setPatients] = useState([]);
+    const [patientsLoading, setPatientsLoading] = useState(false);
+    const [searchQ, setSearchQ] = useState('');
+    const [selectedPhones, setSelectedPhones] = useState(new Set());
+    const searchTimer = useRef(null);
+    const [testOpen, setTestOpen] = useState(false);
+    const [testNumbers, setTestNumbers] = useState('');
+    const [testMessage, setTestMessage] = useState('');
+    const [testLoading, setTestLoading] = useState(false);
+    const [testResults, setTestResults] = useState(null);
+    const [exportingExcel, setExportingExcel] = useState(false);
+
+    const fetchCampaigns = useCallback(async () => {
+        try {
+            const res = await fetch(`${API_BASE}/api/sms-campaigns`);
+            if (res.ok) setCampaigns(await res.json());
+        } catch (_) { } finally { setLoading(false); }
+    }, []);
+
+    useEffect(() => {
+        fetchCampaigns();
+        const iv = setInterval(fetchCampaigns, 10000);
+        return () => clearInterval(iv);
+    }, [fetchCampaigns]);
+
+    const searchPatients = useCallback(async (period, q) => {
+        setPatientsLoading(true);
+        setSelectedPhones(new Set());
+        try {
+            const url = period === 'all'
+                ? `${API_BASE}/api/sms-campaigns/patients?q=${encodeURIComponent(q)}&limit=500`
+                : `${API_BASE}/api/sms-campaigns/patients-by-appointment?period=${period}&q=${encodeURIComponent(q)}&limit=500`;
+            const res = await fetch(url);
+            if (res.ok) {
+                const data = await res.json();
+                const normalized = (data.patients || []).map(p => {
+                    if (period === 'all') {
+                        const clean = (p.celular || '').replace(/\D/g, '');
+                        return {
+                            id: String(p.cod || p.documento || p.nombre || "").trim(), documento: String(p.cod || p.documento || p.nombre || "").trim(), cod: p.cod, nombre: p.nombre, telefono: clean,
+                            tipoTelefono: clean.length === 10 && clean.startsWith('3') ? 'CELULAR' : 'FIJO',
+                            fechaCita: null, horaCita: null, medico: null,
+                        };
+                    }
+                    return {
+                        id: p.documento, documento: p.documento, cod: p.documento, nombre: p.nombre, telefono: p.telefono,
+                        tipoTelefono: p.tipoTelefono, fechaCita: p.fechaCita,
+                        horaCita: p.horaCita, medico: p.medico,
+                    };
+                });
+                setPatients(normalized);
+            }
+        } catch (_) { } finally { setPatientsLoading(false); }
+    }, []);
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    useEffect(() => { if (showModal) searchPatients(filterPeriod, ''); }, [showModal]);
+
+    useEffect(() => {
+        if (!showModal) return;
+        clearTimeout(searchTimer.current);
+        searchTimer.current = setTimeout(() => searchPatients(filterPeriod, searchQ), 400);
+    }, [searchQ, filterPeriod, showModal, searchPatients]);
+
+    const togglePatient = (tel) => setSelectedPhones(prev => {
+        const n = new Set(prev); n.has(tel) ? n.delete(tel) : n.add(tel); return n;
+    });
+    const selectAllMobile = () => setSelectedPhones(new Set(
+        patients.filter(p => p.tipoTelefono === 'CELULAR' && p.telefono).map(p => p.telefono)
+    ));
+    const clearAll = () => setSelectedPhones(new Set());
+
     const exportToExcel = () => {
         let listToExport = selectedPhones.size > 0
             ? patients.filter(p => selectedPhones.has(p.telefono))
@@ -372,7 +372,7 @@ function downloadXlsx(rows, fileName) {
         }
     };
 
-        const handleCreate = async (e) => {
+    const handleCreate = async (e) => {
         e.preventDefault();
         if (selectedPhones.size === 0) { alert('Selecciona al menos un destinatario.'); return; }
         setCreating(true);
@@ -613,13 +613,6 @@ function downloadXlsx(rows, fileName) {
                                                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all"
                                                 style={{ background: 'rgba(52,211,153,0.15)', color: '#34d399', border: '1px solid rgba(52,211,153,0.4)' }}>
                                                 <Smartphone size={11} /> Seleccionar ({mobilePatientsCount})
-                                            </button>
-                                            <button type="button" onClick={exportToExcel}
-                                                disabled={patientsLoading || patients.length === 0 || exportingExcel}
-                                                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all hover:bg-emerald-500/25 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
-                                                style={{ background: 'rgba(16,185,129,0.2)', color: '#34d399', border: '1px solid rgba(16,185,129,0.45)' }}
-                                                title="Exportar a Excel (Cédula y Celular)">
-                                                <FileSpreadsheet size={12} /> Exportar Excel
                                             </button>
                                             {selectedPhones.size > 0 && (
                                                 <button type="button" onClick={clearAll}
