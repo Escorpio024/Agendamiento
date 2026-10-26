@@ -8,6 +8,7 @@ const openai = new OpenAI({
     maxRetries: 1,    // 1 reintento automático si falla
 });
 const MODEL = process.env.OPENAI_MODEL || "gpt-4o";
+const FALLBACK_MODEL = process.env.OPENAI_FALLBACK_MODEL || "gpt-4.1-mini";
 
 const TODAY = () => {
     const d = new Date();
@@ -42,7 +43,18 @@ async function callAI(input, { temperature = 0.1, maxTokens = 200, json = false 
     };
     if (json) config.response_format = { type: 'json_object' };
 
-    const completion = await openai.chat.completions.create(config);
+    let completion;
+    try {
+        completion = await openai.chat.completions.create(config);
+    } catch (err) {
+        // Modelo deprecado o inexistente: reintentar con el modelo de respaldo
+        if (err.status === 404 && MODEL !== FALLBACK_MODEL) {
+            console.error(`[AI] Modelo '${MODEL}' no disponible (${err.message}). Usando '${FALLBACK_MODEL}'.`);
+            completion = await openai.chat.completions.create({ ...config, model: FALLBACK_MODEL });
+        } else {
+            throw err;
+        }
+    }
     let result = completion.choices[0].message.content.trim();
 
     // Strip markdown fences if model ignores response_format

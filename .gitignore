@@ -44,3 +44,6 @@ ResumenChat*.md
 
 # Carpeta de scripts locales y temporales
 scratch/
+
+# Graphify - grafo de conocimiento local (no subir al repositorio)
+graphify-out/
