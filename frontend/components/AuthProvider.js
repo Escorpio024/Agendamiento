@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, createContext, useContext } from 'react';
 import Image from 'next/image';
+import { useRouter, usePathname } from 'next/navigation';
 import { Lock, User, ArrowRight, LogOut } from 'lucide-react';
 import logoImg from '../img/AURORA.IA png-07.png';
 
@@ -15,7 +16,14 @@ const USERS = {
     'spaceguard': '10*13.24'
 };
 
+/** Usuarios restringidos: solo pueden ver la ruta indicada */
+const RESTRICTED_USERS = {
+    'agendamiento!26': '/agendamiento',
+};
+
 export default function AuthProvider({ children }) {
+    const router = useRouter();
+    const pathname = usePathname();
     const [isAuthenticated, setIsAuthenticated] = useState(false);
     const [isChecking, setIsChecking] = useState(true);
     const [loggedUser, setLoggedUser] = useState('');  // usuario que inició sesión
@@ -85,6 +93,13 @@ export default function AuthProvider({ children }) {
             setError('Credenciales incorrectas');
         }
     };
+
+    // Usuario restringido: redirigir al único módulo permitido
+    const allowedPath = RESTRICTED_USERS[loggedUser];
+    const isBlocked = isAuthenticated && allowedPath && !(pathname === allowedPath || pathname.startsWith(allowedPath + '/'));
+    useEffect(() => {
+        if (isBlocked) router.replace(allowedPath);
+    }, [isBlocked, allowedPath, router]);
 
     // ── Pantalla de carga ──
     if (isChecking) {
@@ -240,7 +255,7 @@ export default function AuthProvider({ children }) {
                     Salir
                 </button>
             </div>
-            {children}
+            {isBlocked ? null : children}
         </AuthContext.Provider>
     );
 }
